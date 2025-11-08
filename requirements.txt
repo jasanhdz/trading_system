@@ -1,0 +1,69 @@
+
+# =============================================================================
+# REQUIREMENTS.TXT CORREGIDO
+# =============================================================================
+
+# Core Data Processing
+pandas>=1.5.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+psycopg2-binary>=2.9.0
+
+# Data Collection
+ccxt>=4.0.0
+requests>=2.31.0
+websocket-client>=1.6.0
+
+# Technical Analysis
+ta-lib>=0.4.0
+vectorbt>=0.25.0
+
+# Statistical Analysis - AÑADIDO
+statsmodels>=0.14.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+tensorflow>=2.13.0
+torch>=2.0.0
+xgboost>=1.7.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0
+
+# Utils
+python-dotenv>=1.0.0
+click>=8.1.0
+tqdm>=4.65.0
+schedule>=1.2.0
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
+jupyter>=1.0.0
+
+# Async Support
+aiohttp>=3.8.0
+fastapi>=0.110.0
+pydantic>=2.5.0
+uvicorn[standard]>=0.23.0
+
+# Market data
+yfinance>=0.2.40
+
+# Econometría / HMM
+arch>=6.3.0
+hmmlearn>=0.3.2
+
+# Core dependencies
+python-binance==1.0.19
+
+# Utils
+structlog==24.1.0
+aiofiles>=24.1.0

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+
+# Database & Data
+*.db
+*.sqlite
+data/raw/
+logs/
+
+# Security
+.env
+
+# Trading
+backtest_results/
+models/
+binance_futures_bot_py/state/*
+.DS_Store
