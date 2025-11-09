@@ -9,11 +9,21 @@ This module provides state-of-the-art architectures that capture:
 """
 from __future__ import annotations
 
+import os
+import warnings
 from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+_ROCM_FORCE_LSTM_DROPOUT = os.environ.get("FORCE_LSTM_DROPOUT", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+_ROCM_DROPOUT_WARNING_EMITTED = False
 
 
 class AttentionLayer(nn.Module):
@@ -55,12 +65,30 @@ class TemporalEncoder(nn.Module):
         self.bidirectional = bidirectional
         self.use_attention = use_attention
         
+        is_rocm = bool(getattr(torch.version, "hip", None))
+        lstm_dropout = dropout if num_layers > 1 else 0.0
+        if (
+            is_rocm
+            and not _ROCM_FORCE_LSTM_DROPOUT
+            and lstm_dropout > 0.0
+        ):
+            global _ROCM_DROPOUT_WARNING_EMITTED
+            if not _ROCM_DROPOUT_WARNING_EMITTED:
+                warnings.warn(
+                    "Disabling in-LSTM dropout on ROCm to avoid MIOpen HIPRTC compilation "
+                    "failures. Set FORCE_LSTM_DROPOUT=1 to override once the driver/toolchain "
+                    "is patched.",
+                    RuntimeWarning,
+                )
+                _ROCM_DROPOUT_WARNING_EMITTED = True
+            lstm_dropout = 0.0
+        
         # LSTM encoder
         self.lstm = nn.LSTM(
             input_size=input_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0.0,
+            dropout=lstm_dropout,
             batch_first=True,
             bidirectional=bidirectional,
         )

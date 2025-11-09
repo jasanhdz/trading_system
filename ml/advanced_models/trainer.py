@@ -151,7 +151,7 @@ class AdvancedTrainer:
             class_weights=class_weights.to(self.device) if class_weights is not None else None,
             classification_weight=1.0,
             regression_weight=0.5,
-        )
+        ).to(self.device)
         
         optimizer = torch.optim.AdamW(
             model.parameters(),

@@ -339,6 +339,8 @@ def main(
             lr=lr,
             patience=patience,
         )
+
+    final_model = final_model.to(trainer.device)
     
     # Final evaluation
     print("\n" + "="*80)
