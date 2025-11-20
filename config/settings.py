@@ -60,7 +60,7 @@ class Settings:
             issues.append("BINANCE_SECRET_KEY missing")
         elif cls.BINANCE_SECRET_KEY and not cls.BINANCE_API_KEY:
             issues.append("BINANCE_API_KEY missing")
-            
+
         if cls.LEVERAGE > 20:
             issues.append(f"High leverage detected: {cls.LEVERAGE}x (consider reducing)")
             

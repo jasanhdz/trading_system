@@ -344,36 +344,98 @@ def walk_forward_split(
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """
     Create walk-forward validation splits for time series.
-    
+
     Instead of a single train/test split, creates multiple expanding windows:
     - Each split uses all previous data for training
     - Tests on the next time window
     - Simulates real trading where we retrain periodically
-    
+
     Args:
         n_samples: Total number of samples
         n_splits: Number of validation folds
         train_ratio: Minimum proportion of data to use for first training
         gap: Number of samples to skip between train and test (avoid lookahead)
-    
+
     Returns:
         List of (train_indices, test_indices) tuples
     """
     min_train = int(n_samples * train_ratio)
     test_size = (n_samples - min_train) // n_splits
-    
+
     splits = []
     for i in range(n_splits):
         train_end = min_train + i * test_size
         test_start = train_end + gap
         test_end = min(test_start + test_size, n_samples)
-        
+
         if test_end <= test_start:
             break
-        
+
         train_idx = np.arange(0, train_end)
         test_idx = np.arange(test_start, test_end)
-        
+
         splits.append((train_idx, test_idx))
-    
+
+    return splits
+
+
+def walk_forward_split_with_validation(
+    n_samples: int,
+    n_splits: int = 5,
+    train_ratio: float = 0.6,
+    val_ratio: float = 0.2,
+    gap: int = 0,
+) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """
+    Create walk-forward splits with VALIDATION set para early stopping.
+
+    Divide los datos en: Train / Validation / Test
+    - Train: Para entrenar el modelo
+    - Validation: Para early stopping y ajustar hiperparámetros
+    - Test: Nunca visto durante entrenamiento, solo para evaluación final
+
+    Args:
+        n_samples: Total number of samples
+        n_splits: Number of validation folds
+        train_ratio: Proportion for training (0.6 = 60%)
+        val_ratio: Proportion for validation (0.2 = 20%)
+        gap: Number of samples to skip between sets
+
+    Returns:
+        List of (train_indices, val_indices, test_indices) tuples
+    """
+    test_ratio = 1.0 - train_ratio - val_ratio
+
+    if test_ratio <= 0:
+        raise ValueError(
+            f"train_ratio ({train_ratio}) + val_ratio ({val_ratio}) "
+            f"debe ser < 1.0"
+        )
+
+    min_train = int(n_samples * train_ratio)
+    val_size = int(n_samples * val_ratio)
+    test_size = (n_samples - min_train - val_size) // n_splits
+
+    splits = []
+    for i in range(n_splits):
+        # Train
+        train_end = min_train + i * test_size
+
+        # Validation
+        val_start = train_end + gap
+        val_end = val_start + val_size
+
+        # Test
+        test_start = val_end + gap
+        test_end = min(test_start + test_size, n_samples)
+
+        if test_end <= test_start or val_end <= val_start:
+            break
+
+        train_idx = np.arange(0, train_end)
+        val_idx = np.arange(val_start, val_end)
+        test_idx = np.arange(test_start, test_end)
+
+        splits.append((train_idx, val_idx, test_idx))
+
     return splits

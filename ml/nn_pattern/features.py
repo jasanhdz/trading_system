@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from analysis.features.technical_indicators import TechnicalIndicators
+from ml.nn_pattern.regime_features import calculate_regime_features, get_regime_feature_names
 
 PRICE_COLS = ["open", "high", "low", "close", "volume"]
 
@@ -89,12 +90,16 @@ CUSTOM_FEATURES = [
     "volume_zscore_20",
 ]
 
+# Features de régimen de mercado (35 features adicionales)
+REGIME_FEATURES = get_regime_feature_names()
+
 ALL_FEATURES = (
     MOMENTUM_COLS
     + TREND_COLS
     + VOLATILITY_COLS
     + VOLUME_COLS
     + CUSTOM_FEATURES
+    + REGIME_FEATURES
 )
 
 
@@ -146,12 +151,16 @@ def build_feature_frame(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     df = df.sort_index().copy()
     ti = TechnicalIndicators(df)
 
+    # Calcular features de régimen de mercado
+    regime_frame = calculate_regime_features(df)
+
     frames = [
         _safe_columns(_strip_base_columns(ti.momentum_indicators()), MOMENTUM_COLS),
         _safe_columns(_strip_base_columns(ti.trend_indicators()), TREND_COLS),
         _safe_columns(_strip_base_columns(ti.volatility_indicators()), VOLATILITY_COLS),
         _safe_columns(_strip_base_columns(ti.volume_indicators()), VOLUME_COLS),
         _safe_columns(_build_custom_features(df), CUSTOM_FEATURES),
+        _safe_columns(regime_frame, REGIME_FEATURES),
     ]
 
     feature_frame = pd.concat(frames, axis=1)
