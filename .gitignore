@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .Python
 .venv/
+.venv_cuda/
+.venv_rocm57/
 
 # Database & Data
 *.db

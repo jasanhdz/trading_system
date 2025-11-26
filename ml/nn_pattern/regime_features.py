@@ -150,15 +150,11 @@ def calculate_regime_features(df: pd.DataFrame) -> pd.DataFrame:
     ).astype(float)
 
     # 10. Fuerza Relativa del Mercado
-    # ROC (Rate of Change) para medir momentum
-    roc_10 = df['close'].pct_change(10)
-    roc_20 = df['close'].pct_change(20)
-
-    regime['roc_10'] = roc_10
-    regime['roc_20'] = roc_20
-
     # Aceleración del precio (segunda derivada)
-    regime['price_acceleration'] = roc_10.diff()
+    # roc_10 y roc_20 ya están en MOMENTUM_COLS, así que solo calculamos la aceleración
+    # usando el roc_10 que ya debería estar calculado o lo calculamos temporalmente
+    roc_10_temp = df['close'].pct_change(10)
+    regime['price_acceleration'] = roc_10_temp.diff()
 
     # Limpiar NaN e infinitos
     regime = regime.replace([np.inf, -np.inf], np.nan)
@@ -281,7 +277,7 @@ def get_regime_feature_names() -> List[str]:
         'price_vs_sma50',
         'sma_cross_bullish',
         'sma_cross_bearish',
-        'roc_10',
-        'roc_20',
+        # 'roc_10',  # Duplicado en MOMENTUM_COLS
+        # 'roc_20',  # Duplicado en MOMENTUM_COLS
         'price_acceleration',
     ]

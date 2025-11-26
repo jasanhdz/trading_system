@@ -122,6 +122,12 @@ class MLProbabilityStrategy(Strategy):
         symbol_cfg = config.get_symbol_config(symbol)
         model_path, scaler_path, meta_path = self._artifact_paths(symbol, timeframe, symbol_cfg, config)
 
+        # Support for directory-based models (ensembles of folds)
+        # If model.pt doesn't exist, but we have fold models in the directory, use the directory as model_path
+        if not model_path.exists() and model_path.parent.exists():
+            if list(model_path.parent.glob("best_model_fold*.pt")):
+                model_path = model_path.parent
+
         if not model_path.exists() or not scaler_path.exists() or not meta_path.exists():
             missing = {
                 "model": model_path.exists(),

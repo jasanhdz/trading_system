@@ -94,7 +94,7 @@ class CosineWarmupScheduler:
             param_group['lr'] = base_lr * lr_scale
 
 
-def evaluate_model(model, dataloader, device, criterion):
+def evaluate_model(model, dataloader, device_obj, criterion):
     """Evalúa el modelo y retorna métricas detalladas."""
     model.eval()
     all_preds = []
@@ -103,8 +103,8 @@ def evaluate_model(model, dataloader, device, criterion):
 
     with torch.no_grad():
         for batch_seq, batch_labels in dataloader:
-            batch_seq = batch_seq.to(device)
-            batch_labels = batch_labels.squeeze(-1).to(device)
+            batch_seq = batch_seq.to(device_obj)
+            batch_labels = batch_labels.squeeze(-1).to(device_obj)
 
             outputs = model(batch_seq)
             loss, _ = criterion(
@@ -174,11 +174,75 @@ def train_production_model(
 ):
     """Entrena modelo con todas las mejoras para producción."""
 
-    device = torch.device(device if torch.cuda.is_available() else "cpu")
-
-    # Detectar ROCm y desactivar AMP si es necesario
+    # Detectar ROCm y forzar inicialización si es necesario
     is_rocm = bool(getattr(torch.version, "hip", None))
+    
+    if is_rocm:
+        logger.info(f"🔧 ROCm detectado - Version HIP: {torch.version.hip}")
+        # Workaround: ROCm a veces no detecta GPUs hasta que se intenta usarlas
+        # Forzar inicialización del contexto ANTES del check de is_available()
+        try:
+            import os
+            if 'HIP_VISIBLE_DEVICES' in os.environ or 'HSA_OVERRIDE_GFX_VERSION' in os.environ:
+                logger.info(f"   HIP_VISIBLE_DEVICES={os.environ.get('HIP_VISIBLE_DEVICES', 'not set')}")
+                logger.info(f"   HSA_OVERRIDE_GFX_VERSION={os.environ.get('HSA_OVERRIDE_GFX_VERSION', 'not set')}")
+                
+                # Forzar la inicialización del contexto CUDA/ROCm
+                # Esto DEBE ejecutarse antes de is_available()
+                torch.cuda._lazy_init()
+                logger.info("   ✅ Contexto ROCm inicializado con _lazy_init()")
+                
+                # Ahora verificar si se detectaron GPUs
+                if torch.cuda.is_available():
+                    logger.info(f"   ✅ ROCm GPUs detectadas: {torch.cuda.device_count()}")
+                else:
+                    logger.warning("   ⚠️  ROCm inicializado pero no se detectaron GPUs")
+        except Exception as e:
+            logger.warning(f"   ⚠️  Error al inicializar ROCm: {e}")
 
+    # FORZAR USO DE GPU - NO PERMITIR CPU
+    logger.info(f"📱 Device solicitado: {device}")
+    logger.info(f"🔍 PyTorch CUDA disponible: {torch.cuda.is_available()}")
+    
+    # Verificar que GPU esté disponible
+    if not torch.cuda.is_available():
+        error_msg = (
+            "❌ GPU NO DISPONIBLE - Entrenamiento BLOQUEADO\n"
+            "   El entrenamiento en CPU está deshabilitado por configuración.\n"
+            "   Razones posibles:\n"
+            "   1. Variables de entorno ROCm no configuradas (HIP_VISIBLE_DEVICES, HSA_OVERRIDE_GFX_VERSION)\n"
+            "   2. Drivers de GPU no cargados correctamente\n"
+            "   3. PyTorch sin soporte ROCm/CUDA\n"
+            "   SOLUCIÓN: Verifica las GPUs con 'rocm-smi' o 'nvidia-smi'"
+        )
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+    
+    # GPU disponible - continuar
+    logger.info(f"✅ GPU disponible - Device count: {torch.cuda.device_count()}")
+    try:
+        for i in range(torch.cuda.device_count()):
+            logger.info(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
+    except Exception as e:
+        logger.warning(f"⚠️  Error al obtener nombre de GPU: {e}")
+    
+    # Crear device object - SOLO GPU, SIN FALLBACK A CPU
+    try:
+        device_obj = torch.device(device)
+        logger.info(f"✅ Device configurado: {device_obj}")
+        
+        # Verificar que efectivamente podemos usar este device
+        test_tensor = torch.rand(10, 10).to(device_obj)
+        del test_tensor
+        torch.cuda.synchronize()
+        logger.info(f"✅ Test de allocación en GPU exitoso")
+        
+    except Exception as e:
+        error_msg = f"❌ Error al configurar GPU '{device}': {e}\nUSO DE CPU BLOQUEADO"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
+    # Configurar AMP según el tipo de GPU
     if is_rocm:
         if use_amp:
             logger.warning("⚠️  ROCm detectado. Desactivando Mixed Precision (AMP)")
@@ -187,7 +251,7 @@ def train_production_model(
         else:
             logger.info("ℹ️  ROCm detectado. Configuración optimizada para AMD GPUs")
 
-    logger.info(f"🚀 Usando device: {device}")
+    logger.info(f"🚀 Usando device: {device_obj} (GPU FORZADA)")
     logger.info(f"✓ Modelo: DeepTemporalNet (arquitectura profunda optimizada)")
     if use_amp:
         logger.info("✓ Mixed Precision (AMP): Activado")
@@ -316,13 +380,13 @@ def train_production_model(
             input_dim=features.shape[1],
             sequence_length=config.sequence_length,
             **model_config,
-        ).to(device)
+        ).to(device_obj)
 
         logger.info(f"🧠 Modelo: {sum(p.numel() for p in model.parameters()):,} parámetros")
 
         # Loss y optimizer
         if use_focal_loss:
-            classification_criterion = FocalLoss(alpha=0.25, gamma=2.0, num_classes=3).to(device)
+            classification_criterion = FocalLoss(alpha=0.25, gamma=2.0, num_classes=3).to(device_obj)
             logger.info("✓ Usando Focal Loss para clasificación")
         else:
             # Class weights tradicional
@@ -331,17 +395,17 @@ def train_production_model(
                 inv_weights = class_counts.sum() / class_counts
                 class_weights = torch.from_numpy(
                     (inv_weights / inv_weights.mean()).astype(np.float32)
-                ).to(device)
+                ).to(device_obj)
             else:
                 class_weights = None
 
-            classification_criterion = nn.CrossEntropyLoss(weight=class_weights).to(device)
+            classification_criterion = nn.CrossEntropyLoss(weight=class_weights).to(device_obj)
 
         criterion = MultiTaskLoss(
             class_weights=None,  # Ya está en classification_criterion
             classification_weight=1.0,
             regression_weight=0.2,
-        ).to(device)  # Mover criterion a GPU
+        ).to(device_obj)  # Mover criterion a GPU
         criterion.classification_criterion = classification_criterion
 
         optimizer = torch.optim.AdamW(
@@ -377,8 +441,8 @@ def train_production_model(
             train_loss = 0.0
 
             for batch_seq, batch_labels in train_loader:
-                batch_seq = batch_seq.to(device)
-                batch_labels = batch_labels.squeeze(-1).to(device)
+                batch_seq = batch_seq.to(device_obj)
+                batch_labels = batch_labels.squeeze(-1).to(device_obj)
 
                 optimizer.zero_grad()
 
@@ -421,7 +485,7 @@ def train_production_model(
             train_loss /= len(train_loader)
 
             # Validación
-            val_metrics, _, _ = evaluate_model(model, val_loader, device, criterion)
+            val_metrics, _, _ = evaluate_model(model, val_loader, device_obj, criterion)
 
             # Learning rate step
             scheduler.step(epoch)
@@ -457,7 +521,7 @@ def train_production_model(
             model.load_state_dict(torch.load(save_dir / f"best_model_fold{fold_idx}.pt"))
 
         # Evaluación final en test set
-        test_metrics, test_preds, test_labels = evaluate_model(model, test_loader, device, criterion)
+        test_metrics, test_preds, test_labels = evaluate_model(model, test_loader, device_obj, criterion)
 
         logger.info(f"\n📊 Resultados Fold {fold_idx}:")
         logger.info(f"  Best Val F1: {best_val_f1:.4f} (epoch {best_epoch+1})")
@@ -488,7 +552,7 @@ def train_production_model(
     logger.info(f"Avg Long F1: {avg_long_f1:.4f}")
     logger.info(f"Avg Short F1: {avg_short_f1:.4f}")
 
-    return all_fold_results
+    return all_fold_results, feature_names
 
 
 @click.command()
@@ -585,7 +649,7 @@ def main(
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # Entrenar
-    results = train_production_model(
+    results, feature_names = train_production_model(
         config=config,
         model_config=model_config,
         device=device,
@@ -615,8 +679,20 @@ def main(
                 'batch_size': batch_size,
                 'lr': lr,
             },
+            'selected_features': feature_names,
             'model_config': model_config,
             'results': results,
+        }, f, indent=2)
+
+    # Guardar meta.json para compatibilidad con el predictor
+    with open(save_dir / "meta.json", "w") as f:
+        json.dump({
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'sequence_length': sequence_length,
+            'selected_features': feature_names,
+            'model_config': model_config,
+            'ensemble_size': 5
         }, f, indent=2)
 
     print("\n" + "="*80)

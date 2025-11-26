@@ -88,6 +88,9 @@ CUSTOM_FEATURES = [
     "roll_vol_30",
     "roll_vol_60",
     "volume_zscore_20",
+    "atr_pct",
+    "price_location",
+    "volume_flow",
 ]
 
 # Features de régimen de mercado (35 features adicionales)
@@ -133,6 +136,23 @@ def _build_custom_features(df: pd.DataFrame) -> pd.DataFrame:
         (df["volume"] - df["volume"].rolling(20).mean())
         / (df["volume"].rolling(20).std() + 1e-9)
     )
+    
+    # New Features
+    # 1. ATR Percentage (Normalized Volatility)
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift()).abs()
+    low_close = (df["low"] - df["close"].shift()).abs()
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = ranges.max(axis=1)
+    atr_14 = true_range.rolling(14).mean()
+    feat["atr_pct"] = atr_14 / df["close"]
+
+    # 2. Simulated Order Flow (Buying/Selling Pressure)
+    # Approximation: Volume * (Close location within High-Low range)
+    range_len = (df["high"] - df["low"]).replace(0, 1e-9)
+    feat["price_location"] = (df["close"] - df["low"]) / range_len
+    feat["volume_flow"] = df["volume"] * (2 * feat["price_location"] - 1) # -1 to 1 scale
+
     return feat
 
 

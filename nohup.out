@@ -1,0 +1,4 @@
+usage: dispatch_training.py [-h] --symbols SYMBOLS --timeframes TIMEFRAMES
+                            [--target-return TARGET_RETURN]
+                            [--prediction-horizon PREDICTION_HORIZON]
+dispatch_training.py: error: argument --target-return: expected one argument

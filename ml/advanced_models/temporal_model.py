@@ -317,13 +317,37 @@ class EnsembleModel(nn.Module):
             return probs
 
 
-# Loss functions for multi-task learning
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for addressing class imbalance.
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    """
+    
+    def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, reduction: str = 'mean'):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+        
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.alpha)
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
 
 class MultiTaskLoss(nn.Module):
     """
     Combined loss for classification and regression tasks.
     
     Uses adaptive weighting to balance tasks during training.
+    Now uses Focal Loss for classification to handle class imbalance better.
     """
     
     def __init__(
@@ -331,9 +355,11 @@ class MultiTaskLoss(nn.Module):
         class_weights: Optional[torch.Tensor] = None,
         classification_weight: float = 1.0,
         regression_weight: float = 0.5,
+        focal_gamma: float = 2.0,
     ):
         super().__init__()
-        self.classification_criterion = nn.CrossEntropyLoss(weight=class_weights)
+        # Use Focal Loss instead of standard Cross Entropy
+        self.classification_criterion = FocalLoss(alpha=class_weights, gamma=focal_gamma)
         self.regression_criterion = nn.MSELoss()
         
         # Learnable task weights (log variance approach)
@@ -357,7 +383,7 @@ class MultiTaskLoss(nn.Module):
             total_loss: Combined weighted loss
             loss_dict: Individual loss components
         """
-        # Classification loss
+        # Classification loss (Focal Loss)
         class_loss = self.classification_criterion(logits, class_targets)
         
         # Adaptive weighting using learned uncertainty

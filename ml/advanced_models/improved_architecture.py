@@ -458,3 +458,131 @@ class HybridCNNLSTM(nn.Module):
 
 # Importar numpy para PositionalEncoding
 import numpy as np
+
+
+class Chomp1d(nn.Module):
+    """Trims the padding to ensure causal convolution."""
+    def __init__(self, chomp_size):
+        super(Chomp1d, self).__init__()
+        self.chomp_size = chomp_size
+
+    def forward(self, x):
+        return x[:, :, :-self.chomp_size].contiguous()
+
+
+class TemporalBlock(nn.Module):
+    """Residual block with dilated causal convolutions."""
+    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
+        super(TemporalBlock, self).__init__()
+        
+        # First dilated convolution
+        self.conv1 = nn.utils.weight_norm(nn.Conv1d(n_inputs, n_outputs, kernel_size,
+                                           stride=stride, padding=padding, dilation=dilation))
+        self.chomp1 = Chomp1d(padding)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout)
+
+        # Second dilated convolution
+        self.conv2 = nn.utils.weight_norm(nn.Conv1d(n_outputs, n_outputs, kernel_size,
+                                           stride=stride, padding=padding, dilation=dilation))
+        self.chomp2 = Chomp1d(padding)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
+                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
+        
+        # Residual connection
+        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
+        self.relu = nn.ReLU()
+        self.init_weights()
+
+    def init_weights(self):
+        self.conv1.weight.data.normal_(0, 0.01)
+        self.conv2.weight.data.normal_(0, 0.01)
+        if self.downsample is not None:
+            self.downsample.weight.data.normal_(0, 0.01)
+
+    def forward(self, x):
+        out = self.net(x)
+        res = x if self.downsample is None else self.downsample(x)
+        return self.relu(out + res)
+
+
+class TemporalConvNet(nn.Module):
+    """
+    Temporal Convolutional Network (TCN).
+    
+    Better than LSTM for long sequences due to larger receptive field and parallelism.
+    """
+    def __init__(
+        self, 
+        input_dim: int, 
+        num_channels: list[int] = [64, 128, 256], 
+        kernel_size: int = 3, 
+        dropout: float = 0.2,
+        num_classes: int = 3,
+        use_regression: bool = True
+    ):
+        super(TemporalConvNet, self).__init__()
+        self.num_classes = num_classes
+        self.use_regression = use_regression
+        
+        layers = []
+        num_levels = len(num_channels)
+        
+        for i in range(num_levels):
+            dilation_size = 2 ** i
+            in_channels = input_dim if i == 0 else num_channels[i-1]
+            out_channels = num_channels[i]
+            
+            layers += [TemporalBlock(
+                in_channels, 
+                out_channels, 
+                kernel_size, 
+                stride=1, 
+                dilation=dilation_size,
+                padding=(kernel_size-1) * dilation_size, 
+                dropout=dropout
+            )]
+
+        self.tcn = nn.Sequential(*layers)
+        
+        # Dense layers after TCN
+        last_channel = num_channels[-1]
+        self.dense = nn.Sequential(
+            nn.Linear(last_channel, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
+        
+        # Heads
+        self.classifier = nn.Linear(128, num_classes)
+        
+        if use_regression:
+            self.regressor = nn.Sequential(
+                nn.Linear(128, 32),
+                nn.ReLU(),
+                nn.Linear(32, 1)
+            )
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        # x shape: (batch, seq_len, features) -> (batch, features, seq_len) for Conv1d
+        x = x.permute(0, 2, 1)
+        
+        y = self.tcn(x)
+        
+        # Take last timestep: (batch, channels, seq_len) -> (batch, channels)
+        y = y[:, :, -1]
+        
+        features = self.dense(y)
+        
+        outputs = {
+            'logits': self.classifier(features)
+        }
+        
+        if self.use_regression:
+            outputs['regression'] = self.regressor(features)
+            
+        return outputs

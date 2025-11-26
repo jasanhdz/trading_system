@@ -6,6 +6,7 @@ Handles loading and inference with LSTM-based models.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -15,7 +16,11 @@ import pandas as pd
 import torch
 
 from ml.nn_pattern.features import build_feature_frame
-from .temporal_model import AdvancedTemporalNet, EnsembleModel
+from .improved_architecture import DeepTemporalNet
+from .temporal_model import EnsembleModel
+
+
+logger = logging.getLogger(__name__)
 
 
 class AdvancedPredictor:
@@ -68,33 +73,31 @@ class AdvancedPredictor:
         self.model_config = self.meta['model_config']
         self.ensemble_size = self.meta.get('ensemble_size', 1)
         
+        logger.info(f"Predictor initialized: {len(self.selected_features)} features, "
+                   f"sequence_length={self.sequence_length}")
+        logger.debug(f"Features: {self.selected_features[:5]}...{self.selected_features[-2:]}")
+        
         # Load model
         self.model = self._load_model()
         self.model.to(self.device)
         self.model.eval()
+        logger.info(f"Model loaded successfully on {self.device}")
     
     def _load_model(self) -> torch.nn.Module:
-        """Load model from checkpoint."""
-        checkpoint = torch.load(self.model_path, map_location=self.device)
-        
-        # Check if ensemble
-        if self.ensemble_size > 1 and isinstance(checkpoint, dict) and 'models' in checkpoint:
-            # Load ensemble
-            models = []
-            for state_dict in checkpoint['models']:
-                model = AdvancedTemporalNet(
-                    input_dim=len(self.selected_features),
-                    sequence_length=self.sequence_length,
-                    **self.model_config,
-                )
-                model.load_state_dict(state_dict)
-                models.append(model)
-            
-            ensemble = EnsembleModel(models, weights=checkpoint.get('weights'))
-            return ensemble
-        else:
-            # Load single model
-            model = AdvancedTemporalNet(
+        """Load ensemble of models from directory."""
+        # Ensure model_path is a directory containing folds
+        if not self.model_path.is_dir():
+             raise ValueError(f"Model path must be a directory containing fold models: {self.model_path}")
+
+        fold_files = sorted(list(self.model_path.glob("best_model_fold*.pt")))
+        if not fold_files:
+            raise FileNotFoundError(f"No 'best_model_fold*.pt' files found in {self.model_path}")
+
+        logger.info(f"Found {len(fold_files)} fold models for ensemble: {[f.name for f in fold_files]}")
+        models = []
+        for fold_file in fold_files:
+            checkpoint = torch.load(fold_file, map_location=self.device)
+            model = DeepTemporalNet(
                 input_dim=len(self.selected_features),
                 sequence_length=self.sequence_length,
                 **self.model_config,
@@ -105,7 +108,14 @@ class AdvancedPredictor:
             else:
                 model.load_state_dict(checkpoint)
             
-            return model
+            model.to(self.device)
+            model.eval()
+            models.append(model)
+        
+        ensemble = EnsembleModel(models)
+        ensemble.to(self.device)
+        ensemble.eval()
+        return ensemble
     
     def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray:
         """
@@ -116,25 +126,40 @@ class AdvancedPredictor:
             
         Returns:
             Prepared sequence of shape (sequence_length, n_features)
+            
+        Raises:
+            ValueError: If insufficient data or missing features
         """
         # Build features
         feature_frame, _ = build_feature_frame(df)
         
+        # Validate data length
         if len(feature_frame) < self.sequence_length:
             raise ValueError(
-                f"Need at least {self.sequence_length} rows to make prediction, "
+                f"Insufficient data: need at least {self.sequence_length} rows, "
                 f"got {len(feature_frame)}"
             )
         
-        # Select features
-        if self.feature_selector:
-            features = feature_frame[self.selected_features].values
-        else:
-            # Ensure correct feature order
-            features = feature_frame[self.selected_features].values
+        # Validate all required features exist
+        missing_features = set(self.selected_features) - set(feature_frame.columns)
+        if missing_features:
+            raise ValueError(
+                f"Missing required features: {missing_features}. "
+                f"Available features: {list(feature_frame.columns[:10])}..."
+            )
+        
+        # Select features in correct order
+        features = feature_frame[self.selected_features].values
         
         # Take last sequence_length rows
         sequence = features[-self.sequence_length:]
+        
+        # Validate shape before scaling
+        expected_shape = (self.sequence_length, len(self.selected_features))
+        if sequence.shape != expected_shape:
+            raise ValueError(
+                f"Shape mismatch: expected {expected_shape}, got {sequence.shape}"
+            )
         
         # Scale
         sequence_scaled = self.scaler.transform(sequence)

@@ -38,6 +38,7 @@ from .dataset import (
     walk_forward_split,
 )
 from .temporal_model import AdvancedTemporalNet, EnsembleModel, MultiTaskLoss
+from .improved_architecture import TemporalConvNet, TransformerNet
 
 
 class AdvancedTrainer:
@@ -139,12 +140,28 @@ class AdvancedTrainer:
         Returns:
             Trained model and training history
         """
-        # Create model
-        model = AdvancedTemporalNet(
-            input_dim=len(self.selected_features),
-            sequence_length=self.config.sequence_length,
-            **self.model_config,
-        ).to(self.device)
+        # Create model based on type
+        model_type = self.model_config.get("type", "lstm")
+        model_params = {k: v for k, v in self.model_config.items() if k != "type"}
+        
+        if model_type == "tcn":
+            model = TemporalConvNet(
+                input_dim=len(self.selected_features),
+                **model_params,
+            ).to(self.device)
+        elif model_type == "transformer":
+            model = TransformerNet(
+                input_dim=len(self.selected_features),
+                sequence_length=self.config.sequence_length,
+                **model_params,
+            ).to(self.device)
+        else:
+            # Default to LSTM (AdvancedTemporalNet)
+            model = AdvancedTemporalNet(
+                input_dim=len(self.selected_features),
+                sequence_length=self.config.sequence_length,
+                **model_params,
+            ).to(self.device)
         
         # Loss and optimizer
         criterion = MultiTaskLoss(
@@ -401,7 +418,7 @@ class AdvancedTrainer:
         **train_kwargs,
     ) -> List[Dict]:
         """
-        Perform walk-forward validation to get realistic performance estimates.
+        Perform walk-forward validation with proper Train/Validation/Test splits.
         
         Returns:
             List of metrics for each fold
@@ -410,28 +427,35 @@ class AdvancedTrainer:
         print(f"WALK-FORWARD VALIDATION ({n_splits} folds)")
         print(f"{'='*60}\n")
         
-        splits = walk_forward_split(
+        # Use the new split method with validation set
+        splits = walk_forward_split_with_validation(
             n_samples=len(features),
             n_splits=n_splits,
-            train_ratio=0.7,
+            train_ratio=0.6,  # 60% initial train
+            val_ratio=0.2,    # 20% validation
             gap=self.config.prediction_horizon,
         )
         
         fold_results = []
         
-        for fold_idx, (train_idx, test_idx) in enumerate(splits, 1):
+        for fold_idx, (train_idx, val_idx, test_idx) in enumerate(splits, 1):
             print(f"\n--- Fold {fold_idx}/{n_splits} ---")
-            print(f"Train: {len(train_idx)} samples | Test: {len(test_idx)} samples")
+            print(f"Train: {len(train_idx)} | Valid: {len(val_idx)} | Test: {len(test_idx)}")
             
             # Split data
             train_features = features[train_idx]
             train_class = class_labels[train_idx]
+            
+            val_features = features[val_idx]
+            val_class = class_labels[val_idx]
+            
             test_features = features[test_idx]
             test_class = class_labels[test_idx]
             
-            # Scale features
+            # Scale features (fit on train only)
             scaler = StandardScaler()
             train_features = scaler.fit_transform(train_features)
+            val_features = scaler.transform(val_features)
             test_features = scaler.transform(test_features)
             
             # Create datasets
@@ -443,6 +467,15 @@ class AdvancedTrainer:
                 prediction_horizon=self.config.prediction_horizon,
                 augment=self.config.use_augmentation,
                 augmentation_noise=self.config.augmentation_noise,
+            )
+            
+            val_dataset = SequenceDataset(
+                val_features,
+                val_class,
+                regression_targets[val_idx],
+                sequence_length=self.config.sequence_length,
+                prediction_horizon=self.config.prediction_horizon,
+                augment=False,
             )
             
             test_dataset = SequenceDataset(
@@ -462,13 +495,19 @@ class AdvancedTrainer:
                 drop_last=False,
             )
             
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=512,
+                shuffle=False,
+            )
+            
             test_loader = DataLoader(
                 test_dataset,
                 batch_size=512,
                 shuffle=False,
             )
             
-            # Compute class weights
+            # Compute class weights based on TRAIN set
             class_counts = np.bincount(train_class, minlength=3)
             if (class_counts > 0).all():
                 inv_weights = class_counts.sum() / class_counts
@@ -476,57 +515,102 @@ class AdvancedTrainer:
             else:
                 class_weights = None
             
-            # Train model
+            # Train model using VALIDATION set for early stopping
             model, history = self.train_single_model(
                 train_loader,
-                None,  # No validation set in walk-forward (use test as final eval)
+                val_loader,  # Pass validation loader here!
                 class_weights=class_weights,
                 **train_kwargs,
             )
             
-            # Evaluate on test set
+            # Evaluate on TEST set (unseen)
             test_metrics = self.evaluate_model(model, test_loader)
             
-            print(f"\nFold {fold_idx} Test Results:")
+            print(f"\nFold {fold_idx} Test Results (Unseen Data):")
             print(f"  Accuracy: {test_metrics['accuracy']:.4f}")
             print(f"  Macro F1: {test_metrics['macro_f1']:.4f}")
             print(f"  AP Long: {test_metrics['ap_long']:.4f}")
             print(f"  AP Short: {test_metrics['ap_short']:.4f}")
-            reg_metrics = test_metrics.get('regression')
-            if reg_metrics:
-                print(f"  Regression MSE: {reg_metrics['mse']:.6f}")
-                print(f"  Regression MAE: {reg_metrics['mae']:.6f}")
             
             fold_results.append({
                 'fold': fold_idx,
                 'train_size': len(train_idx),
+                'val_size': len(val_idx),
                 'test_size': len(test_idx),
                 'metrics': test_metrics,
                 'history': history,
             })
         
         # Aggregate results
-        avg_accuracy = np.mean([r['metrics']['accuracy'] for r in fold_results])
         avg_f1 = np.mean([r['metrics']['macro_f1'] for r in fold_results])
-        avg_ap_long = np.mean([r['metrics']['ap_long'] for r in fold_results])
-        avg_ap_short = np.mean([r['metrics']['ap_short'] for r in fold_results])
-        regression_metrics = [r['metrics'].get('regression') for r in fold_results]
-        regression_metrics = [m for m in regression_metrics if m]
         
         print(f"\n{'='*60}")
         print("WALK-FORWARD VALIDATION SUMMARY")
         print(f"{'='*60}")
-        print(f"Average Accuracy: {avg_accuracy:.4f} ± {np.std([r['metrics']['accuracy'] for r in fold_results]):.4f}")
         print(f"Average Macro F1: {avg_f1:.4f} ± {np.std([r['metrics']['macro_f1'] for r in fold_results]):.4f}")
-        print(f"Average AP Long: {avg_ap_long:.4f}")
-        print(f"Average AP Short: {avg_ap_short:.4f}")
-        if regression_metrics and len(regression_metrics) == len(fold_results):
-            avg_mse = np.mean([m['mse'] for m in regression_metrics])
-            std_mse = np.std([m['mse'] for m in regression_metrics])
-            avg_mae = np.mean([m['mae'] for m in regression_metrics])
-            std_mae = np.std([m['mae'] for m in regression_metrics])
-            print(f"Average Regression MSE: {avg_mse:.6f} ± {std_mse:.6f}")
-            print(f"Average Regression MAE: {avg_mae:.6f} ± {std_mae:.6f}")
         print(f"{'='*60}\n")
         
         return fold_results
+
+
+def walk_forward_split_with_validation(
+    n_samples: int,
+    n_splits: int = 5,
+    train_ratio: float = 0.6,
+    val_ratio: float = 0.2,
+    gap: int = 0,
+) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """
+    Create walk-forward splits with VALIDATION set for early stopping.
+    
+    Returns:
+        List of (train_indices, val_indices, test_indices) tuples
+    """
+    # Calculate size of the test block
+    # We reserve train_ratio + val_ratio for the initial window
+    initial_window_size = int(n_samples * (train_ratio + val_ratio))
+    remaining_samples = n_samples - initial_window_size
+    test_size = remaining_samples // n_splits
+    
+    if test_size <= 0:
+         # Fallback for small datasets: simple split
+         test_size = n_samples // (n_splits + 2)
+         initial_window_size = n_samples - (test_size * n_splits)
+
+    splits = []
+    current_end = initial_window_size
+    
+    for i in range(n_splits):
+        # Define windows relative to current_end
+        # Test window is the next block
+        test_start = current_end + gap
+        test_end = min(test_start + test_size, n_samples)
+        
+        if test_end <= test_start:
+            break
+            
+        # Validation window is the block immediately preceding test
+        # Size is roughly val_ratio of total, or proportional
+        val_size_indices = int(n_samples * val_ratio)
+        val_end = current_end
+        val_start = max(0, val_end - val_size_indices)
+        
+        # Train window is everything before validation
+        train_end = val_start - gap
+        train_start = 0
+        
+        if train_end <= train_start:
+            # Not enough data for this split configuration
+            continue
+            
+        train_idx = np.arange(train_start, train_end)
+        val_idx = np.arange(val_start, val_end)
+        test_idx = np.arange(test_start, test_end)
+        
+        splits.append((train_idx, val_idx, test_idx))
+        
+        # Move window forward
+        current_end = test_end
+
+    return splits
+
