@@ -156,6 +156,97 @@ def _build_custom_features(df: pd.DataFrame) -> pd.DataFrame:
     return feat
 
 
+def _normalize_price_features(df: pd.DataFrame, features_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normaliza features basadas en precio absoluto para ML.
+    
+    Convierte indicadores de precio/volumen absolutos a valores relativos.
+    Esto previene que el scaler aprenda parámetros gigantes y mejora la generalización.
+    """
+    normalized = features_df.copy()
+    close = df.loc[features_df.index, 'close']
+    volume = df.loc[features_df.index, 'volume']
+    
+    # 1. Moving Averages: Convertir a % distancia del precio
+    ma_features = ['sma_10', 'sma_20', 'sma_50', 'ema_10', 'ema_20']
+    for ma in ma_features:
+        if ma in normalized.columns:
+            # (close - MA) / close * 100 = % arriba/abajo de la MA
+            normalized[ma] = ((close - normalized[ma]) / close * 100).replace([np.inf, -np.inf], np.nan)
+    
+    # 2. Bollinger Bands: Usar posición relativa y normalizar
+    if 'bb_upper' in normalized.columns and 'bb_lower' in normalized.columns:
+        bb_range = (normalized['bb_upper'] - normalized['bb_lower']).replace(0, np.nan)
+        # Posición del precio dentro de las bandas (-1 = en lower, 0 = en middle, 1 = en upper)
+        normalized['bb_position'] = ((close - normalized['bb_middle']) / (bb_range / 2)).replace([np.inf, -np.inf], np.nan)
+        # Width normalizado (% del precio)
+        normalized['bb_width'] = (bb_range / close * 100).replace([np.inf, -np.inf], np.nan)
+        # Eliminar valores absolutos
+        normalized = normalized.drop(columns=['bb_upper', 'bb_middle', 'bb_lower'], errors='ignore')
+    
+    # 3. Keltner Channels: Mismo tratamiento
+    if 'kc_upper' in normalized.columns and 'kc_lower' in normalized.columns:
+        kc_range = (normalized['kc_upper'] - normalized['kc_lower']).replace(0, np.nan)
+        kc_middle = (normalized['kc_upper'] + normalized['kc_lower']) / 2
+        normalized['kc_position'] = ((close - kc_middle) / (kc_range / 2)).replace([np.inf, -np.inf], np.nan)
+        normalized['kc_width'] = (kc_range / close * 100).replace([np.inf, -np.inf], np.nan)
+        normalized = normalized.drop(columns=['kc_upper', 'kc_lower'], errors='ignore')
+    
+    # 4. Parabolic SAR: Distancia relativa
+    if 'sar' in normalized.columns:
+        normalized['sar'] = ((close - normalized['sar']) / close * 100).replace([np.inf, -np.inf], np.nan)
+    
+    # 5. Momentum: Convertir a % en vez de diferencia absoluta
+    if 'momentum_10' in normalized.columns:
+        # Momentum es close - close.shift(10), convertir a %
+        normalized['momentum_10'] = (normalized['momentum_10'] / close * 100).replace([np.inf, -np.inf], np.nan)
+    
+    # 6. Volume Features: Normalizar por volumen promedio reciente
+    volume_ma_20 = volume.rolling(20, min_periods=1).mean()
+    volume_sma_features = ['volume_sma_10', 'volume_sma_20', 'volume_sma_50']
+    for vol_feat in volume_sma_features:
+        if vol_feat in normalized.columns:
+            # Ratio vs volumen promedio (ej. 1.5 = 50% más que el promedio)
+            normalized[vol_feat] = (normalized[vol_feat] / volume_ma_20).replace([np.inf, -np.inf], np.nan)
+    
+    # 7. Indicadores acumulativos (OBV, A/D, VPT): Usar z-score en ventana móvil
+    # Estos indicadores crecen sin límite, mejor usar su posición relativa reciente
+    window = 50
+    
+    # OBV (On Balance Volume)
+    if 'obv' in normalized.columns:
+        obv = normalized['obv']
+        obv_mean = obv.rolling(window, min_periods=10).mean()
+        obv_std = obv.rolling(window, min_periods=10).std()
+        normalized['obv_zscore'] = ((obv - obv_mean) / (obv_std + 1e-9)).replace([np.inf, -np.inf], np.nan)
+        normalized = normalized.drop(columns=['obv'], errors='ignore')
+    
+    if 'obv_sma' in normalized.columns:
+        normalized = normalized.drop(columns=['obv_sma'], errors='ignore')
+    
+    # A/D Line (Accumulation/Distribution)
+    if 'ad_line' in normalized.columns:
+        ad = normalized['ad_line']
+        ad_mean = ad.rolling(window, min_periods=10).mean()
+        ad_std = ad.rolling(window, min_periods=10).std()
+        normalized['ad_zscore'] = ((ad - ad_mean) / (ad_std + 1e-9)).replace([np.inf, -np.inf], np.nan)
+        normalized = normalized.drop(columns=['ad_line'], errors='ignore')
+    
+    # VPT (Volume Price Trend)
+    if 'vpt' in normalized.columns:
+        vpt = normalized['vpt']
+        vpt_mean = vpt.rolling(window, min_periods=10).mean()
+        vpt_std = vpt.rolling(window, min_periods=10).std()
+        normalized['vpt_zscore'] = ((vpt - vpt_mean) / (vpt_std + 1e-9)).replace([np.inf, -np.inf], np.nan)
+        normalized = normalized.drop(columns=['vpt'], errors='ignore')
+    
+    # 8. Volume Flow: Ya está parcialmente normalizado pero verificar
+    if 'volume_flow' in normalized.columns:
+        # Normalizar por volumen promedio
+        normalized['volume_flow'] = (normalized['volume_flow'] / volume_ma_20).replace([np.inf, -np.inf], np.nan)
+    
+    return normalized
+
 def build_feature_frame(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     """
     Generate a feature dataframe aligned with the input price index.
@@ -185,9 +276,15 @@ def build_feature_frame(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
 
     feature_frame = pd.concat(frames, axis=1)
 
+    # Normalizar features basadas en precio ANTES de limpiar
+    feature_frame = _normalize_price_features(df, feature_frame)
+
     # Clean up infinities, forward-fill indicator warm-up gaps, and keep consistent column order
     feature_frame = feature_frame.replace([np.inf, -np.inf], np.nan)
     feature_frame = feature_frame.ffill()
     feature_frame = feature_frame.dropna()
+    
+    # Actualizar lista de features (algunas columnas fueron reemplazadas)
+    final_features = feature_frame.columns.tolist()
 
-    return feature_frame, ALL_FEATURES
+    return feature_frame, final_features

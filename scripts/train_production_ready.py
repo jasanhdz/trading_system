@@ -179,6 +179,10 @@ def train_production_model(
     
     if is_rocm:
         logger.info(f"🔧 ROCm detectado - Version HIP: {torch.version.hip}")
+        # Desactivar AMP en ROCm por estabilidad en RX 6600
+        use_amp = False
+        logger.info("⚠️  AMP desactivado para AMD ROCm por estabilidad")
+        
         # Workaround: ROCm a veces no detecta GPUs hasta que se intenta usarlas
         # Forzar inicialización del contexto ANTES del check de is_available()
         try:

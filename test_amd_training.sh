@@ -2,13 +2,13 @@
 # Test rápido de AMD GPU con entrenamiento
 
 export HSA_OVERRIDE_GFX_VERSION=10.3.0
-export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/opt/rocm-6.2.0/lib:/opt/rocm-6.2.0/lib64:$LD_LIBRARY_PATH
 export HIP_VISIBLE_DEVICES=0
 export PYTORCH_HIP_ALLOC_CONF=max_split_size_mb:512
 
 echo "Testing AMD GPU 0 with minimal training..."
 
-.venv_rocm57/bin/python -c "
+.venv_rocm62/bin/python -c "
 import torch
 import torch.nn as nn
 

@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import time
+import json
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 import threading
@@ -33,25 +34,44 @@ class TrainingJob:
     timeframe: str
     target_return: float = 0.005
     prediction_horizon: int = 6
+    epochs: int = 200
     status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED
     gpu_id: Optional[int] = None
     process: Optional[subprocess.Popen] = None
 
 class GPUDispatcher:
     def __init__(self):
+        self._clean_logs()
         self.gpus: List[GPUInfo] = self._detect_gpus()
         self.jobs: Queue[TrainingJob] = Queue()
         self.active_jobs: List[TrainingJob] = []
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         
+    def _clean_logs(self):
+        """Limpia logs antiguos de multi_gpu."""
+        log_dir = "logs/multi_gpu"
+        if os.path.exists(log_dir):
+            print(f"🧹 Limpiando logs antiguos en {log_dir}...")
+            for f in os.listdir(log_dir):
+                if f.endswith(".log"):
+                    try:
+                        os.remove(os.path.join(log_dir, f))
+                    except Exception as e:
+                        print(f"⚠️  No se pudo borrar {f}: {e}")
+        else:
+            os.makedirs(log_dir, exist_ok=True)
+
     def _detect_gpus(self) -> List[GPUInfo]:
         """Detecta GPUs disponibles y asigna entornos."""
         gpus = []
+        rocm_env = os.environ.copy()
+        rocm_env["HSA_OVERRIDE_GFX_VERSION"] = "10.3.0"
+        rocm_env["LD_LIBRARY_PATH"] = f"/opt/rocm-6.2.0/lib:/opt/rocm-6.2.0/lib64:{rocm_env.get('LD_LIBRARY_PATH', '')}"
         
         # 1. Detectar AMD GPUs (rocm-smi)
         try:
-            result = subprocess.run(['rocm-smi', '--showid'], capture_output=True, text=True)
+            result = subprocess.run(['rocm-smi', '--showid'], capture_output=True, text=True, env=rocm_env)
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
                     if "GPU[" in line:  # Más específico para evitar falsos positivos
@@ -63,13 +83,50 @@ class GPUDispatcher:
                                     id=gpu_id,
                                     name=f"AMD GPU {gpu_id}",
                                     type="AMD",
-                                    env_path=".venv_rocm57",
-                                    python_path=".venv_rocm57/bin/python"
+                                    env_path=".venv_rocm62",
+                                    python_path=".venv_rocm62/bin/python"
                                 ))
                         except:
                             pass
+            else:
+                if result.stderr:
+                    print(f"⚠️  rocm-smi falló: {result.stderr.strip()}")
         except FileNotFoundError:
             pass
+        
+        # 1b. Fallback: detectar AMD via PyTorch si rocm-smi no devolvió nada
+        if not any(g.type == "AMD" for g in gpus):
+            try:
+                detect_script = """
+import json
+import torch
+devices = []
+if torch.cuda.is_available():
+    for i in range(torch.cuda.device_count()):
+        devices.append({"id": i, "name": torch.cuda.get_device_name(i)})
+print(json.dumps(devices))
+"""
+                result = subprocess.run(
+                    [".venv_rocm62/bin/python", "-c", detect_script],
+                    capture_output=True,
+                    text=True,
+                    env=rocm_env,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    devices = json.loads(result.stdout.strip())
+                    for dev in devices:
+                        gpus.append(GPUInfo(
+                            id=dev["id"],
+                            name=dev["name"],
+                            type="AMD",
+                            env_path=".venv_rocm62",
+                            python_path=".venv_rocm62/bin/python"
+                        ))
+                else:
+                    if result.stderr:
+                        print(f"⚠️  PyTorch ROCm detection falló: {result.stderr.strip()}")
+            except Exception as e:
+                print(f"⚠️  Error detectando AMD GPUs via PyTorch: {e}")
 
         # 2. Detectar NVIDIA GPUs (nvidia-smi)
         try:
@@ -97,7 +154,7 @@ class GPUDispatcher:
             
         return gpus
 
-    def add_jobs(self, symbols: List[str], timeframes: List[str], target_return: float = 0.005, prediction_horizon: int = 6):
+    def add_jobs(self, symbols: List[str], timeframes: List[str], target_return: float = 0.005, prediction_horizon: int = 6, epochs: int = 200):
         for symbol in symbols:
             for tf in timeframes:
                 # Check if model already exists
@@ -106,26 +163,29 @@ class GPUDispatcher:
                     print(f"⏩ Saltando {symbol} {tf} (Ya existe)")
                     continue
                     
-                self.jobs.put(TrainingJob(
+                job = TrainingJob(
                     symbol=symbol, 
                     timeframe=tf,
                     target_return=target_return,
-                    prediction_horizon=prediction_horizon
-                ))
+                    prediction_horizon=prediction_horizon,
+                    epochs=epochs # Pass epochs to the TrainingJob constructor
+                )
+                self.jobs.put(job) # Use self.jobs.put as it's a Queue
+                print(f"➕ Trabajo añadido: {symbol} {tf} (Epochs: {epochs})")
                 
-    def _run_job(self, gpu: GPUInfo, job: TrainingJob):
+    def _run_job(self, gpu: GPUInfo, job: TrainingJob): # Reverted order to match original
         print(f"🚀 Iniciando {job.symbol} {job.timeframe} en GPU {gpu.id} ({gpu.type})")
         
         # Configurar batch size según GPU
-        batch_size = "96" if gpu.type == "AMD" else "128"
+        batch_size = "96" if gpu.type == "NVIDIA" else "96"  # NVIDIA reducido para estabilidad; AMD mantiene 96
         
         cmd = [
-            gpu.python_path,
+            gpu.python_path, # Use gpu.python_path as it's already available
             "-u",
             "scripts/train_production_ready.py",
             "--symbol", job.symbol,
             "--timeframe", job.timeframe,
-            "--epochs", "200",
+            "--epochs", str(job.epochs), # Use epochs from job object
             "--batch-size", batch_size,
             "--target-return", str(job.target_return),
             "--prediction-horizon", str(job.prediction_horizon),
@@ -137,13 +197,18 @@ class GPUDispatcher:
         
         if gpu.type == "NVIDIA":
             env["CUDA_VISIBLE_DEVICES"] = str(gpu.id)
+            env["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
             
         if gpu.type == "AMD":
             env["HIP_VISIBLE_DEVICES"] = str(gpu.id)
             env["HSA_OVERRIDE_GFX_VERSION"] = "10.3.0"
-            env["LD_LIBRARY_PATH"] = f"/opt/rocm/lib:{env.get('LD_LIBRARY_PATH', '')}"
+            env["LD_LIBRARY_PATH"] = f"/opt/rocm-6.2.0/lib:/opt/rocm-6.2.0/lib64:{env.get('LD_LIBRARY_PATH', '')}"
             env["PYTORCH_HIP_ALLOC_CONF"] = "max_split_size_mb:512"
-            env["MIOPEN_DISABLE_CACHE"] = "0"
+            # MIOpen settings - DISABLED due to gfx1032 incompatibility
+            env["MIOPEN_ENABLE_LOGGING"] = "0"
+            env["MIOPEN_FIND_ENFORCE"] = "5"  # Use fallback implementations
+            env["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "0"
+            env["HSA_ENABLE_SDMA"] = "0"  # Disable SDMA for stability
             
         try:
             log_file = open(f"logs/multi_gpu/{job.symbol}_{job.timeframe}_{gpu.type}_{gpu.id}.log", "w")
@@ -232,16 +297,25 @@ def main():
     parser.add_argument("--timeframes", type=str, required=True, help="Comma separated timeframes")
     parser.add_argument("--target-return", type=float, default=0.005, help="Target return")
     parser.add_argument("--prediction-horizon", type=int, default=6, help="Prediction horizon")
+    parser.add_argument("--epochs", type=int, default=200, help="Número de épocas de entrenamiento")
     
     args = parser.parse_args()
     
     symbols = args.symbols.split(",")
     timeframes = args.timeframes.split(",")
     
-    os.makedirs("logs/multi_gpu", exist_ok=True)
-    
     dispatcher = GPUDispatcher()
-    dispatcher.add_jobs(symbols, timeframes, args.target_return, args.prediction_horizon)
+    
+    # Add jobs
+    dispatcher.add_jobs(
+        symbols, 
+        timeframes, 
+        target_return=args.target_return,
+        prediction_horizon=args.prediction_horizon,
+        epochs=args.epochs
+    )
+    
+    # Start
     dispatcher.run()
 
 if __name__ == "__main__":
