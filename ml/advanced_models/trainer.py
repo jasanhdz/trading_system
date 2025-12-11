@@ -82,7 +82,8 @@ class AdvancedTrainer:
         torch.backends.cudnn.benchmark = False
     
     def load_and_prepare_data(
-        self
+        self,
+        apply_selection: bool = True,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
         """
         Load data and perform feature engineering + selection.
@@ -98,7 +99,7 @@ class AdvancedTrainer:
         print(f"Loaded {len(features)} samples with {len(feature_names)} features")
         
         # Feature selection (if enabled)
-        if self.config.use_feature_selection:
+        if self.config.use_feature_selection and apply_selection:
             print(f"Selecting top {self.config.n_features_to_select} features...")
             self.feature_selector = FeatureSelector(
                 method=self.config.feature_selection_method,
@@ -414,6 +415,7 @@ class AdvancedTrainer:
         features: np.ndarray,
         class_labels: np.ndarray,
         regression_targets: np.ndarray,
+        feature_names: List[str],
         n_splits: int = 5,
         **train_kwargs,
     ) -> List[Dict]:
@@ -446,17 +448,58 @@ class AdvancedTrainer:
             train_features = features[train_idx]
             train_class = class_labels[train_idx]
             
-            val_features = features[val_idx]
-            val_class = class_labels[val_idx]
+            # Add lookback buffer to Val and Test to prevent data loss at boundaries
+            lookback = self.config.sequence_length
             
-            test_features = features[test_idx]
-            test_class = class_labels[test_idx]
+            # Val needs lookback from train
+            val_start_idx = max(0, val_idx[0] - lookback)
+            val_features_buffer = features[val_start_idx : val_idx[-1] + 1]
+            val_class_buffer = class_labels[val_start_idx : val_idx[-1] + 1]
+            val_reg_buffer = regression_targets[val_start_idx : val_idx[-1] + 1]
+            
+            # Test needs lookback from val (or train if val is skipped/empty)
+            test_start_idx = max(0, test_idx[0] - lookback)
+            test_features_buffer = features[test_start_idx : test_idx[-1] + 1]
+            test_class_buffer = class_labels[test_start_idx : test_idx[-1] + 1]
+            test_reg_buffer = regression_targets[test_start_idx : test_idx[-1] + 1]
+            
+            # Feature Selection (Fit on Train ONLY)
+            current_feature_names = feature_names
+            if self.config.use_feature_selection:
+                # Create a new selector for this fold
+                fold_selector = FeatureSelector(
+                    method=self.config.feature_selection_method,
+                    n_features=self.config.n_features_to_select,
+                )
+                
+                # Fit on TRAIN data only
+                # Use a subset if train is too large to speed up
+                sample_size = min(5000, len(train_features))
+                if len(train_features) > sample_size:
+                    sample_idx = np.random.choice(len(train_features), sample_size, replace=False)
+                    fit_features = train_features[sample_idx]
+                    fit_labels = train_class[sample_idx]
+                else:
+                    fit_features = train_features
+                    fit_labels = train_class
+                
+                selected = fold_selector.fit(
+                    fit_features,
+                    fit_labels,
+                    feature_names,
+                )
+                
+                # Transform all sets (including buffers)
+                train_features = fold_selector.transform(train_features)
+                val_features_buffer = fold_selector.transform(val_features_buffer)
+                test_features_buffer = fold_selector.transform(test_features_buffer)
+                current_feature_names = selected
             
             # Scale features (fit on train only)
             scaler = StandardScaler()
             train_features = scaler.fit_transform(train_features)
-            val_features = scaler.transform(val_features)
-            test_features = scaler.transform(test_features)
+            val_features_buffer = scaler.transform(val_features_buffer)
+            test_features_buffer = scaler.transform(test_features_buffer)
             
             # Create datasets
             train_dataset = SequenceDataset(
@@ -470,21 +513,23 @@ class AdvancedTrainer:
             )
             
             val_dataset = SequenceDataset(
-                val_features,
-                val_class,
-                regression_targets[val_idx],
+                val_features_buffer,
+                val_class_buffer,
+                val_reg_buffer,
                 sequence_length=self.config.sequence_length,
                 prediction_horizon=self.config.prediction_horizon,
                 augment=False,
+                start_index=lookback if val_start_idx < val_idx[0] else None, # Only skip if we added buffer
             )
             
             test_dataset = SequenceDataset(
-                test_features,
-                test_class,
-                regression_targets[test_idx],
+                test_features_buffer,
+                test_class_buffer,
+                test_reg_buffer,
                 sequence_length=self.config.sequence_length,
                 prediction_horizon=self.config.prediction_horizon,
                 augment=False,
+                start_index=lookback if test_start_idx < test_idx[0] else None, # Only skip if we added buffer
             )
             
             # Create data loaders
@@ -514,6 +559,9 @@ class AdvancedTrainer:
                 class_weights = torch.from_numpy((inv_weights / inv_weights.mean()).astype(np.float32))
             else:
                 class_weights = None
+            
+            # Update selected features for this fold so the model knows the input dimension
+            self.selected_features = current_feature_names
             
             # Train model using VALIDATION set for early stopping
             model, history = self.train_single_model(

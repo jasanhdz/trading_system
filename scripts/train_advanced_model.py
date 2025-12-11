@@ -168,7 +168,8 @@ def main(
     )
     
     # Load and prepare data
-    features, class_labels, regression_targets, feature_names = trainer.load_and_prepare_data()
+    # Load and prepare data (RAW, no selection yet)
+    features, class_labels, regression_targets, feature_names = trainer.load_and_prepare_data(apply_selection=False)
     
     print(f"\nDataset Summary:")
     print(f"  Total Samples: {len(features)}")
@@ -185,6 +186,7 @@ def main(
             features,
             class_labels,
             regression_targets,
+            feature_names=feature_names,
             n_splits=n_folds,
             epochs=epochs,
             lr=lr,
@@ -247,60 +249,130 @@ def main(
         print("="*80 + "\n")
     
     # Train final model(s)
-    # Scale features
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
+    # Split into train/val/test (chronological) BEFORE scaling/selection
+    n_samples = len(features)
+    train_end = int(n_samples * 0.7)
+    valid_end = int(n_samples * 0.85)
     
-    # Create dataset
-    dataset = SequenceDataset(
-        features_scaled,
-        class_labels,
-        regression_targets,
+    print(f"Final Split Indices:")
+    print(f"  Train: 0 - {train_end}")
+    print(f"  Valid: {train_end} - {valid_end}")
+    print(f"  Test: {valid_end} - {n_samples}\n")
+    
+    # Split raw data with lookback buffer for val/test to ensure continuity
+    # We need 'sequence_length' previous samples to make the first prediction of the new set
+    lookback = sequence_length
+    
+    X_train = features[:train_end]
+    y_train_cls = class_labels[:train_end]
+    y_train_reg = regression_targets[:train_end]
+    
+    # Val needs lookback from train
+    val_start_idx = max(0, train_end - lookback)
+    X_val = features[val_start_idx:valid_end]
+    y_val_cls = class_labels[val_start_idx:valid_end]
+    y_val_reg = regression_targets[val_start_idx:valid_end]
+    
+    # Test needs lookback from val
+    test_start_idx = max(0, valid_end - lookback)
+    X_test = features[test_start_idx:]
+    y_test_cls = class_labels[test_start_idx:]
+    y_test_reg = regression_targets[test_start_idx:]
+    
+    # Feature Selection (Fit on Train ONLY)
+    if feature_selection:
+        print("Performing feature selection on training set...")
+        trainer.feature_selector = FeatureSelector(
+            method=dataset_config.feature_selection_method,
+            n_features=dataset_config.n_features_to_select,
+        )
+        
+        # Fit on train
+        sample_size = min(10000, len(X_train))
+        if len(X_train) > sample_size:
+            idx = np.random.choice(len(X_train), sample_size, replace=False)
+            fit_X = X_train[idx]
+            fit_y = y_train_cls[idx]
+        else:
+            fit_X = X_train
+            fit_y = y_train_cls
+            
+        trainer.selected_features = trainer.feature_selector.fit(fit_X, fit_y, feature_names)
+        print(f"Selected {len(trainer.selected_features)} features")
+        
+        # Transform all
+        X_train = trainer.feature_selector.transform(X_train)
+        X_val = trainer.feature_selector.transform(X_val)
+        X_test = trainer.feature_selector.transform(X_test)
+    else:
+        trainer.selected_features = feature_names
+
+    # Scale features (Fit on Train ONLY)
+    print("Scaling features (fit on train)...")
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_val = scaler.transform(X_val)
+    X_test = scaler.transform(X_test)
+    
+    # Create datasets (Separate datasets for strict isolation)
+    train_dataset = SequenceDataset(
+        X_train,
+        y_train_cls,
+        y_train_reg,
         sequence_length=sequence_length,
         prediction_horizon=horizon,
         augment=dataset_config.use_augmentation,
         augmentation_noise=dataset_config.augmentation_noise,
     )
     
-    # Split into train/val/test (chronological)
-    n_samples = len(dataset)
-    train_end = int(n_samples * 0.7)
-    valid_end = int(n_samples * 0.85)
+    valid_dataset = SequenceDataset(
+        X_val,
+        y_val_cls,
+        y_val_reg,
+        sequence_length=sequence_length,
+        prediction_horizon=horizon,
+        augment=False,
+        start_index=lookback,  # Skip buffer, start predicting at first real val sample
+    )
     
-    train_indices = list(range(0, train_end))
-    valid_indices = list(range(train_end, valid_end))
-    test_indices = list(range(valid_end, n_samples))
+    test_dataset = SequenceDataset(
+        X_test,
+        y_test_cls,
+        y_test_reg,
+        sequence_length=sequence_length,
+        prediction_horizon=horizon,
+        augment=False,
+        start_index=lookback,  # Skip buffer, start predicting at first real test sample
+    )
     
-    print(f"Final Split:")
-    print(f"  Train: {len(train_indices)} samples")
-    print(f"  Valid: {len(valid_indices)} samples")
-    print(f"  Test: {len(test_indices)} samples\n")
+    print(f"Datasets created (Effective samples excluding buffer):")
+    print(f"  Train samples: {len(train_dataset)}")
+    print(f"  Valid samples: {len(valid_dataset)} (Buffer size: {lookback})")
+    print(f"  Test samples: {len(test_dataset)} (Buffer size: {lookback})\n")
     
     # Create data loaders
-    from torch.utils.data import SubsetRandomSampler
-    
     train_loader = DataLoader(
-        dataset,
+        train_dataset,
         batch_size=batch_size,
-        sampler=SubsetRandomSampler(train_indices),
+        shuffle=True, # Shuffle train
+        drop_last=True,
     )
     
     valid_loader = DataLoader(
-        dataset,
+        valid_dataset,
         batch_size=batch_size,
-        sampler=SubsetRandomSampler(valid_indices),
+        shuffle=False,
     )
     
     test_loader = DataLoader(
-        dataset,
+        test_dataset,
         batch_size=batch_size,
-        sampler=SubsetRandomSampler(test_indices),
+        shuffle=False,
     )
     
     # Compute class weights
-    valid_index_array = np.array(dataset.valid_indices)
-    train_labels = class_labels[valid_index_array[train_indices]]
-    class_counts = np.bincount(train_labels, minlength=3)
+    # Use y_train_cls directly since we have it separated
+    class_counts = np.bincount(y_train_cls, minlength=3)
     if (class_counts > 0).all():
         inv_weights = class_counts.sum() / class_counts
         class_weights = torch.from_numpy((inv_weights / inv_weights.mean()).astype(np.float32))

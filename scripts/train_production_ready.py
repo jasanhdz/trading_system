@@ -22,6 +22,20 @@ import json
 import torch
 import torch.nn as nn
 import numpy as np
+import random
+import os
+
+def set_seed(seed=42):
+    """Fija las semillas para reproducibilidad."""
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"🌱 Semillas fijadas en {seed}")
 
 # Mixed precision - compatible con ROCm y CUDA
 try:
@@ -45,29 +59,11 @@ from utils.logger import setup_logger
 
 logger = setup_logger("production_trainer")
 
-MODEL_DIR = (REPO_ROOT / "models" / "advanced").resolve()
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_DIR_DEFAULT = (REPO_ROOT / "models" / "advanced").resolve()
+MODEL_DIR_DEFAULT.mkdir(parents=True, exist_ok=True)
 
 
-class FocalLoss(nn.Module):
-    """
-    Focal Loss para manejar desbalanceo de clases.
-
-    Mejor que class weighting porque reduce la importancia de
-    ejemplos fáciles y se enfoca en ejemplos difíciles.
-    """
-
-    def __init__(self, alpha=0.25, gamma=2.0, num_classes=3):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.num_classes = num_classes
-
-    def forward(self, inputs, targets):
-        ce_loss = nn.functional.cross_entropy(inputs, targets, reduction='none')
-        pt = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
-        return focal_loss.mean()
+# FocalLoss local definition removed to use the one in ml.advanced_models.temporal_model
 
 
 class CosineWarmupScheduler:
@@ -99,10 +95,19 @@ def evaluate_model(model, dataloader, device_obj, criterion):
     model.eval()
     all_preds = []
     all_labels = []
+    all_returns = [] # Para PnL (Targets)
+    all_reg_preds = [] # Para MSE/MAE (Predicciones)
     total_loss = 0.0
 
     with torch.no_grad():
-        for batch_seq, batch_labels in dataloader:
+        for batch in dataloader:
+            if len(batch) == 3:
+                batch_seq, batch_labels, batch_reg = batch
+                batch_reg = batch_reg.to(device_obj)
+            else:
+                batch_seq, batch_labels = batch
+                batch_reg = None
+
             batch_seq = batch_seq.to(device_obj)
             batch_labels = batch_labels.squeeze(-1).to(device_obj)
 
@@ -111,7 +116,7 @@ def evaluate_model(model, dataloader, device_obj, criterion):
                 outputs['logits'],
                 batch_labels,
                 outputs.get('regression'),
-                None,
+                batch_reg,
             )
 
             total_loss += loss.item()
@@ -121,6 +126,11 @@ def evaluate_model(model, dataloader, device_obj, criterion):
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(batch_labels.cpu().numpy())
+            
+            if batch_reg is not None:
+                all_returns.extend(batch_reg.cpu().numpy())
+                if 'regression' in outputs:
+                    all_reg_preds.extend(outputs['regression'].cpu().numpy().flatten())
 
     avg_loss = total_loss / len(dataloader)
 
@@ -137,21 +147,60 @@ def evaluate_model(model, dataloader, device_obj, criterion):
     per_class_precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
     per_class_recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
 
+    # Métricas de Trading (Implied PnL)
+    # Asumimos que si predice Long (1) compramos, Short (2) vendemos, Neutral (0) nada.
+    # Usamos los retornos reales (regression targets) para calcular el resultado.
+    pnl_metrics = {}
+    if len(all_returns) > 0:
+        all_returns = np.array(all_returns)
+        all_preds = np.array(all_preds)
+        
+        # PnL Longs
+        long_mask = (all_preds == 1)
+        long_pnl = np.sum(all_returns[long_mask])
+        
+        # PnL Shorts (retorno inverso)
+        short_mask = (all_preds == 2)
+        short_pnl = np.sum(-all_returns[short_mask])
+        
+        total_pnl = long_pnl + short_pnl
+        
+        pnl_metrics = {
+            'total_pnl': total_pnl,
+            'long_pnl': long_pnl,
+            'short_pnl': short_pnl,
+            'long_count': np.sum(long_mask),
+            'short_count': np.sum(short_mask)
+        }
+
+    # Métricas de Regresión
+    reg_metrics = {}
+    if len(all_returns) > 0 and len(all_reg_preds) > 0:
+        # Asegurar que tengan la misma longitud
+        min_len = min(len(all_returns), len(all_reg_preds))
+        y_true = np.array(all_returns[:min_len])
+        y_pred = np.array(all_reg_preds[:min_len])
+        
+        from sklearn.metrics import mean_squared_error, mean_absolute_error
+        mse = mean_squared_error(y_true, y_pred)
+        mae = mean_absolute_error(y_true, y_pred)
+        
+        reg_metrics = {
+            'mse': mse,
+            'mae': mae
+        }
+
     metrics = {
         'loss': avg_loss,
         'accuracy': accuracy,
         'macro_f1': macro_f1,
         'macro_precision': macro_precision,
         'macro_recall': macro_recall,
-        'neutral_f1': per_class_f1[0],
-        'long_f1': per_class_f1[1],
-        'short_f1': per_class_f1[2],
-        'neutral_precision': per_class_precision[0],
-        'long_precision': per_class_precision[1],
-        'short_precision': per_class_precision[2],
-        'neutral_recall': per_class_recall[0],
-        'long_recall': per_class_recall[1],
-        'short_recall': per_class_recall[2],
+        'neutral_f1': per_class_f1[0] if len(per_class_f1) > 0 else 0,
+        'long_f1': per_class_f1[1] if len(per_class_f1) > 1 else 0,
+        'short_f1': per_class_f1[2] if len(per_class_f1) > 2 else 0,
+        **pnl_metrics,
+        **reg_metrics
     }
 
     return metrics, all_preds, all_labels
@@ -269,36 +318,15 @@ def train_production_model(
     logger.info(f"✓ Dataset: {len(features)} muestras, {len(feature_names)} features")
     logger.info(f"✓ Features incluyen régimen de mercado: {len(feature_names)} totales")
 
-    # Feature selection
+    # Feature selection y Scaling se mueven DENTRO del loop de folds para evitar leakage
     from ml.advanced_models.dataset import FeatureSelector
-
-    if config.use_feature_selection and len(feature_names) > config.n_features_to_select:
-        logger.info(f"🎯 Seleccionando top {config.n_features_to_select} features...")
-        selector = FeatureSelector(
-            method=config.feature_selection_method,
-            n_features=config.n_features_to_select,
-        )
-
-        sample_idx = np.random.choice(len(features), min(10000, len(features)), replace=False)
-        selected_features = selector.fit(features[sample_idx], class_labels[sample_idx], feature_names)
-        features = selector.transform(features)
-        feature_names = selected_features
-
-        logger.info(f"✓ Features seleccionadas: {len(feature_names)}")
-
-        # Guardar selector
-        if save_dir:
-            import joblib
-            joblib.dump(selector, save_dir / "feature_selector.pkl")
-
-    # Escalar features
-    logger.info("⚙️  Escalando features...")
-    scaler = StandardScaler()
-    features = scaler.fit_transform(features)
-
-    if save_dir:
-        import joblib
-        joblib.dump(scaler, save_dir / "scaler.pkl")
+    
+    # Solo inicializamos el selector si se va a usar, pero el fit se hace por fold
+    feature_selector_class = FeatureSelector if config.use_feature_selection else None
+    
+    # Guardar features originales para referencia
+    original_features = features.copy()
+    original_feature_names = feature_names.copy()
 
     # Walk-forward splits CON VALIDACIÓN
     logger.info("📈 Creando walk-forward splits con validación...")
@@ -320,18 +348,72 @@ def train_production_model(
         logger.info(f"{'='*70}")
         logger.info(f"  Train: {len(train_idx)} | Val: {len(val_idx)} | Test: {len(test_idx)}")
 
-        # Split data
-        train_features = features[train_idx]
-        train_labels = class_labels[train_idx]
-        val_features = features[val_idx]
-        val_labels = class_labels[val_idx]
-        test_features = features[test_idx]
-        test_labels = class_labels[test_idx]
+        # --- PREPROCESAMIENTO POR FOLD (SIN LEAKAGE) ---
+        
+        # 1. Feature Selection
+        current_train_features = features[train_idx]
+        current_train_labels = class_labels[train_idx]
+        
+        current_val_features = features[val_idx]
+        current_test_features = features[test_idx]
+        
+        current_feature_names = original_feature_names
+        
+        if feature_selector_class and len(original_feature_names) > config.n_features_to_select:
+            logger.info(f"  🎯 Seleccionando features (Fold {fold_idx})...")
+            selector = feature_selector_class(
+                method=config.feature_selection_method,
+                n_features=config.n_features_to_select,
+            )
+            
+            # Fit solo en TRAIN
+            # Usar una muestra si es muy grande para acelerar
+            sample_size = min(20000, len(current_train_features))
+            sample_idx_sel = np.random.choice(len(current_train_features), sample_size, replace=False)
+            
+            selected_names = selector.fit(
+                current_train_features[sample_idx_sel], 
+                current_train_labels[sample_idx_sel], 
+                original_feature_names
+            )
+            
+            # Transformar todos
+            current_train_features = selector.transform(current_train_features)
+            current_val_features = selector.transform(current_val_features)
+            current_test_features = selector.transform(current_test_features)
+            
+            current_feature_names = selected_names
+            
+            # Guardar selector del fold
+            if save_dir:
+                import joblib
+                joblib.dump(selector, save_dir / f"feature_selector_fold{fold_idx}.pkl")
+
+        # 2. Scaling
+        logger.info(f"  ⚙️  Escalando features (Fold {fold_idx})...")
+        scaler = StandardScaler()
+        
+        # Fit solo en TRAIN
+        current_train_features = scaler.fit_transform(current_train_features)
+        
+        # Transform en VAL y TEST
+        current_val_features = scaler.transform(current_val_features)
+        current_test_features = scaler.transform(current_test_features)
+        
+        if save_dir:
+            import joblib
+            joblib.dump(scaler, save_dir / f"scaler_fold{fold_idx}.pkl")
+
+        # Preparar targets de regresión
+        train_reg = regression_targets[train_idx] if regression_targets is not None else None
+        val_reg = regression_targets[val_idx] if regression_targets is not None else None
+        test_reg = regression_targets[test_idx] if regression_targets is not None else None
 
         # Crear datasets
         train_dataset = SequenceDataset(
-            train_features,
-            train_labels.reshape(-1, 1),
+            current_train_features,
+            class_labels[train_idx].reshape(-1, 1),
+            train_reg,
             sequence_length=config.sequence_length,
             prediction_horizon=config.prediction_horizon,
             augment=True,
@@ -339,16 +421,18 @@ def train_production_model(
         )
 
         val_dataset = SequenceDataset(
-            val_features,
-            val_labels.reshape(-1, 1),
+            current_val_features,
+            class_labels[val_idx].reshape(-1, 1),
+            val_reg,
             sequence_length=config.sequence_length,
             prediction_horizon=config.prediction_horizon,
             augment=False,
         )
 
         test_dataset = SequenceDataset(
-            test_features,
-            test_labels.reshape(-1, 1),
+            current_test_features,
+            class_labels[test_idx].reshape(-1, 1),
+            test_reg,
             sequence_length=config.sequence_length,
             prediction_horizon=config.prediction_horizon,
             augment=False,
@@ -380,8 +464,9 @@ def train_production_model(
         )
 
         # Crear modelo profundo optimizado
+        # Importante: input_dim depende de las features seleccionadas en ESTE fold
         model = DeepTemporalNet(
-            input_dim=features.shape[1],
+            input_dim=current_train_features.shape[1],
             sequence_length=config.sequence_length,
             **model_config,
         ).to(device_obj)
@@ -389,28 +474,38 @@ def train_production_model(
         logger.info(f"🧠 Modelo: {sum(p.numel() for p in model.parameters()):,} parámetros")
 
         # Loss y optimizer
-        if use_focal_loss:
-            classification_criterion = FocalLoss(alpha=0.25, gamma=2.0, num_classes=3).to(device_obj)
-            logger.info("✓ Usando Focal Loss para clasificación")
+        # Calcular pesos de clase dinámicos para este fold
+        train_labels = class_labels[train_idx].flatten()
+        class_counts = np.bincount(train_labels, minlength=3)
+        total_samples = len(train_labels)
+        logger.info(f"  ⚖️  Distribución de clases: {class_counts} (Total: {total_samples})")
+        
+        if (class_counts > 0).all():
+            # Inverse frequency weights
+            weights = total_samples / (3 * class_counts)
+            # Normalize to sum to 3 (or mean 1)
+            weights = weights / weights.mean()
+            class_weights_tensor = torch.from_numpy(weights.astype(np.float32)).to(device_obj)
+            logger.info(f"  ⚖️  Pesos calculados: {weights}")
         else:
-            # Class weights tradicional
-            class_counts = np.bincount(train_labels, minlength=3)
-            if (class_counts > 0).all():
-                inv_weights = class_counts.sum() / class_counts
-                class_weights = torch.from_numpy(
-                    (inv_weights / inv_weights.mean()).astype(np.float32)
-                ).to(device_obj)
-            else:
-                class_weights = None
+            logger.warning("  ⚠️  Clases faltantes en train set, usando pesos uniformes")
+            class_weights_tensor = None
 
-            classification_criterion = nn.CrossEntropyLoss(weight=class_weights).to(device_obj)
-
+        # Inicializar MultiTaskLoss con pesos y Focal Loss
         criterion = MultiTaskLoss(
-            class_weights=None,  # Ya está en classification_criterion
+            class_weights=class_weights_tensor if use_focal_loss else None, 
             classification_weight=1.0,
             regression_weight=0.2,
-        ).to(device_obj)  # Mover criterion a GPU
-        criterion.classification_criterion = classification_criterion
+            focal_gamma=2.0
+        ).to(device_obj)
+        
+        # Si NO usamos focal loss pero sí pesos, necesitamos configurar CrossEntropy manualmente
+        # Pero MultiTaskLoss usa FocalLoss por defecto.
+        # Si queremos standard CE, tendríamos que modificar MultiTaskLoss o pasar gamma=0?
+        # Por ahora asumimos que use_focal_loss=True es lo deseado para "Institutional".
+        if not use_focal_loss:
+             # Fallback a CE standard si se solicita explícitamente no usar Focal
+             criterion.classification_criterion = nn.CrossEntropyLoss(weight=class_weights_tensor).to(device_obj)
 
         optimizer = torch.optim.AdamW(
             model.parameters(),
@@ -444,7 +539,14 @@ def train_production_model(
             model.train()
             train_loss = 0.0
 
-            for batch_seq, batch_labels in train_loader:
+            for batch in train_loader:
+                if len(batch) == 3:
+                    batch_seq, batch_labels, batch_reg = batch
+                    batch_reg = batch_reg.to(device_obj)
+                else:
+                    batch_seq, batch_labels = batch
+                    batch_reg = None
+
                 batch_seq = batch_seq.to(device_obj)
                 batch_labels = batch_labels.squeeze(-1).to(device_obj)
 
@@ -464,7 +566,7 @@ def train_production_model(
                             outputs['logits'],
                             batch_labels,
                             outputs.get('regression'),
-                            None,
+                            batch_reg,
                         )
 
                     scaler_amp.scale(loss).backward()
@@ -478,7 +580,7 @@ def train_production_model(
                         outputs['logits'],
                         batch_labels,
                         outputs.get('regression'),
-                        None,
+                        batch_reg,
                     )
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
@@ -531,6 +633,8 @@ def train_production_model(
         logger.info(f"  Best Val F1: {best_val_f1:.4f} (epoch {best_epoch+1})")
         logger.info(f"  Test Accuracy: {test_metrics['accuracy']:.4f}")
         logger.info(f"  Test Macro F1: {test_metrics['macro_f1']:.4f}")
+        if 'mse' in test_metrics:
+            logger.info(f"  Test MSE: {test_metrics['mse']:.6f} | MAE: {test_metrics['mae']:.6f}")
         logger.info(f"  Long F1: {test_metrics['long_f1']:.4f}")
         logger.info(f"  Short F1: {test_metrics['short_f1']:.4f}")
 
@@ -539,6 +643,7 @@ def train_production_model(
             'best_val_f1': best_val_f1,
             'best_epoch': best_epoch,
             'test_metrics': {k: float(v) for k, v in test_metrics.items()},
+            'selected_features': current_feature_names, # Guardar features de este fold
         }
         all_fold_results.append(fold_result)
 
@@ -573,6 +678,8 @@ def train_production_model(
 @click.option("--hidden-dim", default=192, help="LSTM hidden dimension")
 @click.option("--lstm-layers", default=3, help="Number of LSTM layers")
 @click.option("--dropout", default=0.35, help="Dropout rate")
+@click.option("--model-dir", default=None, help="Custom model directory (for sweeps)")
+@click.option("--seed", default=42, show_default=True, help="Random seed")
 def main(
     symbol: str,
     timeframe: str,
@@ -587,12 +694,17 @@ def main(
     hidden_dim: int,
     lstm_layers: int,
     dropout: float,
+    model_dir: str,
+    seed: int,
 ):
     """Entrena modelo mejorado para producción."""
 
     print("\n" + "="*80)
-    print("🚀 ENTRENAMIENTO MEJORADO PARA PRODUCCIÓN")
+    print("🚀 ENTRENAMIENTO MEJORADO PARA PRODUCCIÓN (INSTITUTIONAL GRADE)")
     print("="*80 + "\n")
+    
+    # Fijar seed
+    set_seed(seed)
 
     # Check GPU
     if device == "cuda":
@@ -649,8 +761,9 @@ def main(
     }
 
     # Directorio de guardado
-    save_dir = MODEL_DIR / symbol / timeframe
-    save_dir.mkdir(parents=True, exist_ok=True)
+    base_dir = Path(model_dir).resolve() if model_dir else MODEL_DIR_DEFAULT / symbol / timeframe
+    base_dir.mkdir(parents=True, exist_ok=True)
+    save_dir = base_dir
 
     # Entrenar
     results, feature_names = train_production_model(

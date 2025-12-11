@@ -394,7 +394,10 @@ class MultiTaskLoss(nn.Module):
         
         # Regression loss (if provided)
         if regression_output is not None and regression_targets is not None:
-            reg_loss = self.regression_criterion(regression_output.squeeze(), regression_targets)
+            # Alinear shapes para evitar broadcasting (batch, ) en ambas tensores
+            reg_out = regression_output.view(-1)
+            reg_tgt = regression_targets.view(-1)
+            reg_loss = self.regression_criterion(reg_out, reg_tgt)
             weighted_reg_loss = self.regression_weight * reg_loss / (2 * torch.exp(self.log_var_reg)) + self.log_var_reg / 2
             
             total_loss = total_loss + weighted_reg_loss

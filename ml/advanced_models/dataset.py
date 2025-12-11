@@ -64,6 +64,7 @@ class SequenceDataset(Dataset):
         prediction_horizon: int = 12,
         augment: bool = False,
         augmentation_noise: float = 0.01,
+        start_index: Optional[int] = None,
     ):
         if features.shape[0] != class_labels.shape[0]:
             raise ValueError(
@@ -76,17 +77,30 @@ class SequenceDataset(Dataset):
                 f"(got {features.shape[0]} vs {regression_targets.shape[0]})"
             )
         
-        self.features = features
-        self.class_labels = class_labels
-        self.regression_targets = regression_targets
         self.sequence_length = sequence_length
         self.prediction_horizon = prediction_horizon
         self.augment = augment
         self.augmentation_noise = augmentation_noise
         
-        # Need enough lookback history for each sample; labels are already aligned.
+        # Convert to torch tensors
+        self.features = torch.FloatTensor(features)
+        self.class_labels = torch.LongTensor(class_labels)
+        
+        if regression_targets is not None:
+            self.regression_targets = torch.FloatTensor(regression_targets)
+        else:
+            self.regression_targets = None
+            
+        # Create valid indices list
+        # We can only start predicting when we have enough history
+        # If start_index is provided (e.g. to skip buffer), use it
+        start = start_index if start_index is not None else (sequence_length - 1)
+        
+        # Ensure start is at least sequence_length - 1
+        start = max(start, sequence_length - 1)
+        
         self.valid_indices = list(range(
-            sequence_length - 1,
+            start,
             len(features)
         ))
         
@@ -99,7 +113,7 @@ class SequenceDataset(Dataset):
         # Get sequence (lookback window)
         start_idx = actual_idx - self.sequence_length + 1
         end_idx = actual_idx + 1
-        sequence = self.features[start_idx:end_idx].copy()
+        sequence = self.features[start_idx:end_idx].clone() # Use clone() for tensors
         
         # Targets are already aligned with `actual_idx`
         class_label = self.class_labels[actual_idx]
@@ -109,17 +123,17 @@ class SequenceDataset(Dataset):
         
         # Data augmentation (add small noise)
         if self.augment and np.random.rand() < 0.5:
-            noise = np.random.normal(0, self.augmentation_noise, sequence.shape)
+            noise = torch.randn_like(sequence) * self.augmentation_noise
             sequence = sequence + noise
         
-        # Convert to tensors
-        sequence_tensor = torch.from_numpy(sequence.astype(np.float32))
-        class_tensor = torch.tensor(class_label, dtype=torch.long)
+        # Already tensors
+        sequence_tensor = sequence.float()
+        class_tensor = class_label.long()
         
         if regression_value is None:
             return sequence_tensor, class_tensor
         
-        regression_tensor = torch.tensor(regression_value, dtype=torch.float32)
+        regression_tensor = regression_value.float()
         return sequence_tensor, class_tensor, regression_tensor
 
 

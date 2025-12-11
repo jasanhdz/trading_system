@@ -162,12 +162,10 @@ class MLProbabilityStrategy(Strategy):
         device = getattr(config, "ML_MODEL_DEVICE", "cpu")
 
         if is_advanced:
-            feature_selector_path = meta_path.parent / "feature_selector.pkl"
             predictor = AdvancedPredictor(
                 model_path=model_path,
                 scaler_path=scaler_path,
                 meta_path=meta_path,
-                feature_selector_path=feature_selector_path if feature_selector_path.exists() else None,
                 device=device,
             )
         else:

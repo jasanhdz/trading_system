@@ -21,6 +21,12 @@ LEGACY_MODELS_ROOT = (REPO_ROOT / "models" / "trained").resolve()
 
 if ADVANCED_MODELS_ROOT.exists():
     os.environ.setdefault("ML_MODELS_ROOT", str(ADVANCED_MODELS_ROOT))
+    # Preselecciona el mejor modelo BTCUSDT 15m (fast/best) si no se ha configurado explicitamente.
+    # Permite cargar directamente la carpeta de folds (best_model_fold*.pt) con sus scalers.
+    os.environ.setdefault(
+        "ML_SYMBOL_MODELS",
+        "BTCUSDT@15m=BTCUSDT/15m/BTCUSDT_15m_tr0.002_ph6_hd192_dr0.35_lr0.0003",
+    )
 elif "ML_MODELS_ROOT" not in os.environ and LEGACY_MODELS_ROOT.exists():
     os.environ["ML_MODELS_ROOT"] = str(LEGACY_MODELS_ROOT)
 
@@ -268,12 +274,16 @@ async def probability_endpoint(request: ProbabilityRequest) -> ProbabilityRespon
     signature = tuple(
         (tf, candles[-1].close_time, len(candles)) for tf, candles in sorted(candles_by_timeframe.items())
     )
-
-    cache_key = (symbol_cfg.symbol, primary_timeframe)
-    if not request.force_refresh:
-        cached = CACHE.get(cache_key)
-        if cached and cached.signature == signature:
-            return cached.payload
+    if LOGGER._logger.isEnabledFor(logging.DEBUG):
+        LOGGER.debug(
+            "ml_request_signature",
+            {
+                "symbol": symbol_cfg.symbol,
+                "primary_tf": primary_timeframe,
+                "signature": signature,
+                "last_close": {tf: candles[-1].close for tf, candles in candles_by_timeframe.items()},
+            },
+        )
 
     probabilities = compute_multi_timeframe_probabilities(
         strategy=STRATEGY,
@@ -304,7 +314,6 @@ async def probability_endpoint(request: ProbabilityRequest) -> ProbabilityRespon
         probabilities=timeframe_payload,
     )
 
-    CACHE[cache_key] = CacheEntry(signature=signature, payload=response)
     return response
 
 
