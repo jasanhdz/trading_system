@@ -16,6 +16,7 @@ import pandas as pd
 import torch
 
 from ml.nn_pattern.features import build_feature_frame
+from .temporal_model import AdvancedTemporalNet
 from .improved_architecture import DeepTemporalNet
 from .temporal_model import EnsembleModel
 
@@ -80,23 +81,37 @@ class AdvancedPredictor:
              raise ValueError(f"Model path must be a directory containing fold models: {self.model_path}")
 
         fold_files = sorted(list(self.model_path.glob("best_model_fold*.pt")))
+        
+        # Fallback: Check for single model.pt
         if not fold_files:
-            raise FileNotFoundError(f"No 'best_model_fold*.pt' files found in {self.model_path}")
+            single_model = self.model_path / "model.pt"
+            if single_model.exists():
+                logger.info(f"No fold models found, loading single model: {single_model.name}")
+                fold_files = [single_model]
+            else:
+                raise FileNotFoundError(f"No 'best_model_fold*.pt' or 'model.pt' found in {self.model_path}")
 
-        logger.info(f"Found {len(fold_files)} fold models for ensemble: {[f.name for f in fold_files]}")
+        logger.info(f"Found {len(fold_files)} model(s) for ensemble")
         
         pipelines = []
         
         for fold_file in fold_files:
-            # Extract fold index from filename (e.g., best_model_fold0.pt -> 0)
-            try:
-                fold_idx = int(fold_file.stem.replace("best_model_fold", ""))
-            except ValueError:
-                logger.warning(f"Could not extract fold index from {fold_file.name}, skipping.")
-                continue
+            # Determine scaler/selector files
+            if fold_file.name == "model.pt":
+                # Single model mode
+                scaler_file = self.model_path / "scaler.pkl"
+                selector_file = self.model_path / "feature_selector.pkl"
+            else:
+                # Ensemble mode
+                try:
+                    fold_idx = int(fold_file.stem.replace("best_model_fold", ""))
+                    scaler_file = self.model_path / f"scaler_fold{fold_idx}.pkl"
+                    selector_file = self.model_path / f"feature_selector_fold{fold_idx}.pkl"
+                except ValueError:
+                    logger.warning(f"Could not extract fold index from {fold_file.name}, skipping.")
+                    continue
 
-            # Load Scaler for this fold
-            scaler_file = self.model_path / f"scaler_fold{fold_idx}.pkl"
+            # Load Scaler
             if not scaler_file.exists():
                 # Fallback to global scaler if per-fold not found (backward compatibility)
                 if self.scaler_path.exists():
@@ -107,7 +122,6 @@ class AdvancedPredictor:
                 scaler = joblib.load(scaler_file)
 
             # Load Selector for this fold
-            selector_file = self.model_path / f"feature_selector_fold{fold_idx}.pkl"
             selector = None
             if selector_file.exists():
                 selector = joblib.load(selector_file)
@@ -123,14 +137,44 @@ class AdvancedPredictor:
                 # If no selector, assume all features in scaler are used
                 input_dim = scaler.mean_.shape[0]
 
-            # Load Model
+            # Load Checkpoint first to inspect architecture
             checkpoint = torch.load(fold_file, map_location=self.device)
-            model = DeepTemporalNet(
-                input_dim=input_dim,
-                sequence_length=self.sequence_length,
-                **self.model_config,
-            )
+            state_dict = checkpoint['model_state_dict'] if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint else checkpoint
             
+            # Detect Architecture Type
+            if any("input_proj" in k for k in state_dict.keys()):
+                # It's DeepTemporalNet
+                ModelClass = DeepTemporalNet
+                logger.info(f"Detected DeepTemporalNet architecture for {fold_file.name}")
+            else:
+                # It's AdvancedTemporalNet
+                ModelClass = AdvancedTemporalNet
+                logger.info(f"Detected AdvancedTemporalNet architecture for {fold_file.name}")
+
+            # Instantiate Model
+            if ModelClass == AdvancedTemporalNet:
+                 # Logic for AdvancedTemporalNet regression dim
+                reg_out_dim = 1
+                for key, tensor in state_dict.items():
+                    if "regressor.3.weight" in key:
+                        reg_out_dim = tensor.shape[0]
+                        break
+                
+                model = ModelClass(
+                    input_dim=input_dim,
+                    sequence_length=self.sequence_length,
+                    regression_output_dim=reg_out_dim,
+                    **self.model_config,
+                )
+            else:
+                # DeepTemporalNet
+                # Filter config for DeepTemporalNet if necessary, but it handles kwargs well
+                model = ModelClass(
+                    input_dim=input_dim,
+                    sequence_length=self.sequence_length,
+                    **self.model_config,
+                )
+
             if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
                 model.load_state_dict(checkpoint['model_state_dict'])
             else:
@@ -180,7 +224,7 @@ class AdvancedPredictor:
                 # Selector expects (n_samples, n_features), sequence is (seq_len, n_features)
                 # But here we have (seq_len, n_features), so we transform directly
                 seq_processed = selector.transform(seq_processed)
-                
+            
             # 2. Scale
             seq_processed = scaler.transform(seq_processed)
             
@@ -215,6 +259,7 @@ class AdvancedPredictor:
         result['confidence'] = float(avg_probs[direction_idx])
         
         return result
+
     def predict_batch(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
         """
         Predict for multiple sequences at once (e.g. backtesting).
@@ -332,19 +377,27 @@ class AdvancedPredictor:
         # En nuestro script actual, 'feature_names' guardado en meta son las features ORIGINALES antes de selección per-fold.
         # Por tanto, debemos asegurar que el dataframe tenga esas columnas.
         
-        required_features = self.selected_features # Estas son las features base que espera el selector
-        missing_features = set(required_features) - set(feature_frame.columns)
-        
-        if missing_features:
-            # A veces build_feature_frame genera nombres ligeramente distintos o el orden importa
-            # Si faltan muchas, es un error.
-            raise ValueError(
-                f"Missing required features: {list(missing_features)[:5]}... "
-                f"Available features: {list(feature_frame.columns[:10])}..."
-            )
-        
-        # Select features in correct order (the order expected by the selector/scaler)
-        features = feature_frame[required_features].values
+        # Determine if we should filter features or pass all
+        # If we have a selector, we assume it expects ALL features generated by build_feature_frame
+        has_selector = False
+        if hasattr(self, 'ensemble_pipelines') and self.ensemble_pipelines:
+            if self.ensemble_pipelines[0].get('selector'):
+                has_selector = True
+                
+        if has_selector:
+            # Pass all features
+            features = feature_frame.values
+        else:
+            # Filter by selected_features
+            required_features = self.selected_features
+            missing_features = set(required_features) - set(feature_frame.columns)
+            
+            if missing_features:
+                raise ValueError(
+                    f"Missing required features: {list(missing_features)[:5]}... "
+                    f"Available features: {list(feature_frame.columns[:10])}..."
+                )
+            features = feature_frame[required_features].values
         
         # Take last sequence_length rows
         sequence = features[-self.sequence_length:]

@@ -85,6 +85,8 @@ def _symbol_key(symbol: str) -> str:
 @click.option("--device", default="cpu", type=click.Choice(["cpu", "cuda"]), help="Device")
 @click.option("--seed", default=42, show_default=True, help="Random seed")
 @click.option("--history-days", type=int, default=None, help="Limit lookback history to N days (overrides defaults)")
+@click.option("--loss-type", default="ce", type=click.Choice(["ce", "focal"]), help="Loss function type")
+@click.option("--focal-gamma", default=2.0, show_default=True, help="Focal loss gamma")
 def main(
     symbol: str,
     timeframe: str,
@@ -109,6 +111,8 @@ def main(
     device: str,
     seed: int,
     history_days: Optional[int],
+    loss_type: str,
+    focal_gamma: float,
 ) -> None:
     """Train advanced temporal model with modern architecture."""
     
@@ -128,7 +132,7 @@ def main(
         prediction_horizon=horizon,
         target_return=target_return,
         max_history_days=history_days if history_days is not None else (270 if timeframe == "15m" else 180),
-        max_samples=30000,
+        max_samples=100000,
         use_feature_selection=feature_selection,
         n_features_to_select=n_features,
         feature_selection_method="mutual_info",
@@ -188,9 +192,12 @@ def main(
             regression_targets,
             feature_names=feature_names,
             n_splits=n_folds,
+            batch_size=batch_size,
             epochs=epochs,
             lr=lr,
             patience=patience,
+            loss_type=loss_type,
+            focal_gamma=focal_gamma,
         )
         
         # Save walk-forward results
@@ -394,6 +401,8 @@ def main(
                 epochs=epochs,
                 lr=lr,
                 patience=patience,
+                loss_type=loss_type,
+                focal_gamma=focal_gamma,
             )
             models.append(model)
             print()
@@ -410,6 +419,8 @@ def main(
             epochs=epochs,
             lr=lr,
             patience=patience,
+            loss_type=loss_type,
+            focal_gamma=focal_gamma,
         )
 
     final_model = final_model.to(trainer.device)
@@ -430,6 +441,13 @@ def main(
     if reg_metrics:
         print(f"  Regression MSE: {reg_metrics['mse']:.6f}")
         print(f"  Regression MAE: {reg_metrics['mae']:.6f}")
+    trading = test_metrics.get('trading')
+    if trading:
+        print(f"  Trading PnL: {trading['total_return']*100:.2f}% "
+              f"(Best thr: {trading['threshold']}, trades: {trading['n_trades']})")
+        print(f"  Sharpe: {trading['sharpe_ratio']:.2f} | "
+              f"Win Rate: {trading['win_rate']*100:.1f}% | "
+              f"Max Drawdown: {trading['max_drawdown']*100:.2f}%")
     print("\nPer-Class Metrics:")
     for cls_name, metrics in test_metrics['per_class'].items():
         print(f"  {cls_name.capitalize()}:")

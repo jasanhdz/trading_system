@@ -159,6 +159,7 @@ class AdvancedTemporalNet(nn.Module):
         bidirectional: bool = True,
         num_classes: int = 3,  # neutral, long, short
         use_regression: bool = True,
+        regression_output_dim: int = 1,
     ):
         super().__init__()
         
@@ -167,6 +168,7 @@ class AdvancedTemporalNet(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_classes = num_classes
         self.use_regression = use_regression
+        self.regression_output_dim = regression_output_dim
         
         # Temporal encoder (LSTM + Attention)
         self.encoder = TemporalEncoder(
@@ -209,7 +211,7 @@ class AdvancedTemporalNet(nn.Module):
                 nn.Linear(last_dim, 64),
                 nn.ReLU(inplace=True),
                 nn.Dropout(dropout * 0.5),
-                nn.Linear(64, 1),
+                nn.Linear(64, regression_output_dim),
             )
         
     def forward(
@@ -356,10 +358,14 @@ class MultiTaskLoss(nn.Module):
         classification_weight: float = 1.0,
         regression_weight: float = 0.5,
         focal_gamma: float = 2.0,
+        loss_type: str = 'focal',
     ):
         super().__init__()
-        # Use Focal Loss instead of standard Cross Entropy
-        self.classification_criterion = FocalLoss(alpha=class_weights, gamma=focal_gamma)
+        # Select classification loss function
+        if loss_type == 'focal':
+            self.classification_criterion = FocalLoss(alpha=class_weights, gamma=focal_gamma)
+        else:
+            self.classification_criterion = nn.CrossEntropyLoss(weight=class_weights)
         self.regression_criterion = nn.MSELoss()
         
         # Learnable task weights (log variance approach)

@@ -30,7 +30,7 @@ from utils.logger import setup_logger
 logger = setup_logger("update_ml_candles")
 
 QUOTE_TOKENS = ("USDT", "BUSD", "USDC", "BTC", "ETH")
-DEFAULT_EXTRA_TIMEFRAMES = ("15m",)
+DEFAULT_EXTRA_TIMEFRAMES = ("15m", "1h", "4h")
 
 
 def to_ccxt_symbol(symbol: str) -> str:
@@ -109,7 +109,7 @@ def _resolve_timeframes(
             seen.add(key)
             timeframes.append(norm)
 
-    add(sym_timeframe or cfg.ML_DEFAULT_TIMEFRAME)
+    # add(sym_timeframe or cfg.ML_DEFAULT_TIMEFRAME)  # Comentado: No descargar 5m
 
     cfg_extra = getattr(cfg, "ML_EXTRA_TIMEFRAMES", None)
     if not cfg_extra:

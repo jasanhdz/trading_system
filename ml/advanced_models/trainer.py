@@ -133,7 +133,10 @@ class AdvancedTrainer:
         epochs: int = 50,
         lr: float = 1e-3,
         patience: int = 10,
+
         min_delta: float = 1e-4,
+        loss_type: str = 'ce',
+        focal_gamma: float = 2.0,
     ) -> Tuple[AdvancedTemporalNet, Dict]:
         """
         Train a single model with early stopping and LR scheduling.
@@ -169,6 +172,8 @@ class AdvancedTrainer:
             class_weights=class_weights.to(self.device) if class_weights is not None else None,
             classification_weight=1.0,
             regression_weight=0.5,
+            loss_type=loss_type,
+            focal_gamma=focal_gamma,
         ).to(self.device)
         
         optimizer = torch.optim.AdamW(
@@ -289,7 +294,9 @@ class AdvancedTrainer:
                           f"Train Loss: {avg_train_loss:.4f} | "
                           f"Valid Loss: {valid_metrics['loss']:.4f} | "
                           f"Valid F1: {valid_metrics['macro_f1']:.4f} | "
-                          f"Valid Acc: {valid_metrics['accuracy']:.4f}")
+                          f"Valid Acc: {valid_metrics['accuracy']:.4f} | "
+                          f"Valid PnL: {valid_metrics['trading']['total_return']*100:.2f}% | "
+                          f"Sharpe: {valid_metrics['trading']['sharpe_ratio']:.2f}")
                 
                 if patience and epochs_without_improvement >= patience:
                     print(f"Early stopping at epoch {epoch}")
@@ -408,6 +415,87 @@ class AdvancedTrainer:
         else:
             result['regression'] = None
 
+        # --- TRADING METRICS (Institutional Grade) ---
+        # Optimize threshold to find best PnL
+        
+        best_trading_metrics = {
+            'total_return': 0.0,
+            'sharpe_ratio': 0.0,
+            'win_rate': 0.0,
+            'max_drawdown': 0.0,
+            'n_trades': 0,
+            'threshold': 0.0
+        }
+        
+        if regression_truth:
+            market_returns = np.concatenate(regression_truth)
+            
+            # Test thresholds from base (0.33) to high confidence (0.8)
+            thresholds = [0.0, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
+            
+            best_pnl = -float('inf')
+            
+            for threshold in thresholds:
+                # Apply threshold logic:
+                # If the highest probability is below threshold, force Neutral (0)
+                max_probs = probs.max(axis=1)
+                # Base predictions from argmax
+                current_preds = predictions.copy()
+                # Filter weak signals
+                current_preds[max_probs < threshold] = 0
+                
+                # Calculate PnL for this threshold
+                strategy_returns = np.zeros_like(market_returns)
+                
+                # Longs
+                strategy_returns[current_preds == 1] = market_returns[current_preds == 1]
+                # Shorts
+                strategy_returns[current_preds == 2] = -market_returns[current_preds == 2]
+                
+                # Transaction costs (0.06% per trade)
+                cost_per_trade = 0.0006 
+                trades_mask = (current_preds != 0)
+                strategy_returns[trades_mask] -= cost_per_trade
+                
+                # Metrics
+                total_return = float(np.sum(strategy_returns))
+                
+                # Optimization criteria: Maximize Total Return
+                if total_return > best_pnl:
+                    best_pnl = total_return
+                    
+                    # Calculate detailed metrics for this best threshold
+                    cumulative_returns = np.cumsum(strategy_returns)
+                    
+                    winning_trades = (strategy_returns > 0) & trades_mask
+                    n_trades = trades_mask.sum()
+                    win_rate = float(winning_trades.sum() / n_trades) if n_trades > 0 else 0.0
+                    
+                    if np.std(strategy_returns) > 1e-9:
+                        sharpe = float(np.mean(strategy_returns) / np.std(strategy_returns) * np.sqrt(365 * 24 * 4))
+                    else:
+                        sharpe = 0.0
+                        
+                    if len(cumulative_returns) > 0:
+                        peak = np.maximum.accumulate(cumulative_returns)
+                        drawdown = (cumulative_returns - peak)
+                        max_drawdown = float(np.min(drawdown))
+                    else:
+                        max_drawdown = 0.0
+                    
+                    best_trading_metrics = {
+                        'total_return': total_return,
+                        'win_rate': win_rate,
+                        'sharpe_ratio': sharpe,
+                        'max_drawdown': max_drawdown,
+                        'n_trades': int(n_trades),
+                        'threshold': threshold
+                    }
+            
+            result['trading'] = best_trading_metrics
+        else:
+            result['trading'] = best_trading_metrics
+
         return result
     
     def walk_forward_validation(
@@ -417,6 +505,7 @@ class AdvancedTrainer:
         regression_targets: np.ndarray,
         feature_names: List[str],
         n_splits: int = 5,
+        batch_size: int = 128,
         **train_kwargs,
     ) -> List[Dict]:
         """
@@ -535,20 +624,20 @@ class AdvancedTrainer:
             # Create data loaders
             train_loader = DataLoader(
                 train_dataset,
-                batch_size=512,
+                batch_size=batch_size,
                 shuffle=True,
-                drop_last=False,
+                drop_last=True,  # Drop last batch if incomplete to avoid BatchNorm errors with size 1
             )
             
             val_loader = DataLoader(
                 val_dataset,
-                batch_size=512,
+                batch_size=batch_size,
                 shuffle=False,
             )
             
             test_loader = DataLoader(
                 test_dataset,
-                batch_size=512,
+                batch_size=batch_size,
                 shuffle=False,
             )
             
@@ -578,7 +667,11 @@ class AdvancedTrainer:
             print(f"  Accuracy: {test_metrics['accuracy']:.4f}")
             print(f"  Macro F1: {test_metrics['macro_f1']:.4f}")
             print(f"  AP Long: {test_metrics['ap_long']:.4f}")
+            print(f"  AP Long: {test_metrics['ap_long']:.4f}")
             print(f"  AP Short: {test_metrics['ap_short']:.4f}")
+            print(f"  Trading PnL: {test_metrics['trading']['total_return']*100:.2f}% (Best Threshold: {test_metrics['trading']['threshold']})")
+            print(f"  Sharpe Ratio: {test_metrics['trading']['sharpe_ratio']:.2f}")
+            print(f"  Win Rate: {test_metrics['trading']['win_rate']*100:.1f}% ({test_metrics['trading']['n_trades']} trades)")
             
             fold_results.append({
                 'fold': fold_idx,
