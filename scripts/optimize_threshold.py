@@ -88,7 +88,8 @@ def simulate_trades(predictions, returns, threshold, min_confidence_diff=0.1):
 @click.option("--min-trades", default=20, help="Mínimo de trades requeridos")
 @click.option("--metric", default="sharpe", type=click.Choice(["sharpe", "pnl"]), help="Métrica a optimizar")
 @click.option("--min-diff", default=0.1, help="Diferencia mínima de confianza entre clases")
-def main(symbol: str, timeframe: str, min_trades: int, metric: str, min_diff: float):
+@click.option("--model-dir", default=None, help="Directorio base de modelos personalizado")
+def main(symbol: str, timeframe: str, min_trades: int, metric: str, min_diff: float, model_dir: str):
     """Re-optimiza threshold con restricción de mínimo de trades."""
     
     print(f"\n{'='*80}")
@@ -100,7 +101,16 @@ def main(symbol: str, timeframe: str, min_trades: int, metric: str, min_diff: fl
     
     # Cargar modelo
     symbol_key = _symbol_key(symbol)
-    model_path = MODEL_DIR / symbol_key / timeframe
+    
+    if model_dir:
+        # Si se especifica directorio, asumimos que es la ruta base donde están los modelos
+        # O la ruta directa? Para ser consistente con train_production_ready, 
+        # si train guarda en custom_dir/SYMBOL/TF, aquí deberíamos buscar ahí.
+        # Pero train_production_ready guarda EXACTAMENTE en model_dir si se provee.
+        # Así que si el usuario proveyó .../ADAUSDT/1h, esa es la ruta.
+        model_path = Path(model_dir)
+    else:
+        model_path = MODEL_DIR / symbol_key / timeframe
     
     if not model_path.exists():
         logger.error(f"Modelo no encontrado: {model_path}")
@@ -108,18 +118,54 @@ def main(symbol: str, timeframe: str, min_trades: int, metric: str, min_diff: fl
     
     # Cargar metadata
     meta_path = model_path / "meta.json"
-    meta = json.loads(meta_path.read_text())
+    results_path = model_path / "production_training_results.json"
     
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+        except:
+            pass
+            
+    # Fallback a production_training_results.json si faltan claves
+    if 'prediction_horizon' not in meta and results_path.exists():
+        try:
+            results = json.loads(results_path.read_text())
+            config = results.get('config', {})
+            # Mapear config a meta
+            meta.update(config)
+            # Asegurar tipos correctos
+            if 'symbol' in config:
+                meta['symbol'] = config['symbol']
+        except Exception as e:
+            logger.warning(f"Error leyendo results.json: {e}")
+
+    # Validar claves requeridas
+    required_keys = ['symbol', 'timeframe', 'sequence_length', 'prediction_horizon', 'target_return']
+    missing = [k for k in required_keys if k not in meta]
+    if missing:
+        logger.error(f"Metadata incompleta. Faltan: {missing}")
+        return
+
     # Cargar predictor
     predictor = AdvancedPredictor(
         model_path=model_path,
         scaler_path=model_path / "scaler.pkl",
-        meta_path=model_path / "meta.json"
+        meta_path=model_path / "meta.json" # Predictor might re-read this, but we passed validation
     )
     
     # Cargar datos de test (últimos 15%)
+    # Normalizar símbolo para dataset (ej: ADAUSDT -> ADA/USDT:USDT si es necesario)
+    # La lógica exacta depende de cómo load_sequence_dataset maneja los símbolos.
+    # En train_production_ready se usa: symbol.replace("USDT", "/USDT") + ":USDT"
+    # Vamos a replicar esa lógica si el símbolo no tiene "/"
+    
+    dataset_symbol = meta['symbol']
+    if "USDT" in dataset_symbol and "/" not in dataset_symbol:
+         dataset_symbol = dataset_symbol.replace("USDT", "/USDT") + ":USDT"
+
     config = AdvancedDatasetConfig(
-        symbol=meta['symbol'],
+        symbol=dataset_symbol,
         timeframe=meta['timeframe'],
         sequence_length=meta['sequence_length'],
         prediction_horizon=meta['prediction_horizon'],
