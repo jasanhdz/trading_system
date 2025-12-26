@@ -13,6 +13,7 @@ import os
 import warnings
 from typing import Dict, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -411,3 +412,59 @@ class MultiTaskLoss(nn.Module):
         
         loss_dict['total_loss'] = total_loss.item()
         return total_loss, loss_dict
+
+
+class SharpeLoss(nn.Module):
+    """
+    Differentiable Sharpe Ratio Loss.
+    
+    Optimizes the model to maximize the risk-adjusted return directly.
+    Loss = -SharpeRatio
+    
+    Formula:
+    R_t = position_t * return_t - transaction_cost * |position_t - position_{t-1}|
+    Sharpe = mean(R) / std(R)
+    """
+    
+    def __init__(self, transaction_cost: float = 0.001, annualization_factor: float = np.sqrt(365*24)):
+        super().__init__()
+        self.transaction_cost = transaction_cost
+        self.annualization_factor = annualization_factor
+        
+    def forward(self, logits: torch.Tensor, returns: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            logits: (batch, num_classes) - Raw output from model
+            returns: (batch, ) - Actual market returns for the next period
+        """
+        # 1. Convert logits to probabilities (Softmax)
+        probs = F.softmax(logits, dim=1) # (batch, 3) -> [Neutral, Long, Short]
+        
+        # 2. Define positions based on probabilities
+        # Long weight = prob[1], Short weight = prob[2]
+        # Net position in range [-1, 1]
+        # position = prob_long - prob_short
+        position = probs[:, 1] - probs[:, 2]
+        
+        # 3. Calculate Strategy Returns
+        # R_strategy = position * R_market
+        strategy_returns = position * returns
+        
+        # 4. Transaction Costs (Approximation)
+        # We penalize changing position rapidly
+        # |pos_t - pos_{t-1}| is hard in batch training without state.
+        # Approximation: Penalize absolute position magnitude (holding cost) or just ignore for simple Sharpe
+        # For now, we ignore transaction costs in the loss to keep it stable, 
+        # assuming the model learns to pick only high conviction moves.
+        
+        # 5. Calculate Sharpe
+        expected_return = torch.mean(strategy_returns)
+        return_std = torch.std(strategy_returns)
+        
+        # Add epsilon to avoid division by zero
+        sharpe = expected_return / (return_std + 1e-8)
+        
+        # We want to MAXIMIZE Sharpe, so we MINIMIZE negative Sharpe
+        loss = -sharpe * self.annualization_factor
+        
+        return loss
