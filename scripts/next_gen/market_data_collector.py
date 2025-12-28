@@ -14,7 +14,12 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data"
 DB_PATH = DATA_DIR / "market_data_v2.db"
 LOG_DIR = ROOT_DIR / "logs"
-SYMBOLS = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'ADA/USDT:USDT', 'AVAX/USDT:USDT', 'SOL/USDT:USDT', 'XRP/USDT:USDT', 'LINK/USDT:USDT']
+SYMBOLS = [
+    'BTC/USDT:USDT', 'ETH/USDT:USDT', 'ADA/USDT:USDT', 'AVAX/USDT:USDT', 
+    'SOL/USDT:USDT', 'XRP/USDT:USDT', 'LINK/USDT:USDT',
+    'DOGE/USDT:USDT', 'BNB/USDT:USDT', 'POL/USDT:USDT', 'DOT/USDT:USDT',
+    'LTC/USDT:USDT', 'UNI/USDT:USDT', 'ATOM/USDT:USDT', 'NEAR/USDT:USDT'
+]
 
 # Setup Logging
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -198,7 +203,7 @@ def main():
         }
     })
     
-    logger.info("🚀 Iniciando Colector V2 (Loop infinito cada 60s)")
+    logger.info("🚀 Iniciando Colector V2 (Loop infinito cada 10s)")
     
     while True:
         try:
@@ -206,9 +211,10 @@ def main():
             fetch_and_store(exchange)
             elapsed = time.time() - start_time
             
-            sleep_time = max(0, 60 - elapsed)
-            logger.info(f"💤 Durmiendo {sleep_time:.2f}s...")
-            time.sleep(sleep_time)
+            sleep_time = max(0, 10 - elapsed)
+            if sleep_time > 0:
+                logger.info(f"💤 Durmiendo {sleep_time:.2f}s...")
+                time.sleep(sleep_time)
             
         except KeyboardInterrupt:
             logger.info("🛑 Colector detenido por usuario")

@@ -57,7 +57,7 @@ class EnsembleManager:
                     input_dim=mc.get('input_dim', 99), # Fallback si no está en config
                     hidden_dim=mc['hidden_dim'],
                     lstm_layers=mc['lstm_layers'],
-                    dropout=mc['dropout'],
+                    dropout=mc.get('dropout', 0.2),
                     num_classes=3
                 ).to(self.device)
                 model.load_state_dict(torch.load(path, map_location=self.device))
@@ -70,7 +70,7 @@ class EnsembleManager:
                     input_dim=mc.get('input_dim', 99),
                     num_channels=mc.get('num_channels', [64, 128, 256]),
                     kernel_size=mc.get('kernel_size', 3),
-                    dropout=mc['dropout']
+                    dropout=mc.get('dropout', 0.2)
                 ).to(self.device)
                 model.load_state_dict(torch.load(path, map_location=self.device))
                 model.eval()

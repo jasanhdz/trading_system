@@ -13,16 +13,17 @@ def _get(name: str, default):
     return getattr(CONFIG, name, default)
 
 # Trailing por ROE: bandas y porcentaje de “ganancia bloqueada” según pico
+# Trailing por ROE: bandas y porcentaje de “ganancia bloqueada” según pico
 PG_ENABLED            = _get("PROFIT_TRAIL_ENABLED", True)
-PG_ARM_ROE            = _get("PROFIT_TRAIL_ARM_ROE", 0.12)   # arma trailing desde 12% ROE
+PG_ARM_ROE            = _get("PROFIT_TRAIL_ARM_ROE", 0.25)   # arma trailing desde 25% ROE (antes 12%)
 PG_PEAK_BAND_LOW      = _get("PROFIT_TRAIL_PEAK_BAND_LOW", 0.30)  # 30%
 PG_PEAK_BAND_MID      = _get("PROFIT_TRAIL_PEAK_BAND_MID", 0.50)  # 50%
-PG_KEEP_LOW           = _get("PROFIT_TRAIL_KEEP_LOW", 0.70)  # <30% pico, bloquea 70%
-PG_KEEP_MID           = _get("PROFIT_TRAIL_KEEP_MID", 0.75)  # 30–50% pico, bloquea 75%
+PG_KEEP_LOW           = _get("PROFIT_TRAIL_KEEP_LOW", 0.60)  # <30% pico, bloquea 60% (antes 70%)
+PG_KEEP_MID           = _get("PROFIT_TRAIL_KEEP_MID", 0.70)  # 30–50% pico, bloquea 70% (antes 75%)
 PG_KEEP_HIGH          = _get("PROFIT_TRAIL_KEEP_HIGH", 0.80) # >50% pico, bloquea 80%
 PG_MIN_LOCK           = _get("PROFIT_TRAIL_MIN_LOCK", 0.10)  # nunca salgas con menos de 10% ROE
 PG_USE_STOP           = _get("PROFIT_TRAIL_USE_STOP", False) # False=cierre a mercado; True=ajusta stop
-PG_HYSTERESIS         = _get("PROFIT_TRAIL_HYSTERESIS", 0.002)  # 0.2% ROE de colchón anti-ruido
+PG_HYSTERESIS         = _get("PROFIT_TRAIL_HYSTERESIS", 0.005)  # 0.5% ROE de colchón anti-ruido (antes 0.2%)
 
 # Breakeven lock (igual que tu lógica actual)
 BE_AT_ROE             = _get("PROFIT_LOCK_BE_AT_ROE", 0.02)  # ejemplo: 2% ROE
