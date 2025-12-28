@@ -143,6 +143,7 @@ def train_model_for_symbol(symbol):
 
     # Convert to Tensor
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"   Using device: {device}")
     dataset = TensorDataset(torch.FloatTensor(X_seq), torch.LongTensor(y_seq))
     loader = DataLoader(dataset, batch_size=64, shuffle=True)
     

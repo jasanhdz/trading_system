@@ -49,5 +49,33 @@
     "NEAR/USDT:USDT": 0.07574,
     "UNI/USDT:USDT": 0.08597,
     "POL/USDT:USDT": 0.02699
+  },
+  "2025-12-28-v3.0-13features-4models": {
+    "_meta": {
+      "version": "3.0",
+      "features": 13,
+      "models": [
+        "LSTM",
+        "TCN",
+        "XGBoost",
+        "Transformer"
+      ],
+      "trained_at": "2025-12-28T23:04:49Z"
+    },
+    "ADA/USDT:USDT": 0.02054,
+    "AVAX/USDT:USDT": 0.00114,
+    "BTC/USDT:USDT": 0.01500,
+    "ETH/USDT:USDT": 0.01200,
+    "LINK/USDT:USDT": 0.00535,
+    "SOL/USDT:USDT": 0.01000,
+    "XRP/USDT:USDT": 0.00800,
+    "ATOM/USDT:USDT": 0.00750,
+    "BNB/USDT:USDT": 0.00400,
+    "DOGE/USDT:USDT": 0.00600,
+    "DOT/USDT:USDT": 0.01100,
+    "LTC/USDT:USDT": 0.00900,
+    "NEAR/USDT:USDT": 0.01244,
+    "UNI/USDT:USDT": 0.00700,
+    "POL/USDT:USDT": 0.00055
   }
 }

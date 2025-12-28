@@ -11,8 +11,11 @@ echo "[$DATE] 🚀 Starting Daily Retraining..." >> $LOG_FILE
 cd $PROJECT_DIR
 
 # 2. Run Training
-# Force GPU usage
-export HSA_OVERRIDE_GFX_VERSION=10.3.0 
+# Full AMD ROCm Environment (per ROCM_AMD_SETUP.md)
+export HSA_OVERRIDE_GFX_VERSION=10.3.0
+export LD_LIBRARY_PATH=/opt/rocm-6.2.0/lib:/opt/rocm-6.2.0/lib64:$LD_LIBRARY_PATH
+export PYTORCH_HIP_ALLOC_CONF=max_split_size_mb:512
+export HSA_ENABLE_SDMA=0
 export HIP_VISIBLE_DEVICES=0
 
 $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py >> $LOG_FILE 2>&1

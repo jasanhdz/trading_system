@@ -1,6 +1,6 @@
 # 🏛️ El Sistema de Trading de 4 Pilares: Whitepaper Técnico
 
-**Versión:** 2.1 (Híbrido Sage-Ninja)
+**Versión:** 3.0 (Consejo de Sabios + Transformer)
 **Fecha:** 28 de Diciembre, 2025
 **Estado:** Producción
 
@@ -8,109 +8,385 @@
 
 ## 1. Resumen Ejecutivo
 
-Este documento detalla la arquitectura de nuestro Sistema de Trading Algorítmico de Alta Frecuencia. El sistema opera sobre una **Arquitectura de 4 Pilares**, diseñada para maximizar el "alpha" (retorno) mientras gestiona estrictamente el riesgo mediante un híbrido de Machine Learning (ML) y Lógica Determinista.
+Este documento detalla, con precisión quirúrgica, la arquitectura completa de nuestro Sistema de Trading Algorítmico de Alta Frecuencia. El sistema opera sobre una **Arquitectura de 4 Pilares**, diseñada para maximizar el "alpha" (retorno superior al mercado) mientras gestiona estrictamente el riesgo mediante un híbrido de Machine Learning (ML) y Lógica Determinista.
 
 **Filosofía Central:** "Entrada Agresiva, Salida Inteligente."
-Utilizamos señales de ML con umbrales bajos para capturar movimientos de tendencia tempranos, protegidos por un protocolo de salida "Ninja" de múltiples capas que asegura ganancias y corta pérdidas basándose en cambios de probabilidad en tiempo real.
 
 ---
 
-## 2. Los 4 Pilares de la Arquitectura
+## 2. Arquitectura de Componentes
 
-### 🏛️ Pilar I: Recolección de Datos e Ingeniería de Características
-*   **Objetivo:** Alimentar los modelos de ML con datos de mercado de alta fidelidad.
-*   **Mecanismo:**
-    *   **Mecanismo de "Snapshots" (La Verdad del Mercado):**
-        *   A diferencia de sistemas tradicionales que usan velas OHLCV (que pueden estar obsoletas por minutos), nuestro sistema captura una **Instantánea del Libro de Órdenes cada 10 segundos**.
-        *   **¿Qué contiene una Instantánea?**
-            1.  **OBI (Order Book Imbalance):** Calculamos la presión de compra/venta en los primeros 20 niveles de profundidad. Fórmula: `(VolCompra - VolVenta) / (VolCompra + VolVenta)`.
-            2.  **Spread Dinámico:** Medimos la distancia entre el mejor Bid y Ask para detectar liquidez.
-            3.  **Profundidad (Depth):** Suma total de volumen disponible para absorber órdenes de mercado.
-            4.  **Volumen Taker:** Diferenciamos agresivamente entre quién *inicia* la operación (Comprador vs Vendedor) para detectar urgencia.
-    *   **Almacenamiento:** Base de datos SQLite (`market_data_v2.db`) con indexación por `timestamp` para recuperación instantánea de secuencias históricas.
-
-### 🏛️ Pilar II: El "Consejo de Sabios" (Ensamble de Modelos)
-*   **Objetivo:** Predecir la dirección del precio mediante el consenso de múltiples inteligencias artificiales.
-*   **Arquitectura:**
-    *   **El Consejo:** No dependemos de un solo algoritmo. Utilizamos un **Ensamble de Votación Ponderada** compuesto por 4 arquitecturas distintas, cada una experta en un área:
-        1.  **XGBoost (El Estadístico):** Experto en datos tabulares y niveles de precios exactos.
-        2.  **LSTM (El Historiador):** Red Neuronal Recurrente que recuerda secuencias temporales largas.
-        3.  **TCN (El Analista Técnico):** Red Convolucional Temporal que detecta patrones visuales en el gráfico.
-        4.  **Transformer (El Visionario):** Mecanismo de atención que detecta relaciones complejas no lineales.
-    *   **Mecanismo de Consenso:**
-        *   Cada modelo emite su voto (Probabilidad Long/Short).
-    *   **Pipeline de Entrenamiento (La Escuela de los Sabios):**
-        *   **Ventana Deslizante (Rolling Window):** No entrenamos una vez y olvidamos. Cada día, el sistema toma los últimos 30 días de datos, descarta lo viejo y reentrena desde cero. Esto permite que los modelos se adapten a la "personalidad" cambiante del mercado (ej. de alcista a lateral).
-        *   **Etiquetado Inteligente (Triple Barrier Method):**
-            *   No enseñamos al modelo a predecir "si el precio sube". Le enseñamos a predecir "si el precio subirá lo suficiente para cubrir comisiones y riesgo antes de tocar el Stop Loss".
-            *   Usamos el Ratio de Sharpe para definir si una operación fue "exitosa" en el pasado.
-        *   **Validación Cruzada Temporal:** Para evitar que el modelo "haga trampa" memorizando el futuro, usamos un esquema de validación donde el set de prueba es siempre *posterior* al set de entrenamiento.
-    *   **Entradas del Modelo (13 Características):**
-        *   **Libro de Órdenes:** `bid_depth`, `ask_depth`, `obi_5`, `obi_10`, `obi_20`, `micro_price`, `bid_ask_spread`.
-        *   **Derivados:** `funding_rate`, `open_interest`.
-        *   **Volumen Agresivo:** `taker_buy_vol`, `taker_sell_vol`.
-        *   **Calculadas:** `buy_sell_ratio`, `depth_imbalance`.
-        *   **Deep Learning (LSTM/TCN/Transformer):** Reciben una **Secuencia de Tensores (Batch, 12, 13)** que representa los últimos 2 minutos de "película" del mercado (12 snapshots de 10s).
-    *   **Salida:** Una "Súper-Probabilidad" unificada (0.0 - 1.0) que representa la convicción del Consejo.
-
-### 🏛️ Pilar III: El Servicio de Inferencia REST (Python)
-*   **Objetivo:** Servir predicciones del modelo al bot de trading con latencia sub-milisegundo.
-*   **Tecnología:** FastAPI (Python).
-*   **Función:**
-    *   Expone endpoints (ej. `/predict`) que el Bot de Trading consulta.
-    *   Carga los últimos modelos entrenados (`.joblib`) en memoria.
-    *   Realiza el cálculo de características en tiempo real sobre las solicitudes entrantes.
-
-### 🏛️ Pilar IV: El Bot de Ejecución (TypeScript)
-*   **Objetivo:** Ejecutar operaciones, gestionar el riesgo y manejar eventos del ciclo de vida.
-*   **Tecnología:** Node.js / TypeScript.
-*   **Lógica Central (`StrategyRunner.ts`):**
-    *   **El Cerebro de Ejecución (`tick()`):**
-        1.  **Sincronización:** Cada 1000ms, el bot despierta.
-        2.  **Consulta al Oráculo:** Envía los datos actuales al Servicio Python y recibe la probabilidad (ej. `LONG: 0.42`).
-        3.  **Evaluación de Umbral Dinámico:**
-            *   El bot consulta `thresholds_config.json`.
-            *   Si el activo es volátil (ej. DOGE), el umbral exigido será alto (0.50).
-            *   Si el activo es estable (ej. BNB), el umbral será bajo (0.30).
-            *   *Lógica:* `Si Probabilidad > Umbral -> INTENCIÓN DE COMPRA`.
-        4.  **Gestión de Posición (Ninja Protocol):**
-            *   **Capa 1: Pánico (Reacción Rápida):** Si la probabilidad del modelo cae por debajo de 0.50 (se vuelve en contra), cerramos inmediatamente. No esperamos al Stop Loss. "Si la razón de entrada desaparece, la posición desaparece".
-            *   **Capa 2: Agotamiento (Neutralidad):** Si el mercado se pone lateral (Probabilidad Neutral > 0.60) y ya ganamos >5%, cerramos. Mejor pájaro en mano.
-            *   **Capa 3: Trailing Stop (Dejar Correr):** Si el precio sube, subimos el Stop Loss detrás de él.
-                *   Ganancia > 10%: Stop a distancia del 40%.
-                *   Ganancia > 30%: Stop a distancia del 20%.
-                *   Ganancia > 50%: Stop a distancia del 10% (Asegurar victoria).
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    BINANCE FUTURES API                          │
+│                 wss://fstream.binance.com                       │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ WebSocket (Order Book, Trades)
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PILAR I: COLECTOR DE DATOS (Python)                            │
+│  Proceso: pm2 "02-Data-Collector"                               │
+│  Archivo: scripts/next_gen/market_data_collector.py             │
+│  Intervalo: Loop cada 10 segundos                               │
+│  Salida: SQLite market_data_v2.db                               │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ INSERT INTO orderbook_metrics
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  BASE DE DATOS: data/market_data_v2.db                          │
+│  ├── orderbook_metrics (timestamp, symbol, obi_5, obi_10, ...)  │
+│  └── derivatives_data (timestamp, symbol, funding_rate, ...)    │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ SELECT últimas 60 filas
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PILAR II: SERVICIO ML V2 (Python FastAPI)                      │
+│  Proceso: pm2 "03-ML-Service-V2"                                │
+│  Archivo: services/ml_service_v2.py                             │
+│  Puerto: 8001                                                   │
+│  Modelos: models/v2_ensemble/{SYMBOL}/*.pt, *.joblib            │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ HTTP POST /ml-v2/predict
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PILAR III: BOT DE EJECUCIÓN (TypeScript)                       │
+│  Proceso: pm2 "01-Trading-Bot"                                  │
+│  Archivo: binance-futures-bot-ts/src/app/strategy-runner.ts     │
+│  Intervalo: tick() cada 1000ms                                  │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ API REST (Market Order)
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    BINANCE FUTURES API                          │
+│                 POST /fapi/v1/order                             │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 3. Flujo del Sistema: El Ciclo de Vida de una Operación
+## 3. PILAR I: Recolección de Datos (La Verdad del Mercado)
 
-1.  **La Chispa:** Binance WebSocket envía una actualización de operación para `ETHUSDT`.
-2.  **El Cerebro (El Consejo):** El Servicio Python procesa la secuencia de snapshots y consulta a los 4 modelos (XGBoost, LSTM, TCN, Transformer).
-    *   *Votación:* XGBoost (0.45), LSTM (0.39), TCN (0.44), Transformer (0.40).
-    *   *Consenso:* El `EnsembleManager` pondera los votos y emite el veredicto final. Resultado: `Probabilidad LONG: 0.42`.
-3.  **El Portero:** El Bot TypeScript ve `0.42` > Umbral `0.40`.
-4.  **La Entrada:** El Bot envía orden `MARKET BUY` a Binance.
-6.  **La Vigilancia:** El Bot monitorea la posición cada segundo.
-    *   *Escenario A:* El precio sube un 8%. El Bot activa el Trailing Stop.
-    *   *Escenario B:* El precio se estanca. La Probabilidad ML cae a `0.45` (Neutral). El Bot cierra con pequeña ganancia.
-    *   *Escenario C:* El mercado cae. La Probabilidad ML cambia a `SHORT 0.55`. El Bot activa **Salida de Pánico** para limitar la pérdida.
+### 3.1 Proceso de Captura
+
+**Archivo:** `scripts/next_gen/market_data_collector.py`
+**Proceso PM2:** `02-Data-Collector`
+**Intervalo:** Cada 10 segundos
+
+### 3.2 Esquema de Base de Datos
+
+```sql
+-- Tabla 1: Métricas del Libro de Órdenes
+CREATE TABLE orderbook_metrics (
+    timestamp INTEGER,      -- Unix timestamp en milisegundos
+    symbol TEXT,            -- Ej: "ETH/USDT:USDT"
+    obi_5 REAL,             -- Order Book Imbalance (5 niveles)
+    obi_10 REAL,            -- Order Book Imbalance (10 niveles)
+    obi_20 REAL,            -- Order Book Imbalance (20 niveles)
+    spread_pct REAL,        -- (Ask - Bid) / Mid Price
+    mid_price REAL,         -- (Best Bid + Best Ask) / 2
+    micro_price REAL,       -- Precio ponderado por volumen del top
+    bid_depth_20 REAL,      -- Suma volumen 20 mejores bids
+    ask_depth_20 REAL,      -- Suma volumen 20 mejores asks
+    PRIMARY KEY (timestamp, symbol)
+);
+
+-- Tabla 2: Datos de Derivados
+CREATE TABLE derivatives_data (
+    timestamp INTEGER,
+    symbol TEXT,
+    funding_rate REAL,      -- Tasa de funding actual
+    open_interest REAL,     -- Contratos abiertos
+    open_interest_value REAL, -- Valor en USD
+    taker_buy_vol REAL,     -- Volumen agresivo de compra (última vela)
+    taker_sell_vol REAL,    -- Volumen agresivo de venta
+    PRIMARY KEY (timestamp, symbol)
+);
+```
+
+### 3.3 Fórmulas de Cálculo
+
+**Order Book Imbalance (OBI):**
+```python
+def calculate_obi(bids, asks, depth):
+    bid_vol = sum(b[1] for b in bids[:depth])  # Suma volumen bids
+    ask_vol = sum(a[1] for a in asks[:depth])  # Suma volumen asks
+    return (bid_vol - ask_vol) / (bid_vol + ask_vol)
+```
+- **Interpretación:** OBI > 0 = Presión compradora. OBI < 0 = Presión vendedora.
+
+**Micro-Price (Precio Justo Instantáneo):**
+```python
+micro_price = (best_bid * ask_qty + best_ask * bid_qty) / (bid_qty + ask_qty)
+```
 
 ---
 
-## 4. Logros y Rendimiento
+## 4. PILAR II: El Consejo de Sabios (Ensemble de Modelos)
 
-*   **Disponibilidad:** 99.9% de tiempo de actividad mediante gestión de procesos PM2.
-*   **Latencia:** <50ms desde la ingesta de datos hasta la ejecución de la orden.
-*   **Adaptabilidad:** Transición exitosa de "Umbrales Estáticos" a "Umbrales Dinámicos" (MlConfigWatcher), permitiendo optimización por activo.
-*   **Gestión de Riesgo:** La "Salida Ninja" ha reducido significativamente el drawdown cortando tempranamente las "Posiciones Zombi" (operaciones estancadas).
+### 4.1 Los 4 Modelos del Consejo
 
-## 5. Recomendaciones y Hoja de Ruta Futura
+| Modelo | Arquitectura | Especialidad | Framework |
+|--------|--------------|--------------|-----------|
+| **XGBoost** | Gradient Boosting (1000 árboles) | Datos tabulares, niveles exactos | XGBoost 2.0 |
+| **LSTM** | 2 capas LSTM (64 hidden units) | Memoria temporal larga | PyTorch |
+| **TCN** | Temporal Convolutional Network [32, 64] | Patrones visuales | PyTorch |
+| **Transformer** | 2 capas, 4 heads, d_model=64 | Relaciones no lineales | PyTorch |
 
-1.  **Modo Sniper (Q1 2026):** Reemplazar Entradas a Mercado con Órdenes Limit para capturar el spread (Comisiones Maker).
-2.  **Meta-Etiquetado:** Entrenar un modelo secundario para predecir la *fiabilidad* del modelo primario, filtrando falsos positivos en mercados agitados.
-3.  **Tamaño por Volatilidad:** Implementar el Criterio de Kelly para dimensionar posiciones basándose en la convicción (apostar más fuerte en alta probabilidad, menos en baja).
+### 4.2 Las 13 Características de Entrada
+
+```python
+feature_cols = [
+    # Libro de Órdenes (Microestructura)
+    'bid_depth',        # Liquidez de compra
+    'ask_depth',        # Liquidez de venta
+    'bid_ask_spread',   # Costo de transacción implícito
+    'obi_5',            # Presión de corto plazo (5 niveles)
+    'obi_10',           # Presión de mediano plazo
+    'obi',              # Presión de largo plazo (20 niveles)
+    'micro_price',      # Precio justo instantáneo
+    
+    # Derivados (Sentimiento Institucional)
+    'funding_rate',     # Costo de mantener posiciones largas
+    'open_interest',    # Contratos abiertos totales
+    
+    # Volumen Agresivo (Urgencia)
+    'taker_buy_vol',    # Compras agresivas (market orders)
+    'taker_sell_vol',   # Ventas agresivas
+    
+    # Derivadas Calculadas
+    'buy_sell_ratio',   # taker_buy_vol / taker_sell_vol
+    'depth_imbalance'   # (bid_depth - ask_depth) / (bid_depth + ask_depth)
+]
+```
+
+### 4.3 Algoritmo de Entrenamiento (train_v2_production.py)
+
+**Archivo:** `scripts/train_v2_production.py`
+**Frecuencia:** Diario (via pm2 cron o manual)
+
+```python
+# PASO 1: Cargar datos históricos
+query = """
+    SELECT o.*, d.funding_rate, d.open_interest, d.taker_buy_vol, d.taker_sell_vol
+    FROM orderbook_metrics o
+    JOIN derivatives_data d ON o.timestamp = d.timestamp AND o.symbol = d.symbol
+    WHERE o.symbol = '{symbol}'
+    ORDER BY o.timestamp ASC
+"""
+
+# PASO 2: Crear etiquetas (Target)
+df['future_price'] = df['price'].shift(-5)  # Precio en 5 snapshots (~50 segundos)
+df['return_5m'] = (df['future_price'] - df['price']) / df['price']
+
+threshold = 0.001  # 0.1% de movimiento mínimo
+# Clase 0: SHORT (return < -0.1%)
+# Clase 1: NEUTRAL (|return| < 0.1%)
+# Clase 2: LONG (return > 0.1%)
+
+# PASO 3: Normalizar con StandardScaler
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# PASO 4: Crear secuencias temporales
+SEQ_LEN = 12  # Últimos 12 snapshots (2 minutos)
+for i in range(len(X_scaled) - SEQ_LEN):
+    X_sequences.append(X_scaled[i:i+SEQ_LEN])  # Shape: (12, 13)
+    y_labels.append(y[i + SEQ_LEN])
+
+# PASO 5: Entrenar cada modelo
+# LSTM: 10 epochs, Adam optimizer, lr=0.001, CrossEntropyLoss
+# TCN: 10 epochs, Adam optimizer, lr=0.001
+# XGBoost: 1000 trees, max_depth=6, learning_rate=0.1
+# Transformer: 10 epochs, Adam optimizer, lr=0.0005
+```
+
+### 4.4 Algoritmo de Predicción (ml_service_v2.py)
+
+**Archivo:** `services/ml_service_v2.py`
+**Endpoint:** `POST /ml-v2/predict`
+
+```python
+# PASO 1: Recibir símbolo del Bot
+request = {"symbol": "ETHUSDT"}
+
+# PASO 2: Cargar últimas 60 filas de la DB
+query = """
+    SELECT o.*, d.funding_rate, d.open_interest, d.taker_buy_vol, d.taker_sell_vol
+    FROM orderbook_metrics o
+    JOIN derivatives_data d ON o.timestamp = d.timestamp
+    WHERE o.symbol = '{symbol}'
+    ORDER BY o.timestamp DESC
+    LIMIT 60
+"""
+
+# PASO 3: Calcular features derivadas
+df['buy_sell_ratio'] = df['taker_buy_vol'] / (df['taker_sell_vol'] + 1e-8)
+df['depth_imbalance'] = (df['bid_depth'] - df['ask_depth']) / (df['bid_depth'] + df['ask_depth'])
+
+# PASO 4: Aplicar scaler guardado
+X_scaled = scaler.transform(df[feature_cols].values)
+
+# PASO 5: Crear secuencia de los últimos 12 snapshots
+X_seq = X_scaled[-12:]  # Shape: (12, 13)
+X_tensor = torch.FloatTensor(X_seq).unsqueeze(0)  # Shape: (1, 12, 13)
+
+# PASO 6: Obtener predicción de cada modelo
+lstm_probs = softmax(lstm_model(X_tensor)['logits'])    # [short, neutral, long]
+tcn_probs = softmax(tcn_model(X_tensor)['logits'])
+transformer_probs = softmax(transformer_model(X_tensor)['logits'])
+xgb_probs = xgb_model.predict(X_seq[-1])  # Solo última fila para XGBoost
+
+# PASO 7: Calcular promedio ponderado (votos iguales por ahora)
+ensemble_probs = (lstm_probs + tcn_probs + transformer_probs + xgb_probs) / 4
+
+# PASO 8: Retornar al Bot
+return {
+    "symbol": "ETHUSDT",
+    "long_prob": ensemble_probs[2],    # Probabilidad LONG
+    "short_prob": ensemble_probs[0],   # Probabilidad SHORT
+    "neutral_prob": ensemble_probs[1]  # Probabilidad NEUTRAL
+}
+```
 
 ---
 
-**Aviso de Confidencialidad:** Este documento contiene detalles arquitectónicos propietarios del Sistema de Trading.
+## 5. PILAR III: El Bot de Ejecución (Ninja Protocol)
+
+### 5.1 Ciclo Principal (tick())
+
+**Archivo:** `binance-futures-bot-ts/src/app/strategy-runner.ts`
+**Intervalo:** Cada 1000ms
+
+```typescript
+async tick() {
+    // 1. Obtener predicción del Servicio ML
+    const prediction = await fetch('http://127.0.0.1:8001/ml-v2/predict', {
+        method: 'POST',
+        body: JSON.stringify({ symbol: 'ETHUSDT' })
+    });
+    const { long_prob, short_prob, neutral_prob } = await prediction.json();
+
+    // 2. Leer umbral dinámico
+    const threshold = MlConfigWatcher.getInstance().getThreshold('ETHUSDT');
+    // Ejemplo: threshold = 0.40
+
+    // 3. Decidir acción
+    if (long_prob > threshold && !hasPosition) {
+        await enterLong();
+    } else if (short_prob > threshold && !hasPosition) {
+        await enterShort();
+    } else if (hasPosition) {
+        await evaluateExit(long_prob, short_prob, neutral_prob);
+    }
+}
+```
+
+### 5.2 Protocolo Ninja de Salida (3 Capas)
+
+```typescript
+async evaluateExit(longProb, shortProb, neutralProb) {
+    const position = getActivePosition();
+    const roiPct = calculateROI(position.entryPrice, currentPrice);
+    const opposingProb = position.side === 'LONG' ? shortProb : longProb;
+
+    // CAPA 1: PÁNICO (Prioridad Máxima)
+    // Si el modelo grita en contra con fuerza (>50%)
+    if (opposingProb > 0.50) {
+        await closeSideMarket(position);
+        log('EXIT: PANIC_REVERSAL');
+        return;
+    }
+
+    // CAPA 2: NEUTRALIDAD (Tomar Ganancias)
+    // Si ganamos >5% y el mercado se duerme (Neutral >60%)
+    if (roiPct > 5 && neutralProb > 0.60) {
+        await closeSideMarket(position);
+        log('EXIT: NEUTRAL_TAKE_PROFIT');
+        return;
+    }
+
+    // CAPA 3: TRAILING STOP (Proteger Ganancias)
+    const peak = Math.max(position.peakROI, roiPct);
+    let trailDistance = 0.40;  // Default: 40%
+    if (peak > 50) trailDistance = 0.10;  // Super estricto
+    else if (peak > 30) trailDistance = 0.20;  // Estricto
+
+    if (peak > 10 && roiPct < peak * (1 - trailDistance)) {
+        await closeSideMarket(position);
+        log('EXIT: TRAILING_STOP');
+        return;
+    }
+}
+```
+
+---
+
+## 6. Flujo Completo: Del Dato a la Orden
+
+```
+T=0       Binance emite actualización de Order Book para ETHUSDT
+          │
+T=10s     Data Collector captura snapshot, calcula OBI, inserta en DB
+          │ INSERT INTO orderbook_metrics VALUES (1703800000000, 'ETH/USDT:USDT', 0.15, ...)
+          ▼
+T=11s     Bot hace tick(), llama POST /ml-v2/predict {"symbol": "ETHUSDT"}
+          │
+          ├── ML Service lee SELECT ... LIMIT 60 ORDER BY timestamp DESC
+          │
+          ├── Calcula features derivadas (buy_sell_ratio, depth_imbalance)
+          │
+          ├── Aplica scaler: X_scaled = scaler.transform(X)
+          │
+          ├── Crea tensor: (1, 12, 13)
+          │
+          ├── Pasa por 4 modelos:
+          │   ├── LSTM:        [0.18, 0.42, 0.40]
+          │   ├── TCN:         [0.15, 0.45, 0.40]
+          │   ├── Transformer: [0.12, 0.48, 0.40]
+          │   └── XGBoost:     [0.10, 0.45, 0.45]
+          │
+          ├── Promedia: ensemble = [0.1375, 0.45, 0.4125]
+          │
+          └── Retorna: {"long_prob": 0.4125, "short_prob": 0.1375, "neutral_prob": 0.45}
+          │
+T=11.05s  Bot recibe respuesta, compara:
+          │   long_prob (0.41) > threshold (0.40) ✓
+          │   No hay posición abierta ✓
+          │
+          └── Bot envía: POST /fapi/v1/order {"side": "BUY", "type": "MARKET", ...}
+          │
+T=11.1s   Binance ejecuta orden, Bot registra entrada en state
+          │
+T=12s     Bot hace tick(), ahora en modo VIGILANCIA
+          │   Evalúa: ¿PÁNICO? ¿NEUTRAL? ¿TRAILING?
+          │   Continúa monitoreando...
+```
+
+---
+
+## 7. Archivos Clave del Sistema
+
+| Archivo | Propósito |
+|---------|-----------|
+| `scripts/next_gen/market_data_collector.py` | Captura datos cada 10s |
+| `services/ml_service_v2.py` | Sirve predicciones vía REST |
+| `scripts/train_v2_production.py` | Entrena los 4 modelos |
+| `ml/advanced_models/ensemble_manager.py` | Combina votos del Consejo |
+| `binance-futures-bot-ts/src/app/strategy-runner.ts` | Ejecuta órdenes |
+| `models/v2_ensemble/{SYMBOL}/` | Modelos entrenados |
+| `models/advanced/thresholds_config.json` | Umbrales por símbolo |
+| `data/market_data_v2.db` | Base de datos de mercado |
+
+---
+
+## 8. Métricas de Rendimiento
+
+*   **Latencia Predicción:** <50ms (end-to-end)
+*   **Frecuencia de Datos:** 1 snapshot cada 10 segundos
+*   **Símbolos Activos:** 15 (BTC, ETH, ADA, AVAX, SOL, XRP, LINK, ATOM, BNB, DOGE, DOT, LTC, NEAR, UNI, POL)
+*   **Reentrenamiento:** Diario (automático vía cron)
+*   **Disponibilidad:** 99.9% (PM2 con auto-restart)
+
+---
+
+**Aviso de Confidencialidad:** Este documento contiene detalles arquitectónicos propietarios. Distribución restringida.
