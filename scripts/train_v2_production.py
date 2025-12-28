@@ -20,6 +20,7 @@ from sklearn.preprocessing import StandardScaler
 from ml.advanced_models.improved_architecture import DeepTemporalNet
 from ml.advanced_models.tabular_model import XGBoostTradingModel
 from ml.advanced_models.tcn_model import TCNTradingModel
+from ml.advanced_models.transformer_model import TradingTransformer
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,9 +41,12 @@ def load_data_from_db(symbol):
     SELECT 
         o.timestamp,
         o.mid_price as price, 
+        o.micro_price,
         o.bid_depth_20 as bid_depth, 
         o.ask_depth_20 as ask_depth, 
         o.spread_pct as bid_ask_spread, 
+        o.obi_5,
+        o.obi_10,
         o.obi_20 as obi,
         d.funding_rate, 
         d.open_interest,
@@ -96,10 +100,17 @@ def train_model_for_symbol(symbol):
     choices = [0, 2] # 0: Short, 2: Long
     df['label'] = np.select(conditions, choices, default=1)
     
+    # Create derived features
+    df['buy_sell_ratio'] = df['taker_buy_vol'] / (df['taker_sell_vol'] + 1e-8)
+    df['depth_imbalance'] = (df['bid_depth'] - df['ask_depth']) / (df['bid_depth'] + df['ask_depth'] + 1e-8)
+    
     feature_cols = [
-        'bid_depth', 'ask_depth', 'bid_ask_spread', 'obi',
+        'bid_depth', 'ask_depth', 'bid_ask_spread', 
+        'obi_5', 'obi_10', 'obi',
+        'micro_price',
         'funding_rate', 'open_interest',
-        'taker_buy_vol', 'taker_sell_vol'
+        'taker_buy_vol', 'taker_sell_vol',
+        'buy_sell_ratio', 'depth_imbalance'
     ]
     
     df = df.dropna()
@@ -185,7 +196,32 @@ def train_model_for_symbol(symbol):
     with open(symbol_dir / "xgboost_config.json", 'w') as f:
         json.dump({}, f)
         
-    logger.info(f"✅ Models for {clean_symbol} saved.")
+    # --- MODEL 4: Transformer ---
+    logger.info(f"   🏋️ Training Transformer for {clean_symbol}...")
+    transformer = TradingTransformer(
+        input_dim=input_dim, 
+        d_model=64, 
+        nhead=4, 
+        num_layers=2,
+        num_classes=3
+    ).to(device)
+    optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0005)
+    
+    transformer.train()
+    for epoch in range(10):
+        for X_b, y_b in loader:
+            X_b, y_b = X_b.to(device), y_b.to(device)
+            optimizer.zero_grad()
+            out = transformer(X_b)
+            loss = criterion(out['logits'], y_b)
+            loss.backward()
+            optimizer.step()
+            
+    torch.save(transformer.state_dict(), symbol_dir / "transformer.pt")
+    with open(symbol_dir / "transformer_config.json", 'w') as f:
+        json.dump({'model_config': {'input_dim': input_dim, 'd_model': 64, 'nhead': 4, 'num_layers': 2, 'dropout': 0.1}}, f)
+        
+    logger.info(f"✅ Models for {clean_symbol} saved (LSTM, TCN, XGBoost, Transformer).")
 
 def train_production():
     symbols = get_all_symbols()

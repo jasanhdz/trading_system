@@ -77,9 +77,12 @@ def load_latest_data(symbol: str, limit: int = 60) -> pd.DataFrame:
     SELECT 
         o.timestamp,
         o.mid_price as price, 
+        o.micro_price,
         o.bid_depth_20 as bid_depth, 
         o.ask_depth_20 as ask_depth, 
         o.spread_pct as bid_ask_spread, 
+        o.obi_5,
+        o.obi_10,
         o.obi_20 as obi,
         d.funding_rate, 
         d.open_interest,
@@ -143,6 +146,11 @@ class V2ModelManager:
             ensemble.load_model("tcn_v2", "tcn", str(symbol_dir / "tcn.pt"), str(symbol_dir / "tcn_config.json"))
             ensemble.load_model("xgb_v2", "xgboost", str(symbol_dir / "xgboost.joblib"), str(symbol_dir / "xgboost_config.json"))
             
+            # Load Transformer if available (backwards compatible)
+            transformer_path = symbol_dir / "transformer.pt"
+            if transformer_path.exists():
+                ensemble.load_model("transformer_v2", "transformer", str(transformer_path), str(symbol_dir / "transformer_config.json"))
+            
             self.ensembles[clean_symbol] = ensemble
             LOGGER.info(f"✅ Loaded {clean_symbol} ensemble.")
             return ensemble
@@ -172,7 +180,11 @@ class V2ModelManager:
                 'consensus': 0.0
             }
             
-        # 1. Feature Engineering
+        # 1. Feature Engineering (Derived Features)
+        df = df.copy()
+        df['buy_sell_ratio'] = df['taker_buy_vol'] / (df['taker_sell_vol'] + 1e-8)
+        df['depth_imbalance'] = (df['bid_depth'] - df['ask_depth']) / (df['bid_depth'] + df['ask_depth'] + 1e-8)
+        
         try:
             cols = self.feature_cols[clean_sym]
             X = df[cols].values
