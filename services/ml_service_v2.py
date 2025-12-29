@@ -189,30 +189,59 @@ class V2ModelManager:
         # CONSEJO DE SABIOS v2.1: Agregar Meta-Features si el modelo las requiere
         # ═══════════════════════════════════════════════════════════════════════════
         cols = self.feature_cols.get(clean_sym, [])
+        n_features = len(cols)
         
-        # Detectar si el modelo es v2.1 (tiene 19 features vs 13)
-        if len(cols) >= 19 or 'mean_obi_12' in cols:
+        # Detectar versión basada en número de features (13 = v2.0, 19 = v2.1)
+        is_v2_1 = n_features >= 19 or 'mean_obi_12' in cols
+        
+        if is_v2_1:
             # Calcular meta-features en tiempo real
             window = 12
             df['mean_obi_12'] = df['obi'].rolling(window, min_periods=1).mean()
             df['max_obi_12'] = df['obi'].rolling(window, min_periods=1).max()
-            df['std_obi_12'] = df['obi'].rolling(window, min_periods=1).std().fillna(0)
+            # FIX: std con min_periods=2 para evitar NaN, luego fillna(0) por seguridad
+            df['std_obi_12'] = df['obi'].rolling(window, min_periods=2).std().fillna(0)
             
             df['total_volume'] = df['taker_buy_vol'] + df['taker_sell_vol']
             df['mean_volume_12'] = df['total_volume'].rolling(window, min_periods=1).mean()
             df['volume_trend'] = df['total_volume'] / (df['mean_volume_12'] + 1e-8)
-            df['slope_price_12'] = (df['price'] - df['price'].shift(window).fillna(df['price'])) / window
+            # FIX: fillna con método forward/backward para evitar NaN en primeras filas
+            df['slope_price_12'] = (df['price'] - df['price'].shift(window).fillna(method='bfill')) / window
             
-            LOGGER.info(f"🧙 Consejo v2.1: Calculated meta-features for {clean_sym}")
+            LOGGER.info(f"🧙 Consejo v2.1: Calculated meta-features for {clean_sym} ({n_features} features)")
+        else:
+            LOGGER.info(f"📊 Consejo v2.0: Using legacy features for {clean_sym} ({n_features} features)")
         
+        # FIX #3: Usar orden de columnas EXACTO del features.json (guardado en training)
         try:
             X = df[cols].values
+            
+            # Sanity check: Detectar NaNs antes del scaler
+            nan_count = np.isnan(X).sum()
+            if nan_count > 0:
+                LOGGER.warning(f"⚠️ Found {nan_count} NaNs in features for {clean_sym}, filling with 0")
+                X = np.nan_to_num(X, nan=0.0)
+                
         except KeyError as e:
             LOGGER.error(f"Missing columns/config for {clean_sym}: {e}")
+            LOGGER.error(f"Available columns: {list(df.columns)}")
+            LOGGER.error(f"Required columns: {cols}")
             raise e
             
         # 2. Scaling
         scaler = self.scalers[clean_sym]
+        
+        # FIX #1: Validar dimensiones del scaler vs features
+        expected_features = scaler.n_features_in_
+        actual_features = X.shape[1]
+        
+        if expected_features != actual_features:
+            LOGGER.error(f"❌ Scaler/Feature mismatch for {clean_sym}!")
+            LOGGER.error(f"   Scaler expects: {expected_features} features")
+            LOGGER.error(f"   Data has: {actual_features} features")
+            LOGGER.error(f"   This likely means model version mismatch (v2.0 scaler with v2.1 features)")
+            raise ValueError(f"Feature dimension mismatch: scaler={expected_features}, data={actual_features}")
+        
         X_scaled = scaler.transform(X)
         
         # 3. Sequence Creation
