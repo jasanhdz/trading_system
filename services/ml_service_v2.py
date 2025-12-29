@@ -141,8 +141,12 @@ class V2ModelManager:
             with open(symbol_dir / "features.json", 'r') as f:
                 self.feature_cols[clean_symbol] = json.load(f)
             
-            # Load Models
-            ensemble.load_model("lstm_v2", "lstm", str(symbol_dir / "lstm.pt"), str(symbol_dir / "lstm_config.json"))
+            # Detect version and load weights
+            is_v2_1 = len(self.feature_cols[clean_symbol]) >= 19
+            version = "v2.1" if is_v2_1 else "default"
+            
+            ensemble = EnsembleManager(device=self.device)
+            ensemble.load_weights_from_config(version)
             ensemble.load_model("tcn_v2", "tcn", str(symbol_dir / "tcn.pt"), str(symbol_dir / "tcn_config.json"))
             ensemble.load_model("xgb_v2", "xgboost", str(symbol_dir / "xgboost.joblib"), str(symbol_dir / "xgboost_config.json"))
             
