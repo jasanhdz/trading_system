@@ -13,6 +13,9 @@ from ml.advanced_models.tabular_model import XGBoostTradingModel
 
 logger = logging.getLogger("EnsembleManager")
 
+# Path to ensemble weights config
+WEIGHTS_PATH = Path(__file__).resolve().parents[2] / "models" / "v2_ensemble" / "ensemble_weights.json"
+
 class EnsembleManager:
     """
     Orquestador del 'Comité de Sabios'.
@@ -24,6 +27,31 @@ class EnsembleManager:
         self.models: Dict[str, Any] = {}
         self.weights: Dict[str, float] = {}
         self.configs: Dict[str, Dict] = {}
+        # Load default weights from config
+        self.load_weights_from_config()
+    
+    def load_weights_from_config(self, version: str = "default"):
+        """
+        Carga pesos de votación desde JSON externo.
+        Permite ajustar pesos sin recompilar.
+        """
+        try:
+            if WEIGHTS_PATH.exists():
+                with open(WEIGHTS_PATH, 'r') as f:
+                    all_weights = json.load(f)
+                weights_dict = all_weights.get(version, all_weights.get("default", {}))
+                
+                # Normalizar pesos para que sumen 1.0
+                total = sum(weights_dict.values()) if weights_dict else 1.0
+                for name, w in weights_dict.items():
+                    if not name.startswith("_"):  # Ignorar comentarios
+                        self.weights[name] = w / total
+                        
+                logger.info(f"✅ Loaded ensemble weights for version '{version}': {self.weights}")
+            else:
+                logger.warning(f"⚠️ Weights config not found at {WEIGHTS_PATH}, using defaults")
+        except Exception as e:
+            logger.error(f"❌ Failed to load weights config: {e}")
         
     def load_model(self, name: str, model_type: str, model_path: str, config_path: str, weight: float = 1.0):
         """

@@ -185,8 +185,27 @@ class V2ModelManager:
         df['buy_sell_ratio'] = df['taker_buy_vol'] / (df['taker_sell_vol'] + 1e-8)
         df['depth_imbalance'] = (df['bid_depth'] - df['ask_depth']) / (df['bid_depth'] + df['ask_depth'] + 1e-8)
         
+        # ═══════════════════════════════════════════════════════════════════════════
+        # CONSEJO DE SABIOS v2.1: Agregar Meta-Features si el modelo las requiere
+        # ═══════════════════════════════════════════════════════════════════════════
+        cols = self.feature_cols.get(clean_sym, [])
+        
+        # Detectar si el modelo es v2.1 (tiene 19 features vs 13)
+        if len(cols) >= 19 or 'mean_obi_12' in cols:
+            # Calcular meta-features en tiempo real
+            window = 12
+            df['mean_obi_12'] = df['obi'].rolling(window, min_periods=1).mean()
+            df['max_obi_12'] = df['obi'].rolling(window, min_periods=1).max()
+            df['std_obi_12'] = df['obi'].rolling(window, min_periods=1).std().fillna(0)
+            
+            df['total_volume'] = df['taker_buy_vol'] + df['taker_sell_vol']
+            df['mean_volume_12'] = df['total_volume'].rolling(window, min_periods=1).mean()
+            df['volume_trend'] = df['total_volume'] / (df['mean_volume_12'] + 1e-8)
+            df['slope_price_12'] = (df['price'] - df['price'].shift(window).fillna(df['price'])) / window
+            
+            LOGGER.info(f"🧙 Consejo v2.1: Calculated meta-features for {clean_sym}")
+        
         try:
-            cols = self.feature_cols[clean_sym]
             X = df[cols].values
         except KeyError as e:
             LOGGER.error(f"Missing columns/config for {clean_sym}: {e}")

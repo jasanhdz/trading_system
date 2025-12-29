@@ -27,11 +27,48 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("TrainV2")
 
 # Config
+VERSION = "v2.1"  # Consejo de Sabios v2.1 con Meta-Features
 DB_PATH = REPO_ROOT / "data" / "market_data_v2.db"
 MODELS_DIR = REPO_ROOT / "models" / "v2_ensemble"
 SYMBOL = "ADA/USDT:USDT" # Entrenamos con ADA como base (luego se puede hacer multi-symbol)
 SEQ_LEN = 12
 PREDICT_HORIZON = 5
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONSEJO DE SABIOS v2.1: Meta-Features para darle "memoria" a XGBoost
+# ═══════════════════════════════════════════════════════════════════════════
+def add_robust_meta_features(df, window=12):
+    """
+    Genera 6 meta-features de forma segura (maneja NaNs) y rápida.
+    Esto permite que XGBoost "vea" tendencias, no solo el instante actual.
+    """
+    df = df.copy()
+    
+    # 1. Rolling Calculations para OBI (Order Book Imbalance)
+    df['mean_obi_12'] = df['obi'].rolling(window).mean()
+    df['max_obi_12'] = df['obi'].rolling(window).max()
+    df['std_obi_12'] = df['obi'].rolling(window).std()
+    
+    # 2. Total volume proxy
+    df['total_volume'] = df['taker_buy_vol'] + df['taker_sell_vol']
+    df['mean_volume_12'] = df['total_volume'].rolling(window).mean()
+    
+    # 3. Volume Trend (con protección división por cero)
+    df['volume_trend'] = df['total_volume'] / (df['mean_volume_12'] + 1e-8)
+    
+    # 4. Price Slope (Optimizado - 100x más rápido que polyfit)
+    # Pendiente = (PrecioActual - PrecioHace12ticks) / 12
+    df['slope_price_12'] = (df['price'] - df['price'].shift(window)) / window
+    
+    # ⚠️ PELIGRO MITIGADO: Eliminar NaNs creados por rolling/shift
+    initial_len = len(df)
+    df = df.dropna()
+    final_len = len(df)
+    
+    if initial_len - final_len > 0:
+        logger.info(f"⚠️ Meta-Features: Removidas {initial_len - final_len} filas con NaNs iniciales.")
+        
+    return df
 
 def load_data_from_db(symbol):
     logger.info(f"📥 Loading data for {symbol}...")
@@ -104,7 +141,13 @@ def train_model_for_symbol(symbol):
     df['buy_sell_ratio'] = df['taker_buy_vol'] / (df['taker_sell_vol'] + 1e-8)
     df['depth_imbalance'] = (df['bid_depth'] - df['ask_depth']) / (df['bid_depth'] + df['ask_depth'] + 1e-8)
     
-    feature_cols = [
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CONSEJO DE SABIOS v2.1: Agregar Meta-Features
+    # ═══════════════════════════════════════════════════════════════════════════
+    df = add_robust_meta_features(df, window=SEQ_LEN)
+    
+    # Features base (13) + Meta-Features (6) = 19 features totales
+    base_cols = [
         'bid_depth', 'ask_depth', 'bid_ask_spread', 
         'obi_5', 'obi_10', 'obi',
         'micro_price',
@@ -112,6 +155,14 @@ def train_model_for_symbol(symbol):
         'taker_buy_vol', 'taker_sell_vol',
         'buy_sell_ratio', 'depth_imbalance'
     ]
+    
+    meta_cols = [
+        'mean_obi_12', 'max_obi_12', 'std_obi_12',
+        'slope_price_12', 'mean_volume_12', 'volume_trend'
+    ]
+    
+    feature_cols = base_cols + meta_cols
+    logger.info(f"🧙 Consejo de Sabios {VERSION}: Entrenando con {len(feature_cols)} features")
     
     df = df.dropna()
     
