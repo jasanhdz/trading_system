@@ -1,3 +1,4 @@
+import argparse
 import sys
 from pathlib import Path
 
@@ -195,8 +196,21 @@ def train_model_for_symbol(symbol):
     # Convert to Tensor
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"   Using device: {device}")
-    dataset = TensorDataset(torch.FloatTensor(X_seq), torch.LongTensor(y_seq))
-    loader = DataLoader(dataset, batch_size=64, shuffle=True)
+    
+    # 6. Time Series Split (80/20) - NO SHUFFLE!
+    split_idx = int(len(X_seq) * 0.8)
+    
+    X_train, X_val = X_seq[:split_idx], X_seq[split_idx:]
+    y_train, y_val = y_seq[:split_idx], y_seq[split_idx:]
+    
+    logger.info(f"   Split: Train={len(X_train)}, Val={len(X_val)}")
+    
+    # Create Loaders
+    train_dataset = TensorDataset(torch.FloatTensor(X_train), torch.LongTensor(y_train))
+    val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
+    
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True) # Shuffle only train
+    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
     
     input_dim = len(feature_cols)
     
@@ -207,8 +221,9 @@ def train_model_for_symbol(symbol):
     criterion = torch.nn.CrossEntropyLoss()
     
     lstm.train()
+    lstm.train()
     for epoch in range(10):
-        for X_b, y_b in loader:
+        for X_b, y_b in train_loader:
             X_b, y_b = X_b.to(device), y_b.to(device)
             optimizer.zero_grad()
             out = lstm(X_b)
@@ -226,8 +241,9 @@ def train_model_for_symbol(symbol):
     optimizer = torch.optim.Adam(tcn.parameters(), lr=0.001)
     
     tcn.train()
+    tcn.train()
     for epoch in range(10):
-        for X_b, y_b in loader:
+        for X_b, y_b in train_loader:
             X_b, y_b = X_b.to(device), y_b.to(device)
             optimizer.zero_grad()
             out = tcn(X_b)
@@ -241,9 +257,13 @@ def train_model_for_symbol(symbol):
         
     # --- MODEL 3: XGBoost ---
     logger.info(f"   🏋️ Training XGBoost for {clean_symbol}...")
-    X_flat = X_seq[:, -1, :] # Last step
+    
+    # Flatten for XGBoost (last step only)
+    X_train_flat = X_train[:, -1, :]
+    X_val_flat = X_val[:, -1, :]
+    
     xgb = XGBoostTradingModel(use_gpu=(device=="cuda"))
-    xgb.train(X_flat, y_seq, X_flat, y_seq)
+    xgb.train(X_train_flat, y_train, X_val_flat, y_val)
     xgb.save(str(symbol_dir / "xgboost.joblib"))
     with open(symbol_dir / "xgboost_config.json", 'w') as f:
         json.dump({}, f)
@@ -261,7 +281,7 @@ def train_model_for_symbol(symbol):
     
     transformer.train()
     for epoch in range(10):
-        for X_b, y_b in loader:
+        for X_b, y_b in train_loader:
             X_b, y_b = X_b.to(device), y_b.to(device)
             optimizer.zero_grad()
             out = transformer(X_b)
@@ -276,8 +296,16 @@ def train_model_for_symbol(symbol):
     logger.info(f"✅ Models for {clean_symbol} saved (LSTM, TCN, XGBoost, Transformer).")
 
 def train_production():
-    symbols = get_all_symbols()
-    logger.info(f"Found {len(symbols)} symbols in DB: {symbols}")
+    parser = argparse.ArgumentParser(description='Train Consejo de Sabios v2.1')
+    parser.add_argument('--symbol', type=str, help='Specific symbol to train (e.g., BNBUSDT)')
+    args = parser.parse_args()
+
+    if args.symbol:
+        symbols = [args.symbol]
+        logger.info(f"🎯 Training SINGLE symbol: {symbols}")
+    else:
+        symbols = get_all_symbols()
+        logger.info(f"Found {len(symbols)} symbols in DB: {symbols}")
     
     for symbol in symbols:
         try:

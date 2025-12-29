@@ -11,7 +11,7 @@ import torch
 import joblib
 import json
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -111,6 +111,12 @@ class V2ModelManager:
         self.feature_cols: Dict[str, List[str]] = {}
         self.device = "cpu" # Force CPU for inference service stability
         
+        # ═══════════════════════════════════════════════════════
+        # FASE 4.5: FILTRO NINJA (EMA ASIMÉTRICO)
+        # ═══════════════════════════════════════════════════════
+        self.smoothed_probs_cache = {} 
+        # Alphas dinámicos se definen en predict()
+        
     def _clean_symbol(self, symbol: str) -> str:
         # ADA/USDT:USDT -> ADAUSDT
         return symbol.replace("/", "").replace(":", "").replace("-", "").replace("USDT", "") + "USDT"
@@ -145,7 +151,7 @@ class V2ModelManager:
             is_v2_1 = len(self.feature_cols[clean_symbol]) >= 19
             version = "v2.1" if is_v2_1 else "default"
             
-            ensemble = EnsembleManager(device=self.device)
+            # ensemble = EnsembleManager(device=self.device) # REMOVED: Double instantiation bug
             ensemble.load_weights_from_config(version)
             ensemble.load_model("tcn_v2", "tcn", str(symbol_dir / "tcn.pt"), str(symbol_dir / "tcn_config.json"))
             ensemble.load_model("xgb_v2", "xgboost", str(symbol_dir / "xgboost.joblib"), str(symbol_dir / "xgboost_config.json"))
@@ -178,9 +184,9 @@ class V2ModelManager:
         clean_sym = self._clean_symbol(symbol)
         
         if ensemble is None:
-            # Dummy response if model missing
+            # Dummy response if model missing (Fail Safe: Neutral)
             return {
-                'ensemble_probs': torch.tensor([[0.33, 0.33, 0.33]]),
+                'ensemble_probs': torch.tensor([[0.0, 1.0, 0.0]]),
                 'consensus': 0.0
             }
             
@@ -210,7 +216,7 @@ class V2ModelManager:
             df['mean_volume_12'] = df['total_volume'].rolling(window, min_periods=1).mean()
             df['volume_trend'] = df['total_volume'] / (df['mean_volume_12'] + 1e-8)
             # FIX: fillna con método forward/backward para evitar NaN en primeras filas
-            df['slope_price_12'] = (df['price'] - df['price'].shift(window).fillna(method='bfill')) / window
+            df['slope_price_12'] = (df['price'] - df['price'].shift(window).bfill()) / window
             
             LOGGER.info(f"🧙 Consejo v2.1: Calculated meta-features for {clean_sym} ({n_features} features)")
         else:
@@ -261,6 +267,60 @@ class V2ModelManager:
         # 4. Predict
         with torch.no_grad():
             result = ensemble.predict(X_tensor)
+            
+        # ═══════════════════════════════════════════════════════
+        # FASE 4.5: FILTRO NINJA (EMA ASIMÉTRICO)
+        # Filosofía: "Subir lento (escéptico), Bajar rápido (paranoico)"
+        # ═══════════════════════════════════════════════════════
+        ensemble_probs = result['ensemble_probs'][0].tolist()
+        
+        raw_dict = {
+            'short': float(ensemble_probs[0]),
+            'neutral': float(ensemble_probs[1]),
+            'long': float(ensemble_probs[2])
+        }
+
+        # 1. Obtener estado anterior (o usar cruda si es la primera vez)
+        prev_smoothed = self.smoothed_probs_cache.get(clean_sym, raw_dict)
+
+        # 2. Definir la personalidad del filtro
+        ALPHA_SLOW = 0.15  # Escéptico: Si la señal sube, cuesta trabajo creerla
+        ALPHA_FAST = 0.70  # Paranoico: Si la señal baja, reaccionamos YA
+
+        smoothed_dict = {}
+
+        # 3. Aplicar lógica asimétrica
+        for key in ['short', 'neutral', 'long']:
+            raw_val = raw_dict[key]
+            prev_val = prev_smoothed[key]
+            
+            # Mágia aquí: ¿La señal está mejorando o empeorando?
+            diff = raw_val - prev_val
+            
+            if diff > 0:
+                # La probabilidad está subiendo -> PIDE CONFIRMACIÓN (Lento)
+                alpha = ALPHA_SLOW
+            else:
+                # La probabilidad está bajando -> PÁNICO (Rápido)
+                alpha = ALPHA_FAST
+            
+            # Fórmula EMA estándar
+            new_val = (alpha * raw_val) + ((1 - alpha) * prev_val)
+            smoothed_dict[key] = new_val
+
+        # 4. Normalizar (asegurar que sumen 1.0)
+        total = smoothed_dict['short'] + smoothed_dict['neutral'] + smoothed_dict['long']
+        normalized_dict = {k: v / total for k, v in smoothed_dict.items()}
+
+        # 5. Guardar en caché para el próximo tick
+        self.smoothed_probs_cache[clean_sym] = normalized_dict
+
+        # 6. Actualizar el resultado con el valor suavizado
+        result['ensemble_probs'] = torch.tensor([[
+            normalized_dict['short'],
+            normalized_dict['neutral'],
+            normalized_dict['long']
+        ]])
             
         return result
 
