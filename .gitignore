@@ -10,6 +10,8 @@ experiments/
 
 # Database & Data
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 data/raw/
 logs/
@@ -22,3 +24,9 @@ backtest_results/
 models/
 binance_futures_bot_py/state/*
 .DS_Store
+
+# Output Artifacts
+*.png
+*.csv
+scripts/grid_results/
+scripts/grid_search_results/
