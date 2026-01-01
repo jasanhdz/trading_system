@@ -196,6 +196,10 @@ def train_model_for_symbol(symbol):
     # Convert to Tensor
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"   Using device: {device}")
+    if device == "cuda":
+        logger.info(f"   GPU Count: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            logger.info(f"   GPU {i}: {torch.cuda.get_device_name(i)}")
     
     # 6. Time Series Split (80/20) - NO SHUFFLE!
     split_idx = int(len(X_seq) * 0.8)
@@ -298,6 +302,8 @@ def train_model_for_symbol(symbol):
 def train_production():
     parser = argparse.ArgumentParser(description='Train Consejo de Sabios v2.1')
     parser.add_argument('--symbol', type=str, help='Specific symbol to train (e.g., BNBUSDT)')
+    parser.add_argument('--shard_id', type=int, default=0, help='Shard ID for parallel training (0-based)')
+    parser.add_argument('--num_shards', type=int, default=1, help='Total number of shards')
     args = parser.parse_args()
 
     if args.symbol:
@@ -306,6 +312,12 @@ def train_production():
     else:
         symbols = get_all_symbols()
         logger.info(f"Found {len(symbols)} symbols in DB: {symbols}")
+        
+    # Sharding Logic
+    if args.num_shards > 1:
+        all_count = len(symbols)
+        symbols = [s for i, s in enumerate(symbols) if i % args.num_shards == args.shard_id]
+        logger.info(f"🧩 Worker {args.shard_id}/{args.num_shards} processing {len(symbols)}/{all_count} symbols")
     
     for symbol in symbols:
         try:

@@ -109,7 +109,8 @@ class V2ModelManager:
         self.ensembles: Dict[str, EnsembleManager] = {}
         self.scalers: Dict[str, Any] = {}
         self.feature_cols: Dict[str, List[str]] = {}
-        self.device = "cpu" # Force CPU for inference service stability
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        LOGGER.info(f"🚀 ML Service initialized on device: {self.device}")
         
         # ═══════════════════════════════════════════════════════
         # FASE 4.5: FILTRO NINJA (EMA ASIMÉTRICO)
