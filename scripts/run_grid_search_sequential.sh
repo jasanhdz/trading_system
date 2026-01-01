@@ -1,91 +1,61 @@
 #!/bin/bash
-# Sequential Grid Search for All Priority Symbols
-# Runs ONE symbol at a time to avoid memory issues
-# Each symbol tests 15 configurations (5 thresholds × 3 stops)
+# scripts/run_grid_search_sequential.sh
+# Runs Grid Search Optimizer for all symbols SEQUENTIALLY to prevent system freeze.
+# Uses AMD GPU 0 for acceleration but processes one symbol at a time.
 
-VENV="/home/jasan/Develop/trading_system/.venv_rocm62/bin/python3"
-SCRIPT="/home/jasan/Develop/trading_system/scripts/grid_search_single_symbol.py"
-OUTPUT_DIR="/home/jasan/Develop/trading_system/scripts/grid_search_results"
-
-# Priority symbols from .env backup (excluding BTC, DOGE, XRP which are already deployed)
+# 1. Define Symbols (21 Total)
 SYMBOLS=(
-    "ADAUSDT"
-    "BNBUSDT"
-    "ATOMUSDT"
-    "POLUSDT"
-    "BTCUSDT"
+    "ADA/USDT:USDT"
+    "AVAX/USDT:USDT"
+    "BTC/USDT:USDT"
+    "ETH/USDT:USDT"
+    "LINK/USDT:USDT"
+    "SOL/USDT:USDT"
+    "XRP/USDT:USDT"
+    "ATOM/USDT:USDT"
+    "BNB/USDT:USDT"
+    "DOGE/USDT:USDT"
+    "DOT/USDT:USDT"
+    "LTC/USDT:USDT"
+    "NEAR/USDT:USDT"
+    "UNI/USDT:USDT"
+    "POL/USDT:USDT"
+    "APT/USDT:USDT"
+    "FET/USDT:USDT"
+    "INJ/USDT:USDT"
+    "SEI/USDT:USDT"
+    "WLD/USDT:USDT"
+    "1000PEPE/USDT:USDT"
 )
 
-mkdir -p "$OUTPUT_DIR"
-SUMMARY_FILE="$OUTPUT_DIR/grid_search_summary.txt"
+# 2. Setup Environment (AMD ROCm)
+source .venv_rocm62/bin/activate
+export HSA_OVERRIDE_GFX_VERSION=10.3.0
+export LD_LIBRARY_PATH=/opt/rocm-6.2.0/lib:/opt/rocm-6.2.0/lib64:$LD_LIBRARY_PATH
+export PYTORCH_HIP_ALLOC_CONF=max_split_size_mb:512
+export HSA_ENABLE_SDMA=0
 
-echo "========================================================================"
-echo "🚀 SEQUENTIAL GRID SEARCH - ALL PRIORITY SYMBOLS"
-echo "   Started: $(date)"
-echo "   Symbols: ${#SYMBOLS[@]}"
-echo "   Configs per symbol: 15 (5 thresholds × 3 stops)"
-echo "========================================================================"
+echo "🚀 Starting Sequential Grid Search (Safe Mode)"
+echo "   Testing 10x AND 15x Leverage."
+echo "   Processing 1 symbol at a time to protect system stability."
+echo "---------------------------------------------------"
 
-echo "Grid Search Summary - $(date)" > "$SUMMARY_FILE"
-echo "========================================" >> "$SUMMARY_FILE"
+# 3. Launch Sequential Loop
+count=1
+total=${#SYMBOLS[@]}
 
-TOTAL=${#SYMBOLS[@]}
-for i in "${!SYMBOLS[@]}"; do
-    SYMBOL="${SYMBOLS[$i]}"
-    PROGRESS=$((i + 1))
+for symbol in "${SYMBOLS[@]}"; do
+    echo "🧩 [$count/$total] Processing $symbol on GPU 0..."
     
-    echo ""
-    echo "========================================================================"
-    echo "📊 PROGRESS: $PROGRESS/$TOTAL"
-    echo "🎯 SYMBOL: $SYMBOL"
-    echo "   Started: $(date)"
-    echo "========================================================================"
+    # Run in FOREGROUND (wait for completion)
+    HIP_VISIBLE_DEVICES=0 python scripts/grid_search_optimizer.py --symbol "$symbol" --days 3 > "logs/grid_search_${symbol//\//_}.log" 2>&1
     
-    # Run grid search for this symbol
-    $VENV $SCRIPT --symbol "$SYMBOL" --days 3
+    echo "✅ Completed $symbol."
+    echo "---------------------------------------------------"
+    ((count++))
     
-    # Extract best result for summary
-    if [ -f "$OUTPUT_DIR/${SYMBOL}_grid_results.csv" ]; then
-        echo "" >> "$SUMMARY_FILE"
-        echo "=== $SYMBOL ===" >> "$SUMMARY_FILE"
-        # Get best result (highest return from CSV)
-        tail -1 "$OUTPUT_DIR/${SYMBOL}_grid_results.csv" >> "$SUMMARY_FILE"
-        echo "   ✅ Completed: $(date)"
-    else
-        echo "   ❌ No results file generated"
-        echo "=== $SYMBOL === ERROR: No results" >> "$SUMMARY_FILE"
-    fi
-    
-    # Brief pause between symbols to free memory
+    # Cooldown to let system breathe
     sleep 5
 done
 
-echo ""
-echo "========================================================================"
-echo "🏆 GRID SEARCH COMPLETE"
-echo "   Finished: $(date)"
-echo "========================================================================"
-echo ""
-echo "📊 QUICK SUMMARY:"
-echo "========================================================================"
-
-# Parse and display best config for each symbol
-for SYMBOL in "${SYMBOLS[@]}"; do
-    CSV="$OUTPUT_DIR/${SYMBOL}_grid_results.csv"
-    if [ -f "$CSV" ]; then
-        # Get best result (sort by return_pct descending)
-        BEST=$(tail -n +2 "$CSV" | sort -t',' -k4 -rn | head -1)
-        if [ -n "$BEST" ]; then
-            THR=$(echo "$BEST" | cut -d',' -f2)
-            STOP=$(echo "$BEST" | cut -d',' -f3)
-            RET=$(echo "$BEST" | cut -d',' -f4 | cut -c1-7)
-            WR=$(echo "$BEST" | cut -d',' -f5)
-            TRADES=$(echo "$BEST" | cut -d',' -f7)
-            echo "$SYMBOL: Thr=$THR Stop=$STOP Return=${RET}% WR=$(echo "$WR * 100" | bc)% Trades=$TRADES"
-        fi
-    fi
-done
-
-echo ""
-echo "📁 Detailed results: $OUTPUT_DIR/"
-echo "📋 Summary: $SUMMARY_FILE"
+echo "🎉 All Grid Search tasks completed successfully."

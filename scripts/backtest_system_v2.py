@@ -383,14 +383,15 @@ class NinjaBotSimulator:
         print(f"Retorno Total:   {((self.balance - self.capital)/self.capital)*100:.2f}%")
         print(f"Total Trades:    {len(df_trades)}")
         print(f"Win Rate:        {len(wins)/len(df_trades)*100:.2f}%")
-        print(f"Profit Factor:   {wins['pnl'].sum() / abs(losses['pnl'].sum()) if not losses.empty else 'Inf':.2f}")
+        print(f"Profit Factor:   {wins['pnl'].sum() / abs(losses['pnl'].sum()) if not losses.empty else float('inf'):.2f}")
         print("-" * 30)
         print("Motivos de Salida:")
         print(df_trades['reason'].value_counts())
         print("="*50)
         
         # Guardar CSV
-        csv_path = f"backtest_trades_{self.symbol}_v2.csv"
+        safe_symbol = self.symbol.replace('/', '_').replace(':', '_')
+        csv_path = f"backtest_trades_{safe_symbol}_v2.csv"
         df_trades.to_csv(csv_path, index=False)
         LOGGER.info(f"📝 Trades guardados en {csv_path}")
         
@@ -398,11 +399,12 @@ class NinjaBotSimulator:
         plt.figure(figsize=(12, 6))
         plt.plot(self.equity_curve)
         plt.title(f"Equity Curve - {self.symbol} (Ninja Protocol)")
-        plt.xlabel("Ticks")
-        plt.ylabel("Equity ($)")
+        plt.xlabel("Trades")
+        plt.ylabel("Balance (USDT)")
         plt.grid(True, alpha=0.3)
-        plt.savefig(f"backtest_equity_{self.symbol}_v2.png")
-        LOGGER.info(f"📈 Gráfico guardado en backtest_equity_{self.symbol}_v2.png")
+        plt.savefig(f"backtest_equity_{safe_symbol}_v2.png")
+        plt.close()
+        LOGGER.info(f"📈 Gráfico guardado en backtest_equity_{safe_symbol}_v2.png")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
