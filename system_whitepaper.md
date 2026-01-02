@@ -480,22 +480,44 @@ Duración: ~2 horas en RTX 3060
 
 ## 8. Hardware y Requisitos
 
-### 8.1 Especificaciones Actuales
+### 8.1 Especificaciones del Sistema
 
 | Componente | Especificación |
 |------------|----------------|
-| **CPU** | Intel Core i7-10700 (8 cores) |
-| **RAM** | 32 GB DDR4 |
-| **GPU** | NVIDIA RTX 3060 (12GB VRAM) |
-| **Almacenamiento** | 1TB NVMe SSD |
-| **OS** | Ubuntu 22.04 LTS |
-| **Python** | 3.12 (venv_cuda) |
-| **Node.js** | 20.x LTS |
-| **CUDA** | 12.x |
+| **CPU** | Intel Core i3-10100F @ 3.60GHz (4 cores, 8 threads) |
+| **RAM** | 8 GB DDR4 |
+| **Almacenamiento** | 1TB NVMe SSD (914GB disponibles) |
+| **OS** | Ubuntu 24.04.3 LTS |
+| **Python** | 3.12.3 |
+| **Node.js** | v20.19.6 LTS |
 
-### 8.2 Dependencias Clave
+### 8.2 Arquitectura Multi-GPU (3 tarjetas)
 
-**Python:**
+El sistema utiliza una arquitectura híbrida con división de tareas por GPU:
+
+| GPU | Modelo | VRAM | Rol |
+|-----|--------|------|-----|
+| **NVIDIA** | GeForce GTX 1660 | 6 GB | **Inferencia** (ML Service v2 - 24/7) |
+| **AMD #1** | Radeon RX 6600 | 8 GB | **Entrenamiento** (Daily Retrain) |
+| **AMD #2** | Radeon RX 6600 MECH 2X | 8 GB | **Entrenamiento** (Paralelo/Backup) |
+
+**Estrategia de División:**
+- La **NVIDIA GTX 1660** está dedicada exclusivamente al servicio de inferencia (`03-ML-Service-V2`), garantizando baja latencia en predicciones 24/7.
+- Las **AMD RX 6600** se utilizan para el re-entrenamiento diario de modelos, aprovechando ROCm para PyTorch.
+
+### 8.3 Entornos Virtuales
+
+```bash
+# Inferencia (NVIDIA CUDA)
+.venv_cuda/     # PyTorch + CUDA para GTX 1660
+
+# Entrenamiento (AMD ROCm)
+.venv_rocm62/   # PyTorch + ROCm 6.2 para RX 6600
+```
+
+### 8.4 Dependencias Clave
+
+**Python (Inferencia - CUDA):**
 ```
 torch==2.1.0+cu121
 xgboost==2.0.0
@@ -506,7 +528,14 @@ pandas==2.1.0
 numpy==1.26.0
 ```
 
-**Node.js:**
+**Python (Entrenamiento - ROCm):**
+```
+torch==2.1.0+rocm6.2
+xgboost==2.0.0
+scikit-learn==1.3.0
+```
+
+**Node.js (Bot):**
 ```
 typescript: ^5.0.0
 js-yaml: ^4.1.0
