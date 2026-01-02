@@ -607,27 +607,205 @@ curl http://localhost:8001/ml-v2/predict -X POST -H "Content-Type: application/j
 
 ---
 
-## 12. Roadmap Futuro
+## 12. Herramientas CLI y Utilidades
+
+### 12.1 Comandos de Consola (~/bin)
+
+Los siguientes comandos están disponibles globalmente desde cualquier directorio:
+
+| Comando | Descripción |
+|---------|-------------|
+| `audit_bot` | Descarga y analiza trades de Binance |
+| `trading_report` | Muestra reportes formateados en consola |
+
+**Configuración de symlinks:**
+```bash
+# Ubicación: ~/bin/
+ls -la ~/bin/
+# audit_bot -> .../binance-futures-bot-ts/analysis/audit_bot.py
+# trading_report -> .../binance-futures-bot-ts/analysis/view_console_report.py
+```
+
+### 12.2 Audit Bot (Forensic Analysis)
+
+**Archivo:** `binance-futures-bot-ts/analysis/audit_bot.py`
+
+Herramienta de análisis forense que descarga el historial de trades de Binance y genera reportes.
+
+**Uso:**
+```bash
+# Operaciones de hoy
+audit_bot --today
+
+# Última semana, solo ganancias
+audit_bot --week --status WIN
+
+# Filtrar por símbolo
+audit_bot --symbol SOLUSDT
+
+# Últimos N días
+audit_bot --days 14
+```
+
+**Output:**
+- `operations_history.csv` - Historial en CSV
+- `chart_equity.png` - Curva de equity
+- `chart_pnl_symbol.png` - PnL por símbolo
+
+### 12.3 Trading Report
+
+**Archivo:** `binance-futures-bot-ts/analysis/view_console_report.py`
+
+Lee el CSV generado por `audit_bot` y muestra un reporte formateado:
+
+```bash
+trading_report
+```
+
+**Secciones del Reporte:**
+1. Signos Vitales (PnL, Win Rate, Profit Factor, Max Drawdown)
+2. Análisis LONG vs SHORT
+3. Hall of Fame (Top 5 victorias)
+4. Hall of Shame (Top 5 pérdidas)
+5. Detalle de Wins
+6. Detalle de Losses
+7. Bitácora completa
+
+---
+
+## 13. Grid Search y Optimización
+
+### 13.1 Symbol Grid Search
+
+**Archivo:** `scripts/symbol_grid_search.py`
+
+Herramienta para encontrar la mejor configuración de régimen para cada símbolo.
+
+**Uso:**
+```bash
+# Grid search con 7 días de datos
+python scripts/symbol_grid_search.py --days 7
+
+# Símbolos específicos
+python scripts/symbol_grid_search.py --symbols BTCUSDT,ETHUSDT --days 14
+```
+
+### 13.2 Escenarios Predefinidos
+
+| Escenario | Leverage | Hard Stop | Entry Threshold | Descripción |
+|-----------|----------|-----------|-----------------|-------------|
+| **DEFAULT** | 10x | -5% | 50% | Configuración base |
+| **TORTUGA** | 3x | -20% | 55% | Conservador, más margen |
+| **SANGRIENTO** | 20x | -2% | 40% | Agresivo, alto riesgo |
+| **CAZADOR** | 10x | -5% | 35% | Entry fácil, mismo riesgo |
+
+### 13.3 Output del Grid Search
+
+```
+reports/
+├── grid_search_YYYYMMDD_HHMMSS.txt    # Reporte legible
+└── symbol_grid_search_results.json    # Datos estructurados
+```
+
+**Formato de Resultados:**
+```yaml
+SYMBOL_OVERRIDES:
+  BTCUSDT:
+    WHALE: { leverage: 3, entry_threshold: 0.55, hard_stop_roe: -0.25 }
+  SOLUSDT:
+    MONK: { leverage: 15, entry_threshold: 0.35, hard_stop_roe: -0.03 }
+```
+
+---
+
+## 14. Biblioteca de Scripts (90+)
+
+**Directorio:** `scripts/` (92 archivos)
+
+### 14.1 Categorías
+
+| Categoría | Scripts | Descripción |
+|-----------|---------|-------------|
+| **Training** | `train_*.py` (12) | Entrenamiento de modelos |
+| **Analysis** | `analyze_*.py` (9) | Análisis de datos y modelos |
+| **Backtest** | `backtest_*.py` (3) | Simulación histórica |
+| **Grid Search** | `grid_search_*.py` (5) | Optimización de parámetros |
+| **Data** | `collect_*.py`, `download_*.py` | Recolección de datos |
+| **Diagnostics** | `diagnose_*.py`, `debug_*.py` | Troubleshooting |
+
+### 14.2 Scripts Clave
+
+| Script | Función |
+|--------|---------|
+| `backtest_system_v2.py` | Backtester completo con ML |
+| `train_v2_production.py` | Training pipeline producción |
+| `symbol_grid_search.py` | Optimizador de regímenes |
+| `daily_retrain.sh` | Re-entrenamiento diario |
+| `collect_historical_data.py` | Descarga datos históricos |
+
+---
+
+## 15. Arquitectura de Directorios
+
+```
+trading_system/
+├── binance-futures-bot-ts/       # Bot TypeScript
+│   ├── src/app/
+│   │   ├── core/                 # RegimeDetector, NinjaConfigManager
+│   │   ├── regimes/              # Strategies (Bloodbath, Whale, Monk, Bunker)
+│   │   └── strategy-runner.ts    # Lógica principal
+│   ├── analysis/                 # audit_bot, trading_report
+│   ├── data/                     # Estado, orders_book.json
+│   ├── logs/                     # history-*.log
+│   └── regime_config.live.yaml   # Config producción
+│
+├── services/
+│   └── ml_service_v2.py          # FastAPI ML Service
+│
+├── ml/
+│   └── advanced_models/          # Arquitecturas de modelos
+│
+├── models/
+│   └── v2_ensemble/              # Modelos entrenados por símbolo
+│
+├── scripts/                      # 92 utilidades
+├── data/                         # market_data_v2.db
+├── config/                       # settings.py
+└── system_whitepaper.md          # Este documento
+```
+
+---
+
+## 16. Roadmap Futuro
 
 - [ ] Multi-exchange support (Bybit, OKX)
 - [ ] Optimización de hiperparámetros con Optuna
 - [ ] Dashboard web para monitoreo
 - [ ] Alertas por Telegram/Discord
 - [ ] Grid Search automatizado semanal
+- [ ] Migración a PostgreSQL para escalabilidad
+- [ ] API de control remoto (start/stop/status)
 
 ---
 
-## 13. Glosario
+## 17. Glosario
 
 | Término | Definición |
 |---------|------------|
-| **OBI** | Order Book Imbalance - Desequilibrio entre compra/venta |
+| **OBI** | Order Book Imbalance - Desequilibrio entre compra/venta [-1, 1] |
 | **Régimen** | Estado del mercado (BLOODBATH, WHALE, MONK, BUNKER) |
-| **Hysteresis** | Retardo intencional para evitar cambios rápidos |
-| **Trailing Stop** | Stop loss que sigue al precio cuando gana |
-| **Ensemble** | Combinación de múltiples modelos ML |
-| **ROI** | Return on Investment (ganancia/pérdida %) |
+| **Hysteresis** | Retardo intencional de 60s para evitar cambios rápidos de régimen |
+| **Trailing Stop** | Stop loss dinámico que sigue al precio cuando está en ganancia |
+| **Ensemble** | Combinación ponderada de 4 modelos ML (LSTM, TCN, XGBoost, Transformer) |
+| **ROI** | Return on Investment - Porcentaje de ganancia/pérdida |
+| **ROE** | Return on Equity - ROI considerando el leverage |
+| **Ninja Filter** | EMA asimétrica para suavizar señales ML |
+| **Grid Search** | Búsqueda exhaustiva de parámetros óptimos |
+| **Funding Rate** | Tasa de financiamiento en futuros perpetuos |
+| **Peak ROE** | Máximo ROI alcanzado en una posición |
+| **CCXT** | Librería unificada para exchanges de crypto |
 
 ---
 
-**© 2026 NINJA Trading System. Documento interno - No distribuir.**
+**© 2026 NINJA Trading System v4.0. Documento interno - No distribuir.**
+
