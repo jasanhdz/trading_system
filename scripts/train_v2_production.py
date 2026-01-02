@@ -15,7 +15,7 @@ import json
 import logging
 import shutil
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler  # CAMBIO v3.0: RobustScaler es más resistente a outliers de crypto
 
 # Importar nuestros modelos
 from ml.advanced_models.improved_architecture import DeepTemporalNet
@@ -33,7 +33,7 @@ DB_PATH = REPO_ROOT / "data" / "market_data_v2.db"
 MODELS_DIR = REPO_ROOT / "models" / "v2_ensemble"
 SYMBOL = "ADA/USDT:USDT" # Entrenamos con ADA como base (luego se puede hacer multi-symbol)
 SEQ_LEN = 12
-PREDICT_HORIZON = 5
+PREDICT_HORIZON = 15  # CAMBIO v3.0: 5 -> 15 minutos (menos ruido, más moonbag-friendly)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CONSEJO DE SABIOS v2.1: Meta-Features para darle "memoria" a XGBoost
@@ -170,8 +170,8 @@ def train_model_for_symbol(symbol):
     X = df[feature_cols].values
     y = df['label'].values
     
-    # 4. Scaling
-    scaler = StandardScaler()
+    # 4. Scaling (v3.0: RobustScaler para crypto outliers)
+    scaler = RobustScaler()
     X_scaled = scaler.fit_transform(X)
     
     # Save Scaler
@@ -225,8 +225,7 @@ def train_model_for_symbol(symbol):
     criterion = torch.nn.CrossEntropyLoss()
     
     lstm.train()
-    lstm.train()
-    for epoch in range(10):
+    for epoch in range(50):  # CAMBIO v3.0: 10 -> 50 épocas para convergencia real
         for X_b, y_b in train_loader:
             X_b, y_b = X_b.to(device), y_b.to(device)
             optimizer.zero_grad()
@@ -245,8 +244,7 @@ def train_model_for_symbol(symbol):
     optimizer = torch.optim.Adam(tcn.parameters(), lr=0.001)
     
     tcn.train()
-    tcn.train()
-    for epoch in range(10):
+    for epoch in range(50):  # CAMBIO v3.0: 10 -> 50 épocas para convergencia real
         for X_b, y_b in train_loader:
             X_b, y_b = X_b.to(device), y_b.to(device)
             optimizer.zero_grad()
@@ -284,7 +282,7 @@ def train_model_for_symbol(symbol):
     optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0005)
     
     transformer.train()
-    for epoch in range(10):
+    for epoch in range(50):  # CAMBIO v3.0: 10 -> 50 épocas para convergencia real
         for X_b, y_b in train_loader:
             X_b, y_b = X_b.to(device), y_b.to(device)
             optimizer.zero_grad()
