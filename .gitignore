@@ -30,3 +30,21 @@ binance_futures_bot_py/state/*
 *.csv
 scripts/grid_results/
 scripts/grid_search_results/
+# Generated Reports (local only)
+reports/
+*.txt
+backtest_*.png
+backtest_*.csv
+
+# Grid Search temp files
+*grid_temp*
+*_temp.*
+
+# Jupyter notebooks output
+*.ipynb_checkpoints/
+
+# Model artifacts (generated locally)
+*.pkl
+*.joblib
+*.h5
+*.keras
