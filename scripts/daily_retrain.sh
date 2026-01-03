@@ -23,16 +23,17 @@ export HSA_ENABLE_SDMA=0
 # PHASE 1: Production Symbols (HIGH PRIORITY)
 # These are the 9 symbols actively trading - train them FIRST
 # Source: binance-futures-bot-ts/.env SYMBOLS variable
+# Format: Must match DB format (ADA/USDT:USDT, not ADAUSDT)
 PRIORITY_SYMBOLS=(
-    "DOGEUSDT"
-    "LINKUSDT"
-    "AVAXUSDT"
-    "POLUSDT"
-    "ETHUSDT"
-    "XRPUSDT"
-    "SOLUSDT"
-    "ADAUSDT"
-    "BTCUSDT"
+    "DOGE/USDT:USDT"
+    "LINK/USDT:USDT"
+    "AVAX/USDT:USDT"
+    "POL/USDT:USDT"
+    "ETH/USDT:USDT"
+    "XRP/USDT:USDT"
+    "SOL/USDT:USDT"
+    "ADA/USDT:USDT"
+    "BTC/USDT:USDT"
 )
 
 echo "[$DATE] 🎯 PHASE 1: Training PRIORITY symbols (${#PRIORITY_SYMBOLS[@]} production symbols)..." >> $LOG_FILE
@@ -55,19 +56,20 @@ echo "[$DATE] ✅ PHASE 1 Complete: Priority symbols trained." >> $LOG_FILE
 
 # PHASE 2: Secondary Symbols (LOWER PRIORITY)
 # These are not actively trading but we keep models fresh
+# Format: Must match DB format (ADA/USDT:USDT, not ADAUSDT)
 SECONDARY_SYMBOLS=(
-    "BNBUSDT"
-    "DOTUSDT"
-    "LTCUSDT"
-    "UNIUSDT"
-    "ATOMUSDT"
-    "NEARUSDT"
-    "1000PEPEUSDT"
-    "FETUSDT"
-    "SEIUSDT"
-    "WLDUSDT"
-    "INJUSDT"
-    "APTUSDT"
+    "BNB/USDT:USDT"
+    "DOT/USDT:USDT"
+    "LTC/USDT:USDT"
+    "UNI/USDT:USDT"
+    "ATOM/USDT:USDT"
+    "NEAR/USDT:USDT"
+    "1000PEPE/USDT:USDT"
+    "FET/USDT:USDT"
+    "SEI/USDT:USDT"
+    "WLD/USDT:USDT"
+    "INJ/USDT:USDT"
+    "APT/USDT:USDT"
 )
 
 echo "[$DATE] 📦 PHASE 2: Training SECONDARY symbols (${#SECONDARY_SYMBOLS[@]} backup symbols)..." >> $LOG_FILE
