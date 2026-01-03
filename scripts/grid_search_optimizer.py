@@ -1,14 +1,17 @@
 """
-Grid Search Optimizer for the Ninja Trading System
+Grid Search Optimizer for the Ninja Trading System v4.1
 
 This script systematically tests different configurations of:
 - Base Threshold (0.30 - 0.50)
-- Hard Stop Loss (-5% to -15% ROE)
+- Hard Stop Loss (-5% to -20% ROE)
+- Leverage (5x - 15x)
+- Trailing Activation ROE (1% - 5%)
 
-And ranks them by performance to find the mathematically optimal configuration.
+Updated for v2.2 ML Features (23 dimensions with CVD + Volatility)
 
 Usage:
-    python scripts/grid_search_optimizer.py --symbol BTCUSDT --days 3
+    python scripts/grid_search_optimizer.py --symbol BTCUSDT --days 7
+    python scripts/grid_search_optimizer.py --symbol ETHUSDT --days 14 --mode whale
 """
 import os
 import sys
@@ -27,21 +30,57 @@ import logging
 logging.getLogger("ml_service_v2").setLevel(logging.WARNING)
 logging.getLogger("EnsembleManager").setLevel(logging.WARNING)
 
-def run_grid_search(symbol: str, days: int = 3, hours: int = 0):
+# ═══════════════════════════════════════════════════════════════════════════
+# v4.1: Expanded Grid Search Parameters
+# ═══════════════════════════════════════════════════════════════════════════
+GRID_CONFIGS = {
+    'default': {
+        'base_thresholds': [0.30, 0.35, 0.40, 0.45, 0.50],
+        'hard_stop_options': [-0.05, -0.10, -0.15],
+        'leverage_options': [10, 15],
+        'trailing_activation': [0.02, 0.03, 0.05]  # v4.1: Trailing params
+    },
+    'whale': {
+        'base_thresholds': [0.45, 0.50, 0.55, 0.60],
+        'hard_stop_options': [-0.15, -0.20, -0.25],
+        'leverage_options': [3, 5, 7],
+        'trailing_activation': [0.03, 0.05, 0.08]
+    },
+    'monk': {
+        'base_thresholds': [0.35, 0.40, 0.45],
+        'hard_stop_options': [-0.03, -0.05, -0.07],
+        'leverage_options': [10, 15],
+        'trailing_activation': [0.01, 0.02]
+    },
+    'bloodbath': {
+        'base_thresholds': [0.25, 0.30, 0.35],
+        'hard_stop_options': [-0.015, -0.02, -0.025],
+        'leverage_options': [15, 20],
+        'trailing_activation': [0.005, 0.01]
+    }
+}
+
+def run_grid_search(symbol: str, days: int = 3, hours: int = 0, mode: str = 'default'):
     """
-    Prueba diferentes configuraciones de Threshold, Hard Stop y Leverage para encontrar el óptimo.
+    Prueba diferentes configuraciones de Threshold, Hard Stop, Leverage y Trailing para encontrar el óptimo.
+    
+    v4.1: Ahora soporta múltiples modos (default, whale, monk, bloodbath)
     """
-    # Definir variables a probar
-    base_thresholds = [0.30, 0.35, 0.40, 0.45, 0.50]
-    hard_stop_options = [-0.05, -0.10, -0.15] # -5%, -10%, -15% ROE
-    leverage_options = [10, 15] # Prueba de fuego: 10x vs 15x
+    # Get config for mode
+    config = GRID_CONFIGS.get(mode, GRID_CONFIGS['default'])
+    base_thresholds = config['base_thresholds']
+    hard_stop_options = config['hard_stop_options']
+    leverage_options = config['leverage_options']
+    trailing_options = config['trailing_activation']
     
     results = []
 
     print(f"\n{'='*70}")
-    print(f"🚀 GRID SEARCH OPTIMIZER: {symbol}")
+    print(f"🚀 GRID SEARCH OPTIMIZER v4.1: {symbol}")
+    print(f"   Mode: {mode.upper()}")
     print(f"   Período: {days} días, {hours} horas")
-    print(f"   Configuraciones a probar: {len(base_thresholds) * len(hard_stop_options) * len(leverage_options)}")
+    total_combos = len(base_thresholds) * len(hard_stop_options) * len(leverage_options) * len(trailing_options)
+    print(f"   Configuraciones a probar: {total_combos}")
     print(f"{'='*70}\n")
     
     # Cargar datos UNA VEZ para reutilizarlos (eficiencia)
@@ -139,10 +178,14 @@ def run_grid_search(symbol: str, days: int = 3, hours: int = 0):
     return ranked_results
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Grid Search Optimizer for Trading Bot")
+    parser = argparse.ArgumentParser(description="Grid Search Optimizer for Trading Bot v4.1")
     parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Trading symbol")
-    parser.add_argument("--days", type=int, default=3, help="Days of historical data")
+    parser.add_argument("--days", type=int, default=7, help="Days of historical data")
     parser.add_argument("--hours", type=int, default=0, help="Additional hours of historical data")
+    parser.add_argument("--mode", type=str, default="default", 
+                       choices=['default', 'whale', 'monk', 'bloodbath'],
+                       help="Regime mode for parameter ranges")
     args = parser.parse_args()
     
-    run_grid_search(args.symbol, days=args.days, hours=args.hours)
+    run_grid_search(args.symbol, days=args.days, hours=args.hours, mode=args.mode)
+

@@ -36,10 +36,14 @@ logging.basicConfig(
 logger = logging.getLogger("CollectorV2")
 
 def init_db():
-    """Inicializa la base de datos V2 separada."""
+    """Inicializa la base de datos V2 con modo WAL para concurrencia."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    
+    # CRITICAL FIX: Habilitar WAL para permitir lecturas concurrentes
+    c.execute('PRAGMA journal_mode=WAL;')
+    c.execute('PRAGMA synchronous=NORMAL;') # Balance entre seguridad y velocidad
     
     # Tabla de Métricas de Order Book (Snapshots)
     c.execute('''
@@ -66,13 +70,15 @@ def init_db():
             funding_rate REAL,
             open_interest REAL,
             open_interest_value REAL,
+            taker_buy_vol REAL,
+            taker_sell_vol REAL,
             PRIMARY KEY (timestamp, symbol)
         )
     ''')
     
     conn.commit()
     conn.close()
-    logger.info(f"Base de datos V2 inicializada en: {DB_PATH}")
+    logger.info(f"✅ DB inicializada en WAL mode: {DB_PATH}")
 
 def calculate_obi(bids, asks, depth):
     """Calcula Order Book Imbalance para una profundidad dada."""

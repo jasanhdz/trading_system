@@ -61,6 +61,19 @@ def add_robust_meta_features(df, window=12):
     # Pendiente = (PrecioActual - PrecioHace12ticks) / 12
     df['slope_price_12'] = (df['price'] - df['price'].shift(window)) / window
     
+    # ═══════════════════════════════════════════════════════════════════════════
+    # NUEVO v2.2: CVD (Cumulative Volume Delta) - El "Medidor de Fuerza"
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Positivo = Dominio Comprador, Negativo = Dominio Vendedor
+    df['cvd_12'] = (df['taker_buy_vol'] - df['taker_sell_vol']).rolling(window).sum()
+    df['cvd_norm_12'] = df['cvd_12'] / (df['mean_volume_12'] * window + 1e-8)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # NUEVO v2.2: Volatilidad del Precio - El "Termómetro de Histeria"
+    # ═══════════════════════════════════════════════════════════════════════════
+    df['std_price_12'] = df['price'].rolling(window).std()
+    df['volatility_ratio'] = df['std_price_12'] / (df['price'] + 1e-8)
+    
     # ⚠️ PELIGRO MITIGADO: Eliminar NaNs creados por rolling/shift
     initial_len = len(df)
     df = df.dropna()
@@ -147,7 +160,7 @@ def train_model_for_symbol(symbol):
     # ═══════════════════════════════════════════════════════════════════════════
     df = add_robust_meta_features(df, window=SEQ_LEN)
     
-    # Features base (13) + Meta-Features (6) = 19 features totales
+    # Features base (13) + Meta-Features (10) = 23 features totales
     base_cols = [
         'bid_depth', 'ask_depth', 'bid_ask_spread', 
         'obi_5', 'obi_10', 'obi',
@@ -159,11 +172,13 @@ def train_model_for_symbol(symbol):
     
     meta_cols = [
         'mean_obi_12', 'max_obi_12', 'std_obi_12',
-        'slope_price_12', 'mean_volume_12', 'volume_trend'
+        'slope_price_12', 'mean_volume_12', 'volume_trend',
+        'cvd_12', 'cvd_norm_12',           # NUEVO: CVD
+        'std_price_12', 'volatility_ratio'  # NUEVO: Volatilidad
     ]
     
     feature_cols = base_cols + meta_cols
-    logger.info(f"🧙 Consejo de Sabios {VERSION}: Entrenando con {len(feature_cols)} features")
+    logger.info(f"🧙 Consejo de Sabios {VERSION}: Entrenando con {len(feature_cols)} features (v2.2 +CVD +Vol)")
     
     df = df.dropna()
     

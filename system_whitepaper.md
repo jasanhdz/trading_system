@@ -149,7 +149,7 @@ El corazón del sistema es un comité de 4 modelos que votan sobre la dirección
 | **XGBoost** | Gradient Boosting | 25% | Decisiones nítidas con meta-features |
 | **Transformer** | Encoder-only (4 heads) | 15% | Relaciones no lineales complejas |
 
-### 4.2 Feature Engineering (19 Dimensiones)
+### 4.2 Feature Engineering (23 Dimensiones - v2.2)
 
 **A. Microestructura (13 features base):**
 
@@ -167,16 +167,27 @@ El corazón del sistema es un comité de 4 modelos que votan sobre la dirección
 12. `buy_sell_ratio` - Ratio compra/venta
 13. `depth_imbalance` - Desequilibrio de profundidad
 
-**B. Meta-Features (6 features derivadas):**
+**B. Meta-Features (10 features derivadas - v2.2):**
 
 ```python
 # Calculadas sobre ventana de 12 ticks (2 minutos)
+# OBI Rolling
 df['mean_obi_12'] = df['obi'].rolling(12).mean()
 df['max_obi_12'] = df['obi'].rolling(12).max()
 df['std_obi_12'] = df['obi'].rolling(12).std()
-df['slope_price_12'] = df['price'].rolling(12).apply(linregress_slope)
+
+# Volumen
 df['mean_volume_12'] = taker_vol.rolling(12).mean()
 df['volume_trend'] = taker_vol / df['mean_volume_12']
+df['slope_price_12'] = (price - price.shift(12)) / 12
+
+# CVD (v2.2) - Flujo de dinero real
+df['cvd_12'] = (buy_vol - sell_vol).rolling(12).sum()
+df['cvd_norm_12'] = cvd_12 / (mean_volume_12 * 12)
+
+# Volatilidad (v2.2) - Termómetro de histeria
+df['std_price_12'] = df['price'].rolling(12).std()
+df['volatility_ratio'] = std_price_12 / price
 ```
 
 ### 4.3 Mecanismo de Votación Ponderada
@@ -465,16 +476,43 @@ XGBClassifier(
 )
 ```
 
-### 7.3 Re-entrenamiento Diario
+### 7.3 Re-entrenamiento Diario (Priority Mode v4.1)
 
-**Script:** `04-Daily-Retrain` (PM2)
+**Script:** `scripts/daily_retrain.sh` (PM2: `04-Daily-Retrain`)
 
 ```
 Horario: 00:00 UTC (cron)
 Datos: Últimos 30 días
-Símbolos: 9 activos
-Duración: ~2 horas en RTX 3060
+GPUs: 2x AMD RX 6600 (ROCm)
 ```
+
+#### 7.3.1 Entrenamiento por Prioridad
+
+**¿Por qué priorizar?**
+
+El sistema entrena 21 símbolos, pero solo 9 están activos en producción. Si un modelo falla o hay un error durante el entrenamiento de un símbolo secundario, los 9 símbolos críticos ya estarán listos para operar.
+
+**Fases de Entrenamiento:**
+
+| Fase | Símbolos | Estrategia | Duración |
+|------|----------|------------|---------|
+| **PHASE 1** | 9 (Producción) | Secuencial | ~1 hora |
+| **PHASE 2** | 12 (Secundarios) | Paralelo (2 GPUs) | ~30 min |
+
+**Símbolos de Producción (Priority):**
+
+```python
+# Fuente: binance-futures-bot-ts/.env
+PRIORITY_SYMBOLS = [
+    'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'POLUSDT', 'ETHUSDT',
+    'XRPUSDT', 'SOLUSDT', 'ADAUSDT', 'BTCUSDT'
+]
+```
+
+**Beneficios:**
+- 🚀 Modelos de producción listos en 1 hora (vs 2+ horas antes)
+- 🛡️ Tolerancia a fallos: si Phase 2 falla, producción no se afecta
+- ⚖️ Balance de carga: Phase 2 usa ambas GPUs en paralelo
 
 ---
 
@@ -675,36 +713,46 @@ trading_report
 
 ## 13. Grid Search y Optimización
 
-### 13.1 Symbol Grid Search
+### 13.1 Grid Search Optimizer v4.1
 
-**Archivo:** `scripts/symbol_grid_search.py`
+**Archivo:** `scripts/grid_search_optimizer.py`
 
-Herramienta para encontrar la mejor configuración de régimen para cada símbolo.
+Herramienta para encontrar la mejor configuración de régimen para cada símbolo. Actualizado en v4.1 con soporte para múltiples modos de régimen.
 
 **Uso:**
 ```bash
-# Grid search con 7 días de datos
-python scripts/symbol_grid_search.py --days 7
+# Grid search modo default (7 días)
+python scripts/grid_search_optimizer.py --symbol BTCUSDT --days 7
 
-# Símbolos específicos
-python scripts/symbol_grid_search.py --symbols BTCUSDT,ETHUSDT --days 14
+# Grid search específico por régimen
+python scripts/grid_search_optimizer.py --symbol ETHUSDT --days 14 --mode whale
+python scripts/grid_search_optimizer.py --symbol DOGEUSDT --days 3 --mode bloodbath
 ```
 
-### 13.2 Escenarios Predefinidos
+### 13.2 Modos de Régimen (v4.1)
 
-| Escenario | Leverage | Hard Stop | Entry Threshold | Descripción |
-|-----------|----------|-----------|-----------------|-------------|
-| **DEFAULT** | 10x | -5% | 50% | Configuración base |
-| **TORTUGA** | 3x | -20% | 55% | Conservador, más margen |
-| **SANGRIENTO** | 20x | -2% | 40% | Agresivo, alto riesgo |
-| **CAZADOR** | 10x | -5% | 35% | Entry fácil, mismo riesgo |
+| Modo | Leverage | Hard Stop | Entry Threshold | Trailing Activation | Uso |
+|------|----------|-----------|-----------------|---------------------|-----|
+| **default** | 10-15x | -5% a -15% | 30%-50% | 2%-5% | Config general |
+| **whale** | 3-7x | -15% a -25% | 45%-60% | 3%-8% | Tendencias fuertes |
+| **monk** | 10-15x | -3% a -7% | 35%-45% | 1%-2% | Rangos laterales |
+| **bloodbath** | 15-20x | -1.5% a -2.5% | 25%-35% | 0.5%-1% | Scalping en caos |
 
-### 13.3 Output del Grid Search
+### 13.3 Parámetros de Búsqueda
+
+El grid search v4.1 optimiza 4 dimensiones simultáneamente:
+
+1. **Base Threshold** - Confianza mínima ML para entrar
+2. **Hard Stop ROE** - Stop loss fijo
+3. **Leverage** - Apalancamiento
+4. **Trailing Activation** - ROE donde activa trailing stop
+
+### 13.4 Output del Grid Search
 
 ```
 reports/
-├── grid_search_YYYYMMDD_HHMMSS.txt    # Reporte legible
-└── symbol_grid_search_results.json    # Datos estructurados
+├── grid_search_{SYMBOL}.json    # Resultados estructurados
+└── grid_search_YYYYMMDD.txt     # Reporte legible
 ```
 
 **Formato de Resultados:**
@@ -804,8 +852,60 @@ trading_system/
 | **Funding Rate** | Tasa de financiamiento en futuros perpetuos |
 | **Peak ROE** | Máximo ROI alcanzado en una posición |
 | **CCXT** | Librería unificada para exchanges de crypto |
+| **CVD** | Cumulative Volume Delta - Suma de (buy - sell) para detectar flujo de dinero |
+| **LRU** | Least Recently Used - Estrategia de evicción de caché por antigüedad |
+| **WAL** | Write-Ahead Logging - Modo SQLite para concurrencia |
 
 ---
 
-**© 2026 NINJA Trading System v4.0. Documento interno - No distribuir.**
+## 18. Changelog v4.1 (3 de Enero, 2026)
+
+### 18.1 Correcciones Críticas
+
+| Fix | Descripción | Archivos |
+|-----|-------------|----------|
+| **WhaleStrategy Consolidation** | Movida lógica de Moonbag y Trailing Logarítmico desde `strategy-runner.ts` a `WhaleStrategy.ts` para eliminar duplicación | `WhaleStrategy.ts`, `strategy-runner.ts` |
+| **Sizing Asymmetry** | Corregido cálculo de sizing: ahora usa `Math.min(atrDist, regimeDist)` para respetar el stop más conservador | `strategy-runner.ts:L821-L839` |
+| **SQLite WAL Mode** | Habilitado `PRAGMA journal_mode=WAL` para permitir lecturas concurrentes | `market_data_collector.py` |
+| **VRAM LRU Eviction** | Implementado lazy loading + evicción LRU con `MAX_MODELS_IN_VRAM=12` para GTX 1660 | `ml_service_v2.py` |
+
+### 18.2 Nuevas Features ML v2.2
+
+Feature Engineering extendido de 19 → 23 dimensiones:
+
+| Feature | Tipo | Propósito |
+|---------|------|-----------|
+| `cvd_12` | CVD | Cumulative Volume Delta acumulado en 12 ticks |
+| `cvd_norm_12` | CVD | CVD normalizado para comparar símbolos |
+| `std_price_12` | Volatilidad | Desviación estándar del precio (12 ticks) |
+| `volatility_ratio` | Volatilidad | Ratio volatilidad/precio para escala cruzada |
+
+### 18.3 WhaleStrategy v4.1 (Exit Logic Consolidada)
+
+```typescript
+// Moonbag Secure (Ex-CAPA 0.5)
+if (peakPct > 30.0) secureThreshold = peakPct - 10.0;
+else if (peakPct > 20.0) secureThreshold = peakPct - 10.0;
+else if (peakPct > 12.0) secureThreshold = peakPct - 8.0;
+...
+
+// Logarithmic Trailing (Ex-CAPA 2)
+let baseTrail = 30 - (22 * Math.log10(peakPct / 5));
+baseTrail = Math.max(8, Math.min(30, baseTrail));
+```
+
+### 18.4 VRAM Management (LRU)
+
+```python
+# MAX_MODELS_IN_VRAM = 12 (optimizado para GTX 1660 6GB)
+# Evicción automática del modelo menos usado recientemente
+def _evict_least_recently_used(self):
+    oldest = min(self.last_accessed, key=self.last_accessed.get)
+    del self.ensembles[oldest]
+    torch.cuda.empty_cache()
+```
+
+---
+
+**© 2026 NINJA Trading System v4.1. Documento interno - No distribuir.**
 

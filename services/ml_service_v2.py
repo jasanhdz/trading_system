@@ -110,7 +110,12 @@ class V2ModelManager:
         self.scalers: Dict[str, Any] = {}
         self.feature_cols: Dict[str, List[str]] = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        LOGGER.info(f"🚀 ML Service initialized on device: {self.device}")
+        
+        # FIX: LRU Tracking para evicción de VRAM
+        self.last_accessed: Dict[str, float] = {}
+        self.MAX_MODELS_IN_VRAM = 12  # Optimized for GTX 1660 6GB (12 * 250MB ≈ 3GB, leaves 3GB headroom) 
+        
+        LOGGER.info(f"🚀 ML Service initialized on device: {self.device} | Max Models VRAM: {self.MAX_MODELS_IN_VRAM}")
         
         # ═══════════════════════════════════════════════════════
         # FASE 4.5: FILTRO NINJA (EMA ASIMÉTRICO)
@@ -125,11 +130,40 @@ class V2ModelManager:
     def get_ensemble(self, symbol: str) -> Optional[EnsembleManager]:
         clean_sym = self._clean_symbol(symbol)
         
+        # FIX: Actualizar timestamp de acceso (LRU Hit)
+        import time
+        self.last_accessed[clean_sym] = time.time()
+        
         if clean_sym in self.ensembles:
             return self.ensembles[clean_sym]
+        
+        # FIX: Chequeo de límite de VRAM antes de cargar nuevo modelo
+        if len(self.ensembles) >= self.MAX_MODELS_IN_VRAM:
+            self._evict_least_recently_used()
             
         # Try to load
         return self.load_model_for_symbol(clean_sym)
+
+    def _evict_least_recently_used(self):
+        """Elimina el modelo menos usado recientemente para liberar VRAM."""
+        if not self.last_accessed:
+            return
+            
+        oldest = min(self.last_accessed, key=self.last_accessed.get)
+        LOGGER.info(f"🗑️ Evicting {oldest} from VRAM (LRU Strategy)")
+        
+        if oldest in self.ensembles:
+            del self.ensembles[oldest]
+        if oldest in self.scalers:
+            del self.scalers[oldest]
+        if oldest in self.feature_cols:
+            del self.feature_cols[oldest]
+        if oldest in self.last_accessed:
+            del self.last_accessed[oldest]
+        
+        # CRITICAL: Forzar liberación de memoria de caché de PyTorch
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
 
     def load_model_for_symbol(self, clean_symbol: str) -> Optional[EnsembleManager]:
         symbol_dir = MODELS_DIR / clean_symbol
@@ -218,6 +252,18 @@ class V2ModelManager:
             df['volume_trend'] = df['total_volume'] / (df['mean_volume_12'] + 1e-8)
             # FIX: fillna con método forward/backward para evitar NaN en primeras filas
             df['slope_price_12'] = (df['price'] - df['price'].shift(window).bfill()) / window
+            
+            # ═══════════════════════════════════════════════════════════════════
+            # v2.2: CVD (Cumulative Volume Delta) - El "Medidor de Fuerza"
+            # ═══════════════════════════════════════════════════════════════════
+            df['cvd_12'] = (df['taker_buy_vol'] - df['taker_sell_vol']).rolling(window, min_periods=1).sum()
+            df['cvd_norm_12'] = df['cvd_12'] / (df['mean_volume_12'] * window + 1e-8)
+
+            # ═══════════════════════════════════════════════════════════════════
+            # v2.2: Volatilidad del Precio - El "Termómetro de Histeria"
+            # ═══════════════════════════════════════════════════════════════════
+            df['std_price_12'] = df['price'].rolling(window, min_periods=2).std().fillna(0)
+            df['volatility_ratio'] = df['std_price_12'] / (df['price'] + 1e-8)
             
             LOGGER.info(f"🧙 Consejo v2.1: Calculated meta-features for {clean_sym} ({n_features} features)")
         else:
@@ -332,7 +378,9 @@ router = APIRouter(prefix="/ml-v2", tags=["ml-v2"])
 
 @router.on_event("startup")
 async def startup_event():
-    MANAGER.load_models()
+    # REMOVED: Pre-loading all models bypassed LRU check
+    # Models now load on-demand via get_ensemble() which respects MAX_MODELS_IN_VRAM
+    LOGGER.info(f"🚀 ML Service V2 ready (Lazy Loading enabled, Max VRAM: {MANAGER.MAX_MODELS_IN_VRAM} models)")
 
 @router.post("/predict", response_model=ProbabilityResponseV2)
 async def predict_endpoint(request: ProbabilityRequestV2) -> ProbabilityResponseV2:
