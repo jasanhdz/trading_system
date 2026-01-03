@@ -74,25 +74,38 @@ SECONDARY_SYMBOLS=(
 
 echo "[$DATE] 📦 PHASE 2: Training SECONDARY symbols (${#SECONDARY_SYMBOLS[@]} backup symbols)..." >> $LOG_FILE
 
-# Parallel training for secondary symbols (they can wait)
-export HIP_VISIBLE_DEVICES=0
-for i in $(seq 0 2 $((${#SECONDARY_SYMBOLS[@]} - 1))); do
-    symbol="${SECONDARY_SYMBOLS[$i]}"
-    echo "[$DATE]   Training $symbol (GPU 0)..." >> $LOG_FILE
-    $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py --symbol "$symbol" >> $LOG_FILE 2>&1 &
+# ═══════════════════════════════════════════════════════════════════════════
+# FIX: Train 2 symbols at a time (1 per GPU), wait for both before next pair
+# This prevents GPU memory exhaustion on RX 6600
+# ═══════════════════════════════════════════════════════════════════════════
+TOTAL=${#SECONDARY_SYMBOLS[@]}
+for ((i=0; i<TOTAL; i+=2)); do
+    # Symbol for GPU 0 (even index)
+    symbol_0="${SECONDARY_SYMBOLS[$i]}"
+    
+    # Symbol for GPU 1 (odd index, if exists)
+    symbol_1=""
+    if [ $((i+1)) -lt $TOTAL ]; then
+        symbol_1="${SECONDARY_SYMBOLS[$((i+1))]}"
+    fi
+    
+    echo "[$DATE]   Training pair: $symbol_0 (GPU 0) + $symbol_1 (GPU 1)..." >> $LOG_FILE
+    
+    # Launch GPU 0 job
+    HIP_VISIBLE_DEVICES=0 $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py --symbol "$symbol_0" >> $LOG_FILE 2>&1 &
+    PID_0=$!
+    
+    # Launch GPU 1 job (if symbol exists)
+    if [ -n "$symbol_1" ]; then
+        HIP_VISIBLE_DEVICES=1 $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py --symbol "$symbol_1" >> $LOG_FILE 2>&1 &
+        PID_1=$!
+        wait $PID_0 $PID_1
+    else
+        wait $PID_0
+    fi
+    
+    echo "[$DATE]   ✅ Pair complete: $symbol_0 + $symbol_1" >> $LOG_FILE
 done
-PID_A=$!
-
-export HIP_VISIBLE_DEVICES=1
-for i in $(seq 1 2 $((${#SECONDARY_SYMBOLS[@]} - 1))); do
-    symbol="${SECONDARY_SYMBOLS[$i]}"
-    echo "[$DATE]   Training $symbol (GPU 1)..." >> $LOG_FILE
-    $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py --symbol "$symbol" >> $LOG_FILE 2>&1 &
-done
-PID_B=$!
-
-# Wait for parallel workers
-wait $PID_A $PID_B 2>/dev/null
 
 echo "[$DATE] ✅ PHASE 2 Complete: Secondary symbols trained." >> $LOG_FILE
 
