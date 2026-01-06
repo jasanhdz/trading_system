@@ -1,7 +1,7 @@
-# 🥷 NINJA Trading System v6.0 - Technical Whitepaper
+# 🥷 NINJA Trading System v6.2 - Technical Whitepaper
 
-**Versión:** 6.0 (Low Latency Architecture)  
-**Fecha:** 5 de Enero, 2026  
+**Versión:** 6.2 (Smart Cooldown Architecture)  
+**Fecha:** 6 de Enero, 2026  
 **Estado:** Producción (Estable)
 
 ---
@@ -22,6 +22,7 @@ El **NINJA Trading System v4.0** es un sistema de trading algorítmico de alta f
 | **v3.0** | Ninja System | Detección de regímenes, parámetros dinámicos |
 | **v4.0** | Regime-Adaptive | YAML config, hysteresis, estrategias por régimen |
 | **v6.0** | Low Latency | Redis caching, async I/O, parallelized network |
+| **v6.2** | Smart Cooldown | Adaptive threshold, regime-based re-entry |
 
 ---
 
@@ -975,6 +976,60 @@ const [price, wallet, pos] = await Promise.all([
 
 ## 19. Changelog
 
+### v6.2 (6 de Enero, 2026) - Smart Cooldown + Adaptive Threshold
+
+#### Smart Cooldown (Re-entry por Régimen)
+
+Logica adaptativa que ajusta el tiempo de espera post-exit según el régimen detectado:
+
+| Régimen | Cooldown | Comportamiento |
+|---------|----------|----------------|
+| **WHALE** | 0 seg | Re-entrada inmediata para surfear tendencias |
+| **BLOODBATH** | 0 seg | Scalping agresivo en volatilidad extrema |
+| **MONK** | 15 min | Paciencia forzada en rangos (evita fee churning) |
+| **BUNKER** | N/A | No opera (ya bloqueado) |
+
+**Archivo:** `strategy-runner.ts` (líneas 228-252)
+
+```typescript
+if (regimeContext.type === 'MONK') {
+  const MONK_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutos
+  if (timeSinceExit < MONK_COOLDOWN_MS) {
+    return; // 🛑 FRENO ACTIVADO
+  }
+}
+// WHALE/BLOODBATH: Sin límite artificial
+```
+
+#### Adaptive Threshold (Etiquetado por Clase de Activo)
+
+| Clase | Símbolos | Threshold | Razón |
+|-------|----------|-----------|-------|
+| **Alpha (Majors)** | BTC, ETH | 0.15% | Menos volátiles, requieren lupa |
+| **Beta (Alts)** | SOL, DOGE, etc. | 0.30% | Ruidosas, requieren filtro |
+
+**Archivo:** `train_v2_production.py`
+
+```python
+if "BTC" in symbol or "ETH" in symbol:
+    THRESHOLD = 0.0015  # 0.15%
+else:
+    THRESHOLD = 0.0030  # 0.30%
+```
+
+#### Horizon Fix
+
+| Parámetro | Antes | Después | Impacto |
+|-----------|-------|---------|--------|
+| `SEQ_LEN` | 12 (2 min) | 60 (10 min) | Contexto temporal ampliado |
+| `PREDICT_HORIZON` | 15 (2.5 min) | 60 (10 min) | Predicción más realista |
+
+| Cambio | Descripción | Archivos |
+|--------|-------------|----------|
+| **Smart Cooldown** | Re-entry adaptativo por régimen | `strategy-runner.ts` |
+| **Adaptive Threshold** | BTC/ETH=0.15%, Alts=0.30% | `train_v2_production.py` |
+| **Horizon Fix** | SEQ_LEN=60, PREDICT_HORIZON=60 | `train_v2_production.py` |
+
 ### v6.1 (5 de Enero, 2026) - Audit Fix (Data Leakage Elimination)
 
 > [!CAUTION]
@@ -985,21 +1040,7 @@ const [price, wallet, pos] = await Promise.all([
 | **Split Before Scale** | Datos divididos ANTES de escalar para evitar look-ahead bias | `train_v2_production.py` |
 | **SEQ_LEN Increase** | Contexto aumentado de 12 → 60 ticks (2 min → 10 min) | `train_v2_production.py`, `ml_service_v2.py` |
 | **Clean Scaler** | Scaler ahora fitted solo en datos de entrenamiento | `train_v2_production.py` |
-| **Expected Accuracy** | Reducida de 98% (fake) a ~55-60% (real) | N/A |
-
-**Antes (Incorrecto):**
-```python
-scaler.fit_transform(X)  # Fit en TODA la data
-X_train, X_val = X[:split], X[split:]  # Split después
-```
-
-**Después (Correcto):**
-```python
-X_train, X_val = df[:split], df[split:]  # Split PRIMERO
-scaler.fit(X_train)  # Fit SOLO en train
-X_train_scaled = scaler.transform(X_train)
-X_val_scaled = scaler.transform(X_val)
-```
+| **Expected Accuracy** | Reducida de 98% (fake) a ~55-70% (real) | N/A |
 
 ### v6.0 (5 de Enero, 2026) - Operation Low Latency
 
@@ -1028,5 +1069,5 @@ X_val_scaled = scaler.transform(X_val)
 
 ---
 
-**© 2026 NINJA Trading System v6.1. Documento interno - No distribuir.**
+**© 2026 NINJA Trading System v6.2. Documento interno - No distribuir.**
 
