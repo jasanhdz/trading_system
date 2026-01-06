@@ -5,6 +5,8 @@ import time
 import sqlite3
 import logging
 import ccxt
+import json
+import redis
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +36,15 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("CollectorV2")
+
+# Redis Connection for Hot Path
+try:
+    r_cache = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    r_cache.ping()
+    logger.info("✅ Redis connected for Hot Path")
+except Exception as e:
+    r_cache = None
+    logger.warning(f"⚠️ Redis not available, using SQLite only: {e}")
 
 def init_db():
     """Inicializa la base de datos V2 con modo WAL para concurrencia."""
@@ -193,6 +204,36 @@ def fetch_and_store(exchange):
             ''', (now, symbol, funding_rate, open_interest, open_interest_val, taker_buy_vol, taker_sell_vol))
             
             logger.info(f"✅ {symbol} procesado. OBI: {obi_5:.2f} | Fund: {funding_rate:.6f} | BuyVol: {taker_buy_vol:.1f}")
+            
+            # ════════════════════════════════════════════════════════════════════
+            # 🚀 HOT PATH: Redis Write for ML Service (<1ms reads)
+            # ════════════════════════════════════════════════════════════════════
+            if r_cache is not None:
+                try:
+                    redis_key = f"market:{symbol}"
+                    tick_data = {
+                        "timestamp": now,
+                        "price": mid_price,
+                        "mid_price": mid_price,
+                        "micro_price": micro_price,
+                        "obi": obi_20,
+                        "obi_20": obi_20,
+                        "obi_5": obi_5,
+                        "obi_10": obi_10,
+                        "spread_pct": spread_pct,
+                        "funding_rate": funding_rate,
+                        "taker_buy_vol": taker_buy_vol,
+                        "taker_sell_vol": taker_sell_vol,
+                        "bid_depth": bid_depth_20,
+                        "ask_depth": ask_depth_20,
+                        "open_interest": open_interest
+                    }
+                    pipe = r_cache.pipeline()
+                    pipe.rpush(redis_key, json.dumps(tick_data))
+                    pipe.ltrim(redis_key, -120, -1)  # Keep last 120 ticks (~20 min at 10s interval)
+                    pipe.execute()
+                except Exception as re:
+                    logger.warning(f"⚠️ Redis write failed for {symbol}: {re}")
             
         except Exception as e:
             logger.error(f"❌ Error procesando {symbol}: {e}")

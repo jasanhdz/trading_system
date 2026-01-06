@@ -222,6 +222,11 @@ class V2ModelManager:
             
         # 1. Feature Engineering (Derived Features)
         df = df.copy()
+        
+        # FIX: Map Redis 'spread_pct' to model's 'bid_ask_spread'
+        if 'spread_pct' in df.columns and 'bid_ask_spread' not in df.columns:
+            df['bid_ask_spread'] = df['spread_pct']
+            
         df['buy_sell_ratio'] = df['taker_buy_vol'] / (df['taker_sell_vol'] + 1e-8)
         df['depth_imbalance'] = (df['bid_depth'] - df['ask_depth']) / (df['bid_depth'] + df['ask_depth'] + 1e-8)
         
