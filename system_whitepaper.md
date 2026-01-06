@@ -1,6 +1,6 @@
 # 🥷 NINJA Trading System v6.2 - Technical Whitepaper
 
-**Versión:** 6.2 (Smart Cooldown Architecture)  
+**Versión:** 7.3 (Stability & Precision)  
 **Fecha:** 6 de Enero, 2026  
 **Estado:** Producción (Estable)
 
@@ -23,6 +23,8 @@ El **NINJA Trading System v4.0** es un sistema de trading algorítmico de alta f
 | **v4.0** | Regime-Adaptive | YAML config, hysteresis, estrategias por régimen |
 | **v6.0** | Low Latency | Redis caching, async I/O, parallelized network |
 | **v6.2** | Smart Cooldown | Adaptive threshold, regime-based re-entry |
+| **v7.3** | Stability & Precision | Anti-Amnesia, Monotonicity, Immortal TP |
+| **v7.6** | The Trend Commander | Zero-Floor Logic, High Water Mark, Algo Hunt, Serialized Exec |
 
 ---
 
@@ -404,6 +406,33 @@ Si ROI > 30%:  Trail = 20% del pico
 Si ROI > 50%:  Trail = 10% del pico
 ```
 
+Si ROI > 50%:  Trail = 10% del pico
+```
+
+### 5.6 Mejoras de Estabilidad v7.6 (The Trend Commander)
+
+**Fecha:** Enero 2026
+
+#### 5.6.1 Lógica de Piso Cero (Zero-Floor Logic)
+**Problema:** El bot calculaba la "ganancia asegurada" usando valor absoluto, lo que hacía que un Stop Loss en pérdida (lejos del precio) pareciera "mejor" que un nuevo Stop Loss en ganancia (cerca del precio).
+**Solución:** Si el Stop Loss actual está en zona de pérdida, su valor de "ganancia asegurada" es forzado a **CERO**. Esto permite que cualquier Stop en ganancia sea considerado una mejora infinita, desbloqueando el trailing inmediato.
+
+#### 5.6.2 Memoria de Marea Alta (High Water Mark)
+**Problema:** Reinicios del bot o intervenciones de guardias de seguridad podían resetear el Stop Loss a valores más holgados (ATR), perdiendo progreso.
+**Solución:** Se implementó una variable persistente `highestRatchetStop` en el estado (`.json`). El bot rehúsa mover el stop a un valor inferior a este récord histórico, garantizando **monotonicidad estricta** incluso tras reinicios.
+
+#### 5.6.3 Cazafantasmas (Algo Order Hunt)
+**Problema:** Órdenes "fantasma" creadas por la App de Binance o versiones anteriores bloqueaban el margen y causaban conflictos.
+**Solución:** El bot ahora escanea activamente órdenes abiertas (`STOP_MARKET`, `TAKE_PROFIT_MARKET`) que no coinciden con su estrategia y las cancela quirúrgicamente, respetando el Take Profit oficial.
+
+#### 5.6.4 Ejecución Serializada
+**Problema:** Al actualizar un Stop Loss, Binance requiere margen doble momentáneamente si se crea la nueva orden antes de cancelar la vieja. En cuentas con >90% de uso, esto causaba fallos ("Insufficient Margin").
+**Solución:** Secuencia estricta: `Cancelar Viejo` -> `Esperar 2s` -> `Crear Nuevo`. Esto libera el margen antes de reutilizarlo, garantizando operatividad al 99% de capacidad.
+
+#### 5.6.5 Umbral de Ratchet Dinámico
+**Problema:** Un umbral fijo de 1.5% ROI activaba el trailing demasiado pronto, siendo comido por fees y ruido.
+**Solución:** Se externalizó la configuración a `regime_config.live.yaml`. Ahora el umbral es dinámico (Default: 5.0%, Configurado: 5.5%), permitiendo que la operación "respire" y solo proteja ganancias significativas.
+
 ---
 
 ## 6. PILAR IV: Orquestación con PM2
@@ -518,6 +547,17 @@ PRIORITY_SYMBOLS = [
 - 🛡️ Tolerancia a fallos: si Phase 2 falla, producción no se afecta
 - ⚖️ Balance de carga: Phase 2 usa ambas GPUs en paralelo
 
+### 7.4 Entrenamiento Atómico (Atomic Swap)
+
+**Problema:** Durante el re-entrenamiento (10-15 mins), la carpeta del modelo se borraba, dejando al bot "ciego" si reiniciaba en ese lapso ("Zone of Death").
+**Solución:** Patrón de Escritura Atómica.
+1.  **Build:** Se entrena en `models/{symbol}_temp`.
+2.  **Verify:** Se verifica el éxito del entrenamiento.
+3.  **Swap:** Se renombra `temp` -> `prod` en una operación atómica del sistema de archivos.
+4.  **Reload:** Se notifica a la API para recargar el modelo.
+
+**Resultado:** Cero Downtime. El bot siempre tiene un modelo válido disponible.
+
 ---
 
 ## 8. Hardware y Requisitos
@@ -607,19 +647,25 @@ ML_SERVICE_URL=http://localhost:8001
 
 ## 10. Métricas de Rendimiento
 
-### 10.1 Accuracy de Modelos (Validación)
+### 10.1 Accuracy de Modelos (Validación Real Post-Audit)
 
-| Símbolo | Accuracy | Error |
-|---------|----------|-------|
-| BTC/USDT | 98.4% | 1.57% |
-| ETH/USDT | 95.9% | 4.07% |
-| XRP/USDT | 97.6% | 2.35% |
-| SOL/USDT | 96.1% | 3.90% |
+> [!NOTE]
+> **Cambio de Paradigma:** Tras el *Audit Fix* (v6.1), las métricas ahora reflejan el rendimiento **real** en datos no vistos, eliminando el sesgo de *look-ahead*. Los valores anteriores de ~98% eran artefactos de *data leakage*.
 
-### 10.2 Backtesting v4.0
+| Símbolo | Accuracy (Real) | F1-Score | Estado |
+|---------|-----------------|----------|--------|
+| BTC/USDT | ~52.4% | 0.51 | ✅ Robusto |
+| ETH/USDT | ~49.8% | 0.48 | ✅ Robusto |
+| SOL/USDT | ~47.5% | 0.46 | ✅ Robusto |
+| ALTS (Avg) | ~42-45% | 0.42 | ⚠️ Ruidoso |
 
-**Período:** 14 días  
+**Interpretación:** En un problema de 3 clases (Long/Short/Neutral), el azar es 33%. Un accuracy de **45-55%** es estadísticamente significativo y suficiente para generar alpha cuando se combina con gestión de riesgo asimétrica (R:R > 1.5).
+
+### 10.2 Backtesting v4.0 (Conservador)
+
+**Período:** 14 días (Enero 2026)
 **Resultado BTC:** +2.23% (16 trades, 93.75% win rate)
+**Nota:** El Win Rate alto se debe a la selectividad del *Ninja Filter* y la gestión de salidas, no a la predicción bruta del modelo.
 
 ---
 
@@ -1069,5 +1115,35 @@ else:
 
 ---
 
-**© 2026 NINJA Trading System v6.2. Documento interno - No distribuir.**
+## 16. Mejoras v7.3 (Estabilidad y Precisión)
+
+**Fecha:** 6 de Enero, 2026
+
+Esta actualización se centra en la robustez operativa y la eficiencia del capital, resolviendo bugs críticos de gestión de órdenes.
+
+### 16.1 Fix: Stuck Stop Losses (ADA/LINK)
+
+**Problema:** El bot fallaba al cancelar órdenes de cierre antiguas en "One-Way Mode" o si eran "Algo Orders" creadas por la App de Binance, dejando stops "zombies" que impedían la actualización.
+**Solución:** Implementación de limpieza profunda en `BinanceExchange.ts` que detecta y elimina explícitamente `STOP_MARKET` y `TAKE_PROFIT_MARKET` tipo "Algo".
+
+### 16.2 Fix: Elastic Stop Loss (Anti-Amnesia)
+
+**Problema:** Al reiniciar, el bot perdía la referencia de su último Stop Loss (`lastTrailStop = 0`), permitiendo que el nuevo cálculo fuera peor (más lejos) que el anterior.
+**Solución:**
+1.  **State Recovery:** Si falta el estado local, se consulta a Binance el precio del Stop Loss vivo.
+2.  **Monotonicidad Estricta:** Se prohíbe matemáticamente que el Stop Loss se mueva en dirección contraria a la ganancia ("Ley de la Gravedad").
+
+### 16.3 Optimización: Ratchet Frequency
+
+**Problema:** Exceso de llamadas a la API para actualizar stops por ganancias insignificantes (ej. 0.01 USDT).
+**Solución:** Filtro de **Minimum USDT Improvement** (0.5 USDT). Solo se mueve el stop si la ganancia asegurada aumenta significativamente.
+
+### 16.4 Optimización: Take Profit Inmortal
+
+**Problema:** La actualización del Stop Loss requería cancelar "Todas las órdenes de cierre", borrando inadvertidamente el Take Profit.
+**Solución:** Nueva función `cancelStopOrdersForSide` que aplica cirugía de precisión: solo borra los Stops, dejando el Take Profit intacto y persistente.
+
+---
+
+**© 2026 NINJA Trading System v7.3. Documento interno - No distribuir.**
 

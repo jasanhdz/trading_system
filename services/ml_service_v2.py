@@ -371,10 +371,36 @@ class V2ModelManager:
             
         return result
 
+    def reload_model(self, symbol: str):
+        """Fuerza la recarga del modelo eliminándolo de la caché."""
+        clean_sym = self._clean_symbol(symbol)
+        if clean_sym in self.ensembles:
+            del self.ensembles[clean_sym]
+        if clean_sym in self.scalers:
+            del self.scalers[clean_sym]
+        if clean_sym in self.feature_cols:
+            del self.feature_cols[clean_sym]
+        if clean_sym in self.last_accessed:
+            del self.last_accessed[clean_sym]
+            
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+            
+        LOGGER.info(f"♻️ Model for {clean_sym} evicted from cache. Will reload on next request.")
+
 MANAGER = V2ModelManager()
 
 # --- API ---
 router = APIRouter(prefix="/ml-v2", tags=["ml-v2"])
+
+@router.post("/reload")
+async def reload_endpoint(request: ProbabilityRequestV2):
+    """Endpoint para notificar que un modelo ha sido reentrenado."""
+    try:
+        MANAGER.reload_model(request.symbol)
+        return {"status": "ok", "message": f"Reload scheduled for {request.symbol}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.on_event("startup")
 async def startup_event():

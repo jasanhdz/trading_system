@@ -105,139 +105,163 @@ def create_sequences(data, seq_len):
 
 def train_model_for_symbol(symbol):
     clean_symbol = symbol.replace("/", "").replace(":", "").replace("-", "").replace("USDT", "") + "USDT"
-    symbol_dir = MODELS_DIR / clean_symbol
     
-    if symbol_dir.exists():
-        shutil.rmtree(symbol_dir)
-    symbol_dir.mkdir(parents=True)
+    # 1. DEFINIR RUTAS (PRODUCCIÓN Y TEMPORAL)
+    prod_dir = MODELS_DIR / clean_symbol
+    temp_dir = MODELS_DIR / f"{clean_symbol}_temp"
     
-    logger.info(f"🛡️ Audit Fix Training for {symbol}...")
+    # Limpiar temp si existe de un run fallido anterior
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+    temp_dir.mkdir(parents=True)
     
-    # 1. Carga y Features
-    df = load_data_from_db(symbol)
-    if len(df) < 500:
-        logger.warning(f"⚠️ Insufficient data ({len(df)}). Skipping.")
-        return
+    logger.info(f"🛡️ Atomic Training started for {symbol} (Building in {temp_dir})...")
+    
+    try:
+        # --- CARGA DE DATOS Y PREPARACIÓN (Igual que antes) ---
+        df = load_data_from_db(symbol)
+        if len(df) < 500:
+            logger.warning(f"⚠️ Insufficient data ({len(df)}). Skipping.")
+            shutil.rmtree(temp_dir) # Limpiar basura
+            return
 
-    # Targets (Horizonte 60 ticks = 10 min)
-    df['future_price'] = df['price'].shift(-PREDICT_HORIZON)
-    df['return'] = (df['future_price'] - df['price']) / df['price']
-    
-    # ══════════════════════════════════════════════════════════════════
-    # LÓGICA DE THRESHOLD ADAPTATIVO (NINJA v6.1)
-    # ══════════════════════════════════════════════════════════════════
-    # Clase Alpha (BTC, ETH): 0.15% (Son menos volátiles, requieren lupa)
-    # Clase Beta (Alts):      0.30% (Son ruidosas, requieren filtro)
-    if "BTC" in symbol or "ETH" in symbol:
-        THRESHOLD = 0.0015
-        logger.info(f"⚖️ Adaptive Threshold for Major ({symbol}): {THRESHOLD*100}%")
-    else:
-        THRESHOLD = 0.0030
-        logger.info(f"🌪️ Adaptive Threshold for Altcoin ({symbol}): {THRESHOLD*100}%")
-    
-    conditions = [(df['return'] < -THRESHOLD), (df['return'] > THRESHOLD)]
-    choices = [0, 2] # 0: Short, 2: Long
-    df['label'] = np.select(conditions, choices, default=1)
-    
-    # Meta Features
-    df = add_robust_meta_features(df, window=12) # Window corta para features locales
-    
-    feature_cols = [
-        'bid_depth', 'ask_depth', 'bid_ask_spread', 'obi_5', 'obi_10', 'obi',
-        'micro_price', 'funding_rate', 'open_interest', 'taker_buy_vol', 'taker_sell_vol',
-        'mean_obi_12', 'max_obi_12', 'std_obi_12', 'slope_price_12', 
-        'mean_volume_12', 'volume_trend', 'cvd_12', 'cvd_norm_12', 
-        'std_price_12', 'volatility_ratio'
-    ]
-    
-    # Eliminar NaNs finales por shift de targets
-    df = df.dropna()
-    
-    # 2. 🛡️ SPLIT PRIMERO (La corrección crítica)
-    # Dividimos temporalmente al 80% ANTES de escalar
-    split_idx = int(len(df) * 0.8)
-    
-    train_df = df.iloc[:split_idx].copy()
-    val_df = df.iloc[split_idx:].copy()
-    
-    X_train_raw = train_df[feature_cols].values
-    y_train_raw = train_df['label'].values
-    
-    X_val_raw = val_df[feature_cols].values
-    y_val_raw = val_df['label'].values
-    
-    # 3. 🛡️ ESCALADO ESTRICTO
-    scaler = RobustScaler()
-    # Fit SOLO con Train
-    X_train_scaled = scaler.fit_transform(X_train_raw)
-    # Transform Val usando estadísticas de Train
-    X_val_scaled = scaler.transform(X_val_raw)
-    
-    # Guardar Scaler (Este es el "limpio")
-    joblib.dump(scaler, symbol_dir / "scaler.pkl")
-    with open(symbol_dir / "features.json", 'w') as f:
-        json.dump(feature_cols, f)
+        # Targets (Horizonte 60 ticks = 10 min)
+        df['future_price'] = df['price'].shift(-PREDICT_HORIZON)
+        df['return'] = (df['future_price'] - df['price']) / df['price']
         
-    # 4. Secuencias (Windowing)
-    def to_sequences(data, labels, seq_len):
-        Xs, ys = [], []
-        for i in range(len(data) - seq_len):
-            Xs.append(data[i:(i + seq_len)])
-            ys.append(labels[i + seq_len])
-        return np.array(Xs), np.array(ys)
-        
-    X_train, y_train = to_sequences(X_train_scaled, y_train_raw, SEQ_LEN)
-    X_val, y_val = to_sequences(X_val_scaled, y_val_raw, SEQ_LEN)
-    
-    if len(X_train) < 100:
-        logger.warning("Not enough sequences after split.")
-        return
-
-    # Tensores
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    train_ds = TensorDataset(torch.FloatTensor(X_train), torch.LongTensor(y_train))
-    val_ds = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
-    
-    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=64, shuffle=False)
-    
-    input_dim = len(feature_cols)
-    
-    # --- MODELOS (Solo muestro TCN y XGBoost por brevedad, el resto igual) ---
-    
-    # 1. TCN
-    logger.info(f"Training TCN (SeqLen: {SEQ_LEN})...")
-    tcn = TCNTradingModel(input_dim=input_dim, num_channels=[32, 64, 128], kernel_size=3, num_classes=3).to(device)
-    optim = torch.optim.Adam(tcn.parameters(), lr=0.001)
-    crit = torch.nn.CrossEntropyLoss()
-    
-    tcn.train()
-    for ep in range(25): # Épocas rápidas para demo
-        for Xb, yb in train_loader:
-            Xb, yb = Xb.to(device), yb.to(device)
-            optim.zero_grad()
-            out = tcn(Xb)
-            loss = crit(out['logits'], yb)
-            loss.backward()
-            optim.step()
+        # ══════════════════════════════════════════════════════════════════
+        # LÓGICA DE THRESHOLD ADAPTATIVO (NINJA v6.1)
+        # ══════════════════════════════════════════════════════════════════
+        if "BTC" in symbol or "ETH" in symbol:
+            THRESHOLD = 0.0015
+            logger.info(f"⚖️ Adaptive Threshold for Major ({symbol}): {THRESHOLD*100}%")
+        else:
+            THRESHOLD = 0.0030
+            logger.info(f"🌪️ Adaptive Threshold for Altcoin ({symbol}): {THRESHOLD*100}%")
             
-    torch.save(tcn.state_dict(), symbol_dir / "tcn.pt")
-    with open(symbol_dir / "tcn_config.json", 'w') as f:
-        json.dump({'model_config': {'input_dim': input_dim, 'num_channels': [32, 64, 128], 'kernel_size': 3, 'dropout': 0.2}}, f)
-
-    # 2. XGBoost (Usa solo el último step de la secuencia)
-    logger.info("Training XGBoost...")
-    X_train_flat = X_train[:, -1, :]
-    X_val_flat = X_val[:, -1, :]
-    
-    xgb = XGBoostTradingModel(use_gpu=(device=="cuda"))
-    xgb.train(X_train_flat, y_train, X_val_flat, y_val)
-    xgb.save(str(symbol_dir / "xgboost.joblib"))
-    with open(symbol_dir / "xgboost_config.json", 'w') as f:
-        json.dump({}, f)
+        conditions = [(df['return'] < -THRESHOLD), (df['return'] > THRESHOLD)]
+        choices = [0, 2]
+        df['label'] = np.select(conditions, choices, default=1)
         
-    logger.info(f"✅ Training Complete for {clean_symbol}. NO DATA LEAKAGE.")
+        df = add_robust_meta_features(df, window=12)
+        
+        feature_cols = [
+            'bid_depth', 'ask_depth', 'bid_ask_spread', 'obi_5', 'obi_10', 'obi',
+            'micro_price', 'funding_rate', 'open_interest', 'taker_buy_vol', 'taker_sell_vol',
+            'mean_obi_12', 'max_obi_12', 'std_obi_12', 'slope_price_12', 
+            'mean_volume_12', 'volume_trend', 'cvd_12', 'cvd_norm_12', 
+            'std_price_12', 'volatility_ratio'
+        ]
+        
+        df = df.dropna()
+        
+        # Split y Scaling
+        split_idx = int(len(df) * 0.8)
+        train_df = df.iloc[:split_idx].copy()
+        val_df = df.iloc[split_idx:].copy()
+        
+        X_train_raw = train_df[feature_cols].values
+        y_train_raw = train_df['label'].values
+        X_val_raw = val_df[feature_cols].values
+        y_val_raw = val_df['label'].values
+        
+        scaler = RobustScaler()
+        X_train_scaled = scaler.fit_transform(X_train_raw)
+        X_val_scaled = scaler.transform(X_val_raw)
+        
+        # --- GUARDAR ARTEFACTOS EN CARPETA TEMPORAL ---
+        joblib.dump(scaler, temp_dir / "scaler.pkl")
+        with open(temp_dir / "features.json", 'w') as f:
+            json.dump(feature_cols, f)
+            
+        # ... (Creación de secuencias y DataLoaders igual que antes) ...
+        def to_sequences(data, labels, seq_len):
+            Xs, ys = [], []
+            for i in range(len(data) - seq_len):
+                Xs.append(data[i:(i + seq_len)])
+                ys.append(labels[i + seq_len])
+            return np.array(Xs), np.array(ys)
+            
+        X_train, y_train = to_sequences(X_train_scaled, y_train_raw, SEQ_LEN)
+        X_val, y_val = to_sequences(X_val_scaled, y_val_raw, SEQ_LEN)
+        
+        if len(X_train) < 100:
+             logger.warning("Not enough sequences.")
+             shutil.rmtree(temp_dir)
+             return
+
+        # Tensores
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        train_ds = TensorDataset(torch.FloatTensor(X_train), torch.LongTensor(y_train))
+        train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
+        input_dim = len(feature_cols)
+
+        # --- ENTRENAMIENTO (Guardando en temp_dir) ---
+        
+        # 1. TCN
+        logger.info(f"Training TCN (Temp)...")
+        tcn = TCNTradingModel(input_dim=input_dim, num_channels=[32, 64, 128], kernel_size=3, num_classes=3).to(device)
+        optim = torch.optim.Adam(tcn.parameters(), lr=0.001)
+        crit = torch.nn.CrossEntropyLoss()
+        
+        tcn.train()
+        for ep in range(25):
+            for Xb, yb in train_loader:
+                Xb, yb = Xb.to(device), yb.to(device)
+                optim.zero_grad()
+                out = tcn(Xb)
+                loss = crit(out['logits'], yb)
+                loss.backward()
+                optim.step()
+        
+        torch.save(tcn.state_dict(), temp_dir / "tcn.pt")
+        with open(temp_dir / "tcn_config.json", 'w') as f:
+            json.dump({'model_config': {'input_dim': input_dim, 'num_channels': [32, 64, 128], 'kernel_size': 3, 'dropout': 0.2}}, f)
+
+        # 2. XGBoost
+        logger.info("Training XGBoost (Temp)...")
+        X_train_flat = X_train[:, -1, :]
+        X_val_flat = X_val[:, -1, :]
+        
+        xgb = XGBoostTradingModel(use_gpu=(device=="cuda"))
+        xgb.train(X_train_flat, y_train, X_val_flat, y_val)
+        xgb.save(str(temp_dir / "xgboost.joblib"))
+        with open(temp_dir / "xgboost_config.json", 'w') as f:
+            json.dump({}, f)
+            
+        logger.info(f"✅ Training Complete in TEMP. Swapping to PRODUCTION...")
+
+        # ══════════════════════════════════════════════════════════════════
+        # 🔄 EL CAMBIO ATÓMICO (SWAP)
+        # ══════════════════════════════════════════════════════════════════
+        # 1. Si existe la carpeta vieja, la movemos a backup (o borramos)
+        # 2. Renombramos la temporal a la oficial
+        
+        if prod_dir.exists():
+            shutil.rmtree(prod_dir) # Borramos la vieja solo ahora que tenemos la nueva lista
+        
+        # Renombrar Temp -> Prod (Operación instantánea en el mismo disco)
+        temp_dir.rename(prod_dir)
+        
+        logger.info(f"✨ Atomic Swap Successful for {clean_symbol}")
+
+        # 5. HOT RELOAD
+        try:
+            import requests
+            response = requests.post("http://localhost:8001/ml-v2/reload", json={"symbol": symbol}, timeout=2)
+            if response.status_code == 200:
+                logger.info(f"🔄 Hot Reload requested for {symbol}: OK")
+            else:
+                logger.warning(f"⚠️ Hot Reload failed: {response.text}")
+        except Exception as e:
+            logger.warning(f"⚠️ Hot Reload connection failed: {e}")
+
+    except Exception as e:
+        logger.error(f"❌ Critical Training Failure for {symbol}: {e}")
+        # Limpieza en caso de error
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+            logger.info("🧹 Cleaned up temp directory.")
 
 def train_production():
     parser = argparse.ArgumentParser()
