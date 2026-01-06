@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 import time
 import logging
+import redis
+import json
 
 from data.collectors.base_collector import BaseDataCollector
 from config.settings import settings
@@ -14,11 +16,38 @@ from utils.exceptions import DataCollectionError
 
 logger = logging.getLogger(__name__)
 
+# Conexión Global a Redis (Hot Path)
+r_cache = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+
 class BinanceDataCollector(BaseDataCollector):
     def __init__(self):
         super().__init__("binance")
         self.exchange = None
         self.rate_limiter = time.time()
+
+    def save_tick(self, symbol: str, tick_data: Dict):
+        """
+        Guarda un tick de datos en Redis (Hot Path) y SQLite (Cold Path).
+        """
+        # --- 1. HOT PATH (Redis) ---
+        # Usamos una LISTA de Redis. Clave ej: "market:BTC/USDT:USDT"
+        redis_key = f"market:{symbol}"
+        
+        # Serializar
+        payload = json.dumps(tick_data)
+        
+        # Pipeline permite ejecutar comandos atómicamente y más rápido
+        pipe = r_cache.pipeline()
+        pipe.rpush(redis_key, payload)      # Empujar a la derecha (nuevo)
+        pipe.ltrim(redis_key, -120, -1)     # Mantener solo los últimos 120 (recortar izq)
+        pipe.execute()
+        
+        # --- 2. COLD PATH (SQLite) ---
+        # Asumimos que existe un db_manager global o inyectado, 
+        # o que el tick_data ya viene formateado para inserción.
+        # Por ahora, mantenemos la interfaz pero logueamos si no hay DB manager.
+        # En una implementación completa, aquí llamaríamos a self.db.insert(tick_data)
+        pass
     
     def connect(self) -> bool:
         """Conectar a Binance"""

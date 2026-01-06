@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import joblib
 import json
+import redis
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 
@@ -56,51 +57,45 @@ class ProbabilityResponseV2(BaseModel):
     meta_verdict: str # "APPROVED" | "VETOED"
 
 # --- Data Loader ---
-def load_latest_data(symbol: str, limit: int = 60) -> pd.DataFrame:
-    """Carga los últimos N registros de la DB V2."""
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"Database not found at {DB_PATH}")
-        
-    # Normalizar símbolo para DB (ADAUSDT -> ADA/USDT:USDT)
-    # Asumimos que el bot envía formato CCXT o limpio.
-    # La DB tiene formato CCXT: "ADA/USDT:USDT"
-    db_symbol = symbol
-    if "/" not in symbol:
-        # Intento simple de conversión si viene como ADAUSDT
-        # Esto es frágil, idealmente el bot envía el formato correcto
-        pass 
+# --- Data Loader ---
+# Conexión Global a Redis
+r_cache = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
-    conn = sqlite3.connect(DB_PATH)
-    
-    # Query con JOIN y Taker Vol
-    query = f"""
-    SELECT 
-        o.timestamp,
-        o.mid_price as price, 
-        o.micro_price,
-        o.bid_depth_20 as bid_depth, 
-        o.ask_depth_20 as ask_depth, 
-        o.spread_pct as bid_ask_spread, 
-        o.obi_5,
-        o.obi_10,
-        o.obi_20 as obi,
-        d.funding_rate, 
-        d.open_interest,
-        d.taker_buy_vol,
-        d.taker_sell_vol
-    FROM orderbook_metrics o
-    JOIN derivatives_data d ON o.timestamp = d.timestamp AND o.symbol = d.symbol
-    WHERE o.symbol = '{db_symbol}'
-    ORDER BY o.timestamp DESC
-    LIMIT {limit}
+def load_latest_data(symbol: str, limit: int = 100) -> pd.DataFrame:
     """
+    Carga datos ultrarrápidos desde Redis (Hot Path).
+    """
+    # Normalizar símbolo para Redis (ej: "market:BTC/USDT:USDT")
+    # Si viene como "BTCUSDT", intentar convertir o usar tal cual si el collector usa ese formato.
+    # El collector usa el símbolo que le pasen. Asumimos consistencia.
+    redis_key = f"market:{symbol}"
     
-    try:
-        df = pd.read_sql_query(query, conn)
-        df = df.sort_values('timestamp') # Reordenar ascendente para secuencia
-    finally:
-        conn.close()
-        
+    # LRANGE obtiene elementos de la lista. -limit es "los últimos N"
+    raw_data = r_cache.lrange(redis_key, -limit, -1)
+    
+    if not raw_data or len(raw_data) < limit:
+        # Fallback o Warm-up
+        # LOGGER.warning(f"Redis miss/insufficient data for {symbol}. Found: {len(raw_data)}")
+        return pd.DataFrame() 
+
+    # Convertir lista de JSON strings a Lista de Dicts
+    data = [json.loads(item) for item in raw_data]
+    
+    # Crear DataFrame
+    df = pd.DataFrame(data)
+    
+    # Conversión de tipos (Redis guarda todo como string en el JSON)
+    # Asegurar que las columnas numéricas sean float
+    numeric_cols = ['mid_price', 'obi_20', 'funding_rate', 'spread_pct', 'taker_buy_vol', 'taker_sell_vol', 'price', 'obi']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+            
+    # Asegurar timestamp correcto
+    if 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df = df.sort_values('timestamp')
+
     return df
 
 # --- Model Manager ---
@@ -302,7 +297,7 @@ class V2ModelManager:
         X_scaled = scaler.transform(X)
         
         # 3. Sequence Creation
-        SEQ_LEN = 12
+        SEQ_LEN = 60  # 60 ticks * 10s = 10 min context (v6.0 Audit Fix)
         if len(X_scaled) < SEQ_LEN:
             LOGGER.warning(f"Not enough data for sequence. Need {SEQ_LEN}, got {len(X_scaled)}")
             pad_len = SEQ_LEN - len(X_scaled)
@@ -389,11 +384,11 @@ async def predict_endpoint(request: ProbabilityRequestV2) -> ProbabilityResponse
     # 1. Load Data
     try:
         # Intentamos cargar con el símbolo tal cual, si falla probamos variantes
-        df = load_latest_data(symbol)
+        df = load_latest_data(symbol, limit=100)  # SEQ_LEN=60 + rolling buffer
         if df.empty:
             # Try converting ADAUSDT -> ADA/USDT:USDT
             alt_symbol = symbol.replace("USDT", "/USDT:USDT")
-            df = load_latest_data(alt_symbol)
+            df = load_latest_data(alt_symbol, limit=100)
             
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No V2 data found for {symbol}")
