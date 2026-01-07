@@ -190,7 +190,7 @@ def group_into_operations(df):
     return operations
 
 def parse_log_for_peak_roi(operations):
-    """Parse PM2 logs to find Peak ROI for each operation's lifetime."""
+    """Parse PM2 logs to find Peak ROI for each operation's specific lifetime."""
     if not LOG_FILE.exists():
         print("⚠️  Log file not found, skipping Peak ROI analysis")
         return operations
@@ -203,13 +203,12 @@ def parse_log_for_peak_roi(operations):
     
     lines = content.split('\n')
     
-    # Parse all ROI entries with timestamps
-    roi_entries = []
-    
-    # Pattern: TIME | SYMBOL | SIDE | ENTRY | MARK | ROI%
+    # Parse all ROI entries with timestamps and entry prices
+    # Pattern: TIME | SYMBOL | SIDE | ENTRY_PRICE | MARK_PRICE | ROI%
     pattern = r'(\d+:\d+:\d+\s+[AP]M)\s+.*?(\w+USDT)\s+.*?(LONG|SHORT)\s+.*?([\d.]+)\s+.*?([\d.]+)\s+.*?([+-]?[\d.]+)%'
     
-    today = datetime.now().date()
+    # Build index of log entries by symbol, side, and entry_price
+    log_entries = []
     
     for line in lines:
         clean_line = ANSI_ESCAPE.sub('', line)
@@ -217,44 +216,58 @@ def parse_log_for_peak_roi(operations):
         if match:
             try:
                 time_str = match.group(1)
-                # Parse time (assume today's date for now)
-                time_obj = datetime.strptime(time_str, '%I:%M:%S %p').replace(
-                    year=today.year, month=today.month, day=today.day
-                )
-                roi_entries.append({
-                    'time': time_obj,
+                entry_price = float(match.group(4))
+                mark_price = float(match.group(5))
+                roi = float(match.group(6))
+                
+                log_entries.append({
+                    'time_str': time_str,
                     'symbol': match.group(2),
                     'side': match.group(3),
-                    'roi': float(match.group(6))
+                    'entry_price': entry_price,
+                    'mark_price': mark_price,
+                    'roi': roi
                 })
             except:
                 pass
     
-    # Match ROI entries to operations
+    print(f"   Parsed {len(log_entries):,} log entries")
+    
+    # Match ROI entries to operations BY ENTRY PRICE (unique identifier)
     for op in operations:
-        if op['entry_time'] is None or op['exit_time'] is None:
+        if op['entry_time'] is None or op['exit_time'] is None or op['entry_price'] is None:
             op['peak_pos'] = None
             op['peak_neg'] = None
             op['salvable'] = None
             continue
         
-        # Find ROI entries during operation lifetime
         op_symbol = op['symbol'] + 'USDT'
         op_side = op['side']
+        op_entry_price = op['entry_price']
+        
+        # Find ALL log entries that match this specific trade by:
+        # 1. Same symbol
+        # 2. Same side
+        # 3. Same entry price (within 0.01% tolerance for float comparison)
+        price_tolerance = op_entry_price * 0.0001  # 0.01% tolerance
         
         relevant_rois = [
-            e['roi'] for e in roi_entries
-            if e['symbol'] == op_symbol and e['side'] == op_side
+            e['roi'] for e in log_entries
+            if e['symbol'] == op_symbol 
+            and e['side'] == op_side
+            and abs(e['entry_price'] - op_entry_price) < price_tolerance
         ]
         
         if relevant_rois:
             op['peak_pos'] = max(relevant_rois)
             op['peak_neg'] = min(relevant_rois)
             op['salvable'] = op['peak_pos'] >= 3.0
+            op['roi_samples'] = len(relevant_rois)
         else:
             op['peak_pos'] = None
             op['peak_neg'] = None
             op['salvable'] = None
+            op['roi_samples'] = 0
     
     return operations
 
