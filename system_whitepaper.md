@@ -558,6 +558,17 @@ PRIORITY_SYMBOLS = [
 
 **Resultado:** Cero Downtime. El bot siempre tiene un modelo válido disponible.
 
+### 7.5 Reentrenamiento cada 12 Horas (Rolling Window)
+
+**Frecuencia:** PM2 Cron: `0 0,12 * * *` (00:00 y 12:00 UTC)
+
+**Justificación:**
+- Los datos de Order Book (OBI, CVD) tienen vida útil corta ("Data Decay").
+- Con solo 15 días de historial, cada bloque de 12 horas representa ~3.3% de información nueva.
+- Al entrenar 2x/día, capturamos las transiciones entre sesiones (NY, Asia, Europa).
+
+**Proceso PM2:** `05-12H-Retrain`
+
 ---
 
 ## 8. Hardware y Requisitos
