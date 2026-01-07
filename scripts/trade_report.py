@@ -34,8 +34,16 @@ load_dotenv(DOTENV_PATH)
 API_KEY = os.getenv('BINANCE_API_KEY')
 API_SECRET = os.getenv('BINANCE_API_SECRET')
 
-TARGET_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 
-                  'AVAX/USDT', 'LINK/USDT', 'POL/USDT', 'DOGE/USDT']
+# All 21 trading symbols (Priority + Secondary)
+TARGET_SYMBOLS = [
+    # Priority (Alpha Batch)
+    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT',
+    'DOGE/USDT', 'LINK/USDT', 'AVAX/USDT', 'POL/USDT',
+    # Secondary (Bravo Batch)
+    'BNB/USDT', 'DOT/USDT', 'LTC/USDT', 'UNI/USDT', 'ATOM/USDT',
+    'NEAR/USDT', 'PEPE/USDT', 'FET/USDT', 'SEI/USDT', 'WLD/USDT',
+    'INJ/USDT', 'APT/USDT'
+]
 
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
@@ -250,30 +258,10 @@ def parse_log_for_peak_roi(operations):
     
     return operations
 
-def print_report(operations, args, label):
-    """Print formatted report."""
+def print_report_simple(operations, args, label):
+    """Print formatted report. Filters already applied."""
     if not operations:
         print("❌ No se encontraron operaciones en el rango seleccionado.")
-        return
-    
-    # Filter by status
-    if args.status:
-        if args.status == 'WIN':
-            operations = [op for op in operations if op['pnl'] and op['pnl'] > 0]
-        else:
-            operations = [op for op in operations if op['pnl'] and op['pnl'] <= 0]
-    
-    # Filter by symbol
-    if args.symbol:
-        sym = args.symbol.upper().replace('USDT', '').replace('/', '')
-        operations = [op for op in operations if op['symbol'] == sym]
-    
-    # Filter by side
-    if args.side:
-        operations = [op for op in operations if op['side'] == args.side]
-    
-    if not operations:
-        print("❌ No se encontraron operaciones con los filtros aplicados.")
         return
     
     # Sort by entry time descending
@@ -348,18 +336,35 @@ def main():
         print("❌ No se encontraron trades en el rango seleccionado.")
         return
     
-    print(f"   Encontrados: {len(df)} trades")
-    
     # Group into operations
     operations = group_into_operations(df)
+    
+    # Apply filters BEFORE counting
+    if args.status:
+        if args.status == 'WIN':
+            operations = [op for op in operations if op['pnl'] and op['pnl'] > 0]
+        else:
+            operations = [op for op in operations if op['pnl'] and op['pnl'] <= 0]
+    
+    if args.symbol:
+        sym = args.symbol.upper().replace('USDT', '').replace('/', '')
+        operations = [op for op in operations if op['symbol'] == sym]
+    
+    if args.side:
+        operations = [op for op in operations if op['side'] == args.side]
+    
+    if not operations:
+        print("❌ No se encontraron operaciones con los filtros aplicados.")
+        return
+    
     print(f"   Operaciones: {len(operations)}")
     
     # Parse logs for Peak ROI if requested
     if args.peak:
         operations = parse_log_for_peak_roi(operations)
     
-    # Print report
-    print_report(operations, args, label)
+    # Print report (filters already applied)
+    print_report_simple(operations, args, label)
 
 if __name__ == "__main__":
     main()
