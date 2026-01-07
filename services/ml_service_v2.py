@@ -118,6 +118,12 @@ class V2ModelManager:
         self.smoothed_probs_cache = {} 
         # Alphas dinámicos se definen en predict()
         
+        # ═══════════════════════════════════════════════════════
+        # 🛂 QUALITY GATE: Cache de metadatos (NINJA v7.8)
+        # ═══════════════════════════════════════════════════════
+        self.metadata_cache: Dict[str, dict] = {}
+        self.QUALITY_THRESHOLD = 0.50  # 50% - Modelos por debajo son vetados
+        
     def _clean_symbol(self, symbol: str) -> str:
         # ADA/USDT:USDT -> ADAUSDT
         return symbol.replace("/", "").replace(":", "").replace("-", "").replace("USDT", "") + "USDT"
@@ -192,6 +198,24 @@ class V2ModelManager:
                 ensemble.load_model("transformer_v2", "transformer", str(transformer_path), str(symbol_dir / "transformer_config.json"))
             
             self.ensembles[clean_symbol] = ensemble
+            
+            # ═══════════════════════════════════════════════════════════════════
+            # 🛂 QUALITY GATE: Cargar Metadata (Pasaporte de Calidad)
+            # ═══════════════════════════════════════════════════════════════════
+            meta_path = symbol_dir / "metadata.json"
+            if meta_path.exists():
+                try:
+                    with open(meta_path, 'r') as f:
+                        self.metadata_cache[clean_symbol] = json.load(f)
+                        acc = self.metadata_cache[clean_symbol].get('accuracy', 0)
+                        LOGGER.info(f"🛂 Passport loaded for {clean_symbol}: Accuracy={acc:.2%}")
+                except Exception as e:
+                    LOGGER.error(f"⚠️ Failed to load metadata for {clean_symbol}: {e}")
+                    self.metadata_cache[clean_symbol] = {"accuracy": 0.0}
+            else:
+                LOGGER.warning(f"⚠️ No metadata.json for {clean_symbol}. Assuming untested (blocked).")
+                self.metadata_cache[clean_symbol] = {"accuracy": 0.0}
+            
             LOGGER.info(f"✅ Loaded {clean_symbol} ensemble.")
             return ensemble
             
@@ -212,6 +236,21 @@ class V2ModelManager:
     def predict(self, symbol: str, df: pd.DataFrame) -> dict:
         ensemble = self.get_ensemble(symbol)
         clean_sym = self._clean_symbol(symbol)
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # 🛂 QUALITY GATE (NINJA v7.8)
+        # ═══════════════════════════════════════════════════════════════════
+        # Si el modelo es "tonto" (<50% accuracy), forzamos NEUTRALIDAD.
+        meta = self.metadata_cache.get(clean_sym, {})
+        accuracy = meta.get('accuracy', 0.0)
+        
+        if accuracy < self.QUALITY_THRESHOLD:
+            LOGGER.warning(f"⛔ VETOED {clean_sym}: Low Accuracy ({accuracy:.2%}). Forcing NEUTRAL.")
+            return {
+                'ensemble_probs': torch.tensor([[0.0, 1.0, 0.0]]),  # Short=0, Neutral=1, Long=0
+                'consensus': 0.0,
+                'verdict': 'VETOED_LOW_ACCURACY'
+            }
         
         if ensemble is None:
             # Dummy response if model missing (Fail Safe: Neutral)

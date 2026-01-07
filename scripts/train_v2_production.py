@@ -278,6 +278,31 @@ def train_model_for_symbol(symbol):
         )
         
         logger.info(f"📓 Diary Entry Saved: TCN Acc={tcn_acc:.2%} | XGB Acc={xgb_acc:.2%}")
+        
+        # ══════════════════════════════════════════════════════════════════
+        # 🛂 QUALITY PASSPORT: Guardar Metadata para la API
+        # ══════════════════════════════════════════════════════════════════
+        # La API leerá esto para decidir si confiar en el modelo o vetarlo.
+        best_accuracy = max(tcn_acc, xgb_acc)
+        best_f1 = max(tcn_f1, xgb_f1)
+        
+        metadata = {
+            "symbol": symbol,
+            "clean_symbol": clean_symbol,
+            "version": VERSION,
+            "timestamp": pd.Timestamp.now().isoformat(),
+            "accuracy": float(best_accuracy),
+            "f1_score": float(best_f1),
+            "tcn_accuracy": float(tcn_acc),
+            "xgb_accuracy": float(xgb_acc),
+            "samples": len(y_val),
+            "models": ["TCN", "XGBOOST"]
+        }
+        
+        with open(temp_dir / "metadata.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
+            
+        logger.info(f"🛂 Quality Passport Saved: Best Acc = {best_accuracy:.2%}")
             
         logger.info(f"✅ Training Complete in TEMP. Swapping to PRODUCTION...")
 

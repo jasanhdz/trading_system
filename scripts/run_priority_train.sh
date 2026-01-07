@@ -1,16 +1,16 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════
-# 🦁 BATALLÓN ALPHA - Entrenamiento PRIORITARIO (Cada 12 Horas)
+# 🦁 BATALLÓN ALPHA - Entrenamiento PRIORITARIO (PARALELO)
 # ═══════════════════════════════════════════════════════════════════════════
 # Símbolos de alta prioridad que mueven el mercado.
-# Schedule: 00:00 y 12:00 UTC (06:00 AM y 06:00 PM CDMX)
-# Duración estimada: ~2.5 horas
+# Optimización: Uso simultáneo de GPU 0 y GPU 1.
+# Duración estimada: ~1.2 horas (vs 2.5h antes)
 
 PROJECT_DIR="/home/jasan/Develop/trading_system"
 LOG_FILE="$PROJECT_DIR/logs/train_alpha.log"
 DATE=$(date '+%Y-%m-%d %H:%M:%S')
 
-echo "[$DATE] 🦁 Iniciando Entrenamiento PRIORITARIO (Alpha Batch)..." >> $LOG_FILE
+echo "[$DATE] 🦁 Iniciando Entrenamiento PRIORITARIO (Alpha Batch - Paralelo)..." >> $LOG_FILE
 
 # Go to project dir
 cd $PROJECT_DIR
@@ -22,8 +22,7 @@ export PYTORCH_HIP_ALLOC_CONF=max_split_size_mb:512
 export HSA_ENABLE_SDMA=0
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 🦁 ALPHA SYMBOLS (9 Production Symbols)
-# Los que operan en binance-futures-bot-ts/.env
+# 🦁 ALPHA SYMBOLS (9 Símbolos)
 # ═══════════════════════════════════════════════════════════════════════════
 ALPHA_SYMBOLS=(
     "BTC/USDT:USDT"
@@ -37,28 +36,46 @@ ALPHA_SYMBOLS=(
     "POL/USDT:USDT"
 )
 
-echo "[$DATE] 🎯 Training ${#ALPHA_SYMBOLS[@]} ALPHA symbols..." >> $LOG_FILE
+echo "[$DATE] 🎯 Training ${#ALPHA_SYMBOLS[@]} ALPHA symbols in Parallel..." >> $LOG_FILE
 
 START_TIME=$(date +%s)
 
-for symbol in "${ALPHA_SYMBOLS[@]}"; do
-    SYMBOL_START=$(date +%s)
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')]   🚀 Training $symbol..." >> $LOG_FILE
+# ═══════════════════════════════════════════════════════════════════════════
+# BUCLE PARALELO (2 GPUs a la vez)
+# ═══════════════════════════════════════════════════════════════════════════
+TOTAL=${#ALPHA_SYMBOLS[@]}
+
+for ((i=0; i<TOTAL; i+=2)); do
+    # Symbol for GPU 0 (índice par)
+    symbol_0="${ALPHA_SYMBOLS[$i]}"
     
-    # Load balancing: Alternate GPUs
-    export HIP_VISIBLE_DEVICES=$((RANDOM % 2))
-    $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py --symbol "$symbol" >> $LOG_FILE 2>&1
-    
-    SYMBOL_END=$(date +%s)
-    SYMBOL_DURATION=$((SYMBOL_END - SYMBOL_START))
-    
-    if [ $? -eq 0 ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')]   ✅ $symbol complete (${SYMBOL_DURATION}s)" >> $LOG_FILE
-    else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')]   ❌ $symbol failed" >> $LOG_FILE
+    # Symbol for GPU 1 (índice impar, si existe)
+    symbol_1=""
+    if [ $((i+1)) -lt $TOTAL ]; then
+        symbol_1="${ALPHA_SYMBOLS[$((i+1))]}"
     fi
     
-    # Pause to let GPU breathe
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')]    🚀 Launching pair: $symbol_0 (GPU 0) + ${symbol_1:-None} (GPU 1)..." >> $LOG_FILE
+    
+    # --- Lanzar Trabajo GPU 0 en Background (&) ---
+    HIP_VISIBLE_DEVICES=0 $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py --symbol "$symbol_0" >> $LOG_FILE 2>&1 &
+    PID_0=$!
+    
+    # --- Lanzar Trabajo GPU 1 en Background (&) ---
+    if [ -n "$symbol_1" ]; then
+        HIP_VISIBLE_DEVICES=1 $PROJECT_DIR/.venv_rocm62/bin/python3 scripts/train_v2_production.py --symbol "$symbol_1" >> $LOG_FILE 2>&1 &
+        PID_1=$!
+        
+        # Esperar a que AMBOS terminen antes de seguir
+        wait $PID_0 $PID_1
+    else
+        # Si es el último y está solo (impar), esperar solo a él
+        wait $PID_0
+    fi
+    
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')]    ✅ Pair complete." >> $LOG_FILE
+    
+    # Pausa técnica para enfriar VRAM y Garbage Collector
     sleep 5
 done
 
@@ -66,7 +83,7 @@ END_TIME=$(date +%s)
 TOTAL_DURATION=$((END_TIME - START_TIME))
 TOTAL_MINUTES=$((TOTAL_DURATION / 60))
 
-# Reload ML Service to pick up new models
+# Reload ML Service
 pm2 reload 03-ML-Service-V2 >> $LOG_FILE 2>&1
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 ML Service reloaded." >> $LOG_FILE
