@@ -567,7 +567,27 @@ PRIORITY_SYMBOLS = [
 - Con solo 15 días de historial, cada bloque de 12 horas representa ~3.3% de información nueva.
 - Al entrenar 2x/día, capturamos las transiciones entre sesiones (NY, Asia, Europa).
 
-**Proceso PM2:** `05-12H-Retrain`
+**Proceso PM2:** `04-Daily-Retrain-12h`
+
+### 7.6 Bitácora de Entrenamiento (Training Diary)
+
+**Archivo:** `data/training_diary.json`
+
+**Propósito:** Registro histórico de métricas de cada entrenamiento para:
+- Detectar degradación de modelos.
+- Comparar rendimiento TCN vs XGBoost.
+- Validar mejoras entre versiones.
+
+**Métricas Registradas:**
+- `accuracy` - Porcentaje de predicciones correctas (validación)
+- `f1_score` - F1 ponderado para multiclase
+- `samples` - Número de muestras evaluadas
+- `timestamp` - Momento del entrenamiento
+
+**Comando para visualizar:**
+```bash
+python scripts/view_diary.py
+```
 
 ---
 
