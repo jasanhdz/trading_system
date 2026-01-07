@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/jasan/Develop/trading_system/binance-futures-bot-ts/.venv/bin/python3
 """
 📊 TRADE REPORT - Comprehensive Trade Analysis with Peak ROI
 =============================================================
