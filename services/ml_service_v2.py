@@ -234,12 +234,22 @@ class V2ModelManager:
                 self.load_model_for_symbol(item.name)
 
     def predict(self, symbol: str, df: pd.DataFrame) -> dict:
-        ensemble = self.get_ensemble(symbol)
         clean_sym = self._clean_symbol(symbol)
+        
+        # Load ensemble first (this populates metadata_cache)
+        ensemble = self.get_ensemble(symbol)
+        
+        if ensemble is None:
+            # Dummy response if model missing (Fail Safe: Neutral)
+            return {
+                'ensemble_probs': torch.tensor([[0.0, 1.0, 0.0]]),
+                'consensus': 0.0
+            }
         
         # ═══════════════════════════════════════════════════════════════════
         # 🛂 QUALITY GATE (NINJA v7.8)
         # ═══════════════════════════════════════════════════════════════════
+        # Check AFTER loading so metadata_cache is populated.
         # Si el modelo es "tonto" (<50% accuracy), forzamos NEUTRALIDAD.
         meta = self.metadata_cache.get(clean_sym, {})
         accuracy = meta.get('accuracy', 0.0)
@@ -250,13 +260,6 @@ class V2ModelManager:
                 'ensemble_probs': torch.tensor([[0.0, 1.0, 0.0]]),  # Short=0, Neutral=1, Long=0
                 'consensus': 0.0,
                 'verdict': 'VETOED_LOW_ACCURACY'
-            }
-        
-        if ensemble is None:
-            # Dummy response if model missing (Fail Safe: Neutral)
-            return {
-                'ensemble_probs': torch.tensor([[0.0, 1.0, 0.0]]),
-                'consensus': 0.0
             }
             
         # 1. Feature Engineering (Derived Features)
