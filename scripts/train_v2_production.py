@@ -11,6 +11,7 @@ import logging
 import shutil
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import RobustScaler
+from sklearn.metrics import accuracy_score, f1_score
 
 # Add repo root to path
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,10 @@ from ml.advanced_models.improved_architecture import DeepTemporalNet
 from ml.advanced_models.tabular_model import XGBoostTradingModel
 from ml.advanced_models.tcn_model import TCNTradingModel
 from ml.advanced_models.transformer_model import TradingTransformer
+from ml.utils.training_diary import TrainingDiary
+
+# Inicializar el diario de entrenamiento
+diary = TrainingDiary()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -228,6 +233,51 @@ def train_model_for_symbol(symbol):
         xgb.save(str(temp_dir / "xgboost.joblib"))
         with open(temp_dir / "xgboost_config.json", 'w') as f:
             json.dump({}, f)
+        
+        # ══════════════════════════════════════════════════════════════════
+        # 📊 EVALUACIÓN DE MÉTRICAS PARA EL DIARIO
+        # ══════════════════════════════════════════════════════════════════
+        logger.info("📊 Calculating Final Metrics for Diary...")
+        
+        # --- EVALUACIÓN TCN ---
+        tcn.eval()
+        all_preds_tcn = []
+        all_targets = []
+        val_ds = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
+        val_loader = DataLoader(val_ds, batch_size=64, shuffle=False)
+        
+        with torch.no_grad():
+            for Xb, yb in val_loader:
+                Xb = Xb.to(device)
+                out = tcn(Xb)
+                preds = torch.argmax(out['logits'], dim=1).cpu().numpy()
+                all_preds_tcn.extend(preds)
+                all_targets.extend(yb.numpy())
+        
+        tcn_acc = accuracy_score(all_targets, all_preds_tcn)
+        tcn_f1 = f1_score(all_targets, all_preds_tcn, average='weighted', zero_division=0)
+        
+        diary.log_entry(
+            symbol=symbol,
+            model_type="TCN",
+            version=VERSION,
+            metrics={"accuracy": float(tcn_acc), "f1_score": float(tcn_f1), "samples": len(all_targets)}
+        )
+        
+        # --- EVALUACIÓN XGBOOST ---
+        xgb_output = xgb.predict(X_val_flat)
+        xgb_preds = np.argmax(xgb_output['probs'], axis=1)
+        xgb_acc = accuracy_score(y_val, xgb_preds)
+        xgb_f1 = f1_score(y_val, xgb_preds, average='weighted', zero_division=0)
+        
+        diary.log_entry(
+            symbol=symbol,
+            model_type="XGBOOST",
+            version=VERSION,
+            metrics={"accuracy": float(xgb_acc), "f1_score": float(xgb_f1), "samples": len(y_val)}
+        )
+        
+        logger.info(f"📓 Diary Entry Saved: TCN Acc={tcn_acc:.2%} | XGB Acc={xgb_acc:.2%}")
             
         logger.info(f"✅ Training Complete in TEMP. Swapping to PRODUCTION...")
 
