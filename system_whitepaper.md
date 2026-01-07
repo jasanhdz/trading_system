@@ -429,8 +429,30 @@ Si ROI > 50%:  Trail = 10% del pico
 **Problema:** Al actualizar un Stop Loss, Binance requiere margen doble momentáneamente si se crea la nueva orden antes de cancelar la vieja. En cuentas con >90% de uso, esto causaba fallos ("Insufficient Margin").
 **Solución:** Secuencia estricta: `Cancelar Viejo` -> `Esperar 2s` -> `Crear Nuevo`. Esto libera el margen antes de reutilizarlo, garantizando operatividad al 99% de capacidad.
 
-#### 5.6.5 Umbral de Ratchet Dinámico
-**Problema:** Un umbral fijo de 1.5% ROI activaba el trailing demasiado pronto, siendo comido por fees y ruido.
+#### 5.6.5 Umbral de Ratchet Dinámico (v7.6)
+
+**Parámetro:** `trailing_activation_roe` en `regime_config.live.yaml`
+
+*NOTA: Reemplazado por Tiered Ratchet en v7.7.*
+
+---
+
+### 5.6.6 Tiered Ratchet - Escudo y Espada (v7.7)
+
+**Basado en:** Data Mining de 38,507 trades (Peak ROI Analysis).
+
+**Hallazgo Clave:** El 90.5% de las posiciones (19/21) alcanzaron al menos +3% ROI antes de revertirse.
+
+**Implementación:**
+
+| Nivel | Rango ROI | Acción | Objetivo |
+|-------|-----------|--------|----------|
+| 🛡️ Escudo | 3% - 6% | Stop → Breakeven + 0.15% | Protección de capital |
+| ⚔️ Espada | > 6% | Trailing 60% | Maximización de ganancias |
+
+**Resultado Esperado:**
+- Trades que alcanzaron +4% pero cerraron en pérdida ahora cierran en $0.
+- Trades explosivos (+20%+) siguen siendo capturados por el trailing agresivo.
 **Solución:** Se externalizó la configuración a `regime_config.live.yaml`. Ahora el umbral es dinámico (Default: 5.0%, Configurado: 5.5%), permitiendo que la operación "respire" y solo proteja ganancias significativas.
 
 ---
