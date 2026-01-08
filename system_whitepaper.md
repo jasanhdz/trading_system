@@ -1,14 +1,14 @@
-# 🥷 NINJA Trading System v6.2 - Technical Whitepaper
+# 🥷 NINJA Trading System v7.8 - Technical Whitepaper
 
-**Versión:** 7.3 (Stability & Precision)  
-**Fecha:** 6 de Enero, 2026  
+**Versión:** 7.8 (Quality Gate + Dynamic Symbols)  
+**Fecha:** 8 de Enero, 2026  
 **Estado:** Producción (Estable)
 
 ---
 
 ## 1. Resumen Ejecutivo
 
-El **NINJA Trading System v4.0** es un sistema de trading algorítmico de alta frecuencia diseñado para operar en mercados de futuros de criptomonedas. Opera bajo una arquitectura de **4 Pilares** con adaptación dinámica al régimen de mercado.
+El **NINJA Trading System v7.8** es un sistema de trading algorítmico de alta frecuencia diseñado para operar en mercados de futuros de criptomonedas. Opera bajo una arquitectura de **4 Pilares** con adaptación dinámica al régimen de mercado.
 
 **Filosofía Central:**
 > *"Entrada Probabilística, Salida Determinista, Adaptación por Régimen."*
@@ -24,7 +24,8 @@ El **NINJA Trading System v4.0** es un sistema de trading algorítmico de alta f
 | **v6.0** | Low Latency | Redis caching, async I/O, parallelized network |
 | **v6.2** | Smart Cooldown | Adaptive threshold, regime-based re-entry |
 | **v7.3** | Stability & Precision | Anti-Amnesia, Monotonicity, Immortal TP |
-| **v7.6** | The Trend Commander | Zero-Floor Logic, High Water Mark, Algo Hunt, Serialized Exec |
+| **v7.6** | The Trend Commander | Zero-Floor Logic, High Water Mark, Tiered Ratchet |
+| **v7.8** | Quality Gate | Dynamic Symbols, Hot-Reload, Alpha/Bravo Training |
 
 ---
 
@@ -486,6 +487,141 @@ pm2 restart 01-Trading-Bot --update-env
 pm2 restart all
 ```
 
+### 6.3 SymbolManager - Hot Reload (v7.8)
+
+**Archivo:** `src/app/SymbolManager.ts`
+
+El SymbolManager detecta automáticamente cambios en los modelos y activa/desactiva símbolos sin reiniciar el bot.
+
+#### Arquitectura
+
+```mermaid
+graph LR
+    Training[Training Completes] --> Meta[metadata.json updated]
+    Meta --> FSWatch[fs.watch detects change]
+    FSWatch --> Debounce[5s Debounce]
+    Debounce --> Sync[SymbolManager.sync]
+    Sync --> |accuracy >= 55%| Start[startRunner]
+    Sync --> |accuracy < 55%| Stop[stopRunner]
+```
+
+#### Componentes
+
+| Parámetro | Valor | Descripción |
+|-----------|-------|-------------|
+| **MODELS_DIR** | `/models/v2_ensemble/` | Directorio de modelos |
+| **QUALITY_THRESHOLD** | 55% | Accuracy mínimo para operar |
+| **DEBOUNCE_MS** | 5000 | Tiempo de espera antes de sync |
+
+#### Código Clave
+
+```typescript
+// SymbolManager.ts
+private startWatching(): void {
+    this.watcher = fs.watch(MODELS_DIR, { recursive: true }, (event, filename) => {
+        if (filename?.endsWith('metadata.json')) {
+            this.logger.info('model_change_detected', { filename, event });
+            this.debouncedSync();
+        }
+    });
+}
+
+sync(): void {
+    const activeSymbols = this.getActiveSymbols();  // Filter by 55% threshold
+    const runningSymbols = Array.from(this.runners.keys());
+    
+    // Start new symbols
+    for (const sym of activeSymbols.filter(s => !this.runners.has(s))) {
+        this.startRunner(sym);
+    }
+    
+    // Stop removed symbols (does NOT close positions)
+    for (const sym of runningSymbols.filter(s => !activeSymbols.includes(s))) {
+        this.stopRunner(sym);
+    }
+}
+```
+
+#### Logs de Ejemplo
+
+```
+[NinjaConfig] Active symbols: 6/21 (threshold: 55%)
+symbol_manager_watching path=/models/v2_ensemble
+model_change_detected filename=LTCUSDT/metadata.json
+symbol_runner_start symbol=LTCUSDT source=hot_reload
+```
+
+### 6.4 Quality Gate - Filtrado por Accuracy (v7.8)
+
+**Archivo:** `src/app/core/NinjaConfigManager.ts`
+
+Solo los símbolos con **accuracy >= 55%** son operados automáticamente.
+
+#### Flujo
+
+1. `regime_config.live.yaml` define 21 símbolos con capital allocation
+2. `getActiveSymbols()` lee `metadata.json` de cada modelo
+3. Filtra símbolos con `accuracy >= QUALITY_THRESHOLD`
+4. Solo símbolos activos inician runners
+
+#### Método `getActiveSymbols()`
+
+```typescript
+getActiveSymbols(): string[] {
+    const allSymbols = this.getSymbols();
+    const QUALITY_THRESHOLD = 0.55;
+    
+    return allSymbols.filter(symbol => {
+        const metaPath = `${MODELS_DIR}/${symbol}/metadata.json`;
+        if (!fs.existsSync(metaPath)) return false;
+        
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        return meta.accuracy >= QUALITY_THRESHOLD;
+    });
+}
+```
+
+#### Estados de Símbolos
+
+| Estado | Accuracy | Comportamiento |
+|--------|----------|----------------|
+| ✅ **ACTIVE** | >= 55% | Trading habilitado |
+| ⛔ **VETOED** | < 55% | Runner detenido (sin afectar posiciones) |
+| ❌ **NO_MODEL** | N/A | Sin metadata.json |
+
+#### Reporte de Ejemplo
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║            TRAINING REPORT - 2026-01-08                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+Symbol          Accuracy   Status
+────────────────────────────────────────
+BNBUSDT           86.82%   ✅ ACTIVE    
+LTCUSDT           74.42%   ✅ ACTIVE    
+BTCUSDT           63.24%   ✅ ACTIVE    
+SOLUSDT           62.86%   ✅ ACTIVE    
+LINKUSDT          60.96%   ✅ ACTIVE    
+AVAXUSDT          57.94%   ✅ ACTIVE    
+DOGEUSDT          51.48%   ⛔ VETOED    
+ETHUSDT           48.07%   ⛔ VETOED    
+...
+
+════════════════════════════════════════
+✅ Active: 6 | ⛔ Vetoed: 15 | Threshold: 55%
+```
+
+### 6.5 Procesos PM2 Actualizados (v7.8)
+
+| ID | Proceso | Función | Estado |
+|----|---------|---------|--------|
+| 0 | `01-Trading-Bot` | Bot principal TypeScript | ✅ Online |
+| 1 | `02-Data-Collector` | Recolector de microestructura | ✅ Online |
+| 2 | `03-ML-Service-V2` | API ML FastAPI | ✅ Online |
+| 4 | `04-Alpha-Train-12h` | Entrenamiento símbolos prioritarios | ⏸️ Cron |
+| 5 | `05-Bravo-Train-24h` | Entrenamiento símbolos secundarios | ⏸️ Cron |
+
 ---
 
 ## 7. Entrenamiento de Modelos
@@ -541,33 +677,54 @@ Datos: Últimos 30 días
 GPUs: 2x AMD RX 6600 (ROCm)
 ```
 
-#### 7.3.1 Entrenamiento por Prioridad
+#### 7.3.1 Alpha/Bravo Dual Training Schedule (v7.8)
 
-**¿Por qué priorizar?**
+**¿Por qué dos batches?**
 
-El sistema entrena 21 símbolos, pero solo 9 están activos en producción. Si un modelo falla o hay un error durante el entrenamiento de un símbolo secundario, los 9 símbolos críticos ya estarán listos para operar.
+El sistema entrena 21 símbolos en dos tandas para optimizar recursos y garantizar que los símbolos de producción estén listos primero.
 
-**Fases de Entrenamiento:**
+**Schedule de Entrenamiento:**
 
-| Fase | Símbolos | Estrategia | Duración |
-|------|----------|------------|---------|
-| **PHASE 1** | 9 (Producción) | Secuencial | ~1 hora |
-| **PHASE 2** | 12 (Secundarios) | Paralelo (2 GPUs) | ~30 min |
+| Batch | Horario (CDMX) | Horario (UTC) | Símbolos | GPU |
+|-------|----------------|---------------|----------|-----|
+| **Alpha** | 2:00 AM | 8:00 AM | 9 Priority | AMD RX 6600 |
+| **Bravo** | 6:00 AM | 12:00 PM | 12 Secondary | AMD RX 6600 |
 
-**Símbolos de Producción (Priority):**
+**Símbolos Alpha (Producción):**
 
 ```python
-# Fuente: binance-futures-bot-ts/.env
-PRIORITY_SYMBOLS = [
-    'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'POLUSDT', 'ETHUSDT',
-    'XRPUSDT', 'SOLUSDT', 'ADAUSDT', 'BTCUSDT'
+# Proceso PM2: 04-Alpha-Train-12h
+ALPHA_SYMBOLS = [
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT',
+    'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'POLUSDT'
 ]
 ```
 
+**Símbolos Bravo (Secundarios):**
+
+```python
+# Proceso PM2: 05-Bravo-Train-24h
+BRAVO_SYMBOLS = [
+    'BNBUSDT', 'DOTUSDT', 'LTCUSDT', 'UNIUSDT', 'ATOMUSDT',
+    'NEARUSDT', '1000PEPEUSDT', 'FETUSDT', 'SEIUSDT',
+    'WLDUSDT', 'INJUSDT', 'APTUSDT'
+]
+```
+
+**Flujo Post-Training:**
+
+```bash
+# run_priority_train.sh
+1. Train model → models/v2_ensemble/{SYMBOL}/
+2. Update metadata.json with accuracy
+3. pm2 reload 03-ML-Service-V2  # Reload models
+4. SymbolManager.sync() detecta cambio  # Hot-reload símbolos
+```
+
 **Beneficios:**
-- 🚀 Modelos de producción listos en 1 hora (vs 2+ horas antes)
-- 🛡️ Tolerancia a fallos: si Phase 2 falla, producción no se afecta
-- ⚖️ Balance de carga: Phase 2 usa ambas GPUs en paralelo
+- 🚀 Modelos Alpha listos a las 3:00 AM (antes de mercado asiático)
+- 🛡️ Tolerancia a fallos: si Bravo falla, Alpha no se afecta
+- ♻️ Hot-reload automático vía SymbolManager
 
 ### 7.4 Entrenamiento Atómico (Atomic Swap)
 
@@ -679,21 +836,154 @@ axios: ^1.6.0
 
 ---
 
-## 9. Variables de Entorno
+## 9. Configuración del Sistema (v7.8)
+
+### 9.1 Variables de Entorno (System-Only)
 
 **Archivo:** `binance-futures-bot-ts/.env`
 
-```bash
-# API Keys
-BINANCE_API_KEY=xxx
-BINANCE_SECRET_KEY=xxx
+> [!IMPORTANT]
+> A partir de v7.8, el archivo `.env` contiene **solo configuración del sistema**. Los parámetros de trading se migraron a `regime_config.live.yaml`.
 
-# Configuración
-SYMBOLS=DOGEUSDT:10:0.75,BTCUSDT:10:0.60,...
-REGIME_CONFIG=/path/to/regime_config.live.yaml
+```bash
+# ═══════════════════════════════════════════════════════════════
+# SYSTEM CONFIG (v7.8) - Trading config moved to YAML
+# ═══════════════════════════════════════════════════════════════
+
+# Binance Credentials
+BINANCE_API_KEY=xxx
+BINANCE_API_SECRET=xxx
+IS_TESTNET=false
+
+# Bot Timing
+BOT_INTERVAL_SEC=10
+BOT_STAGGER_MS=1000
 
 # ML Service
-ML_SERVICE_URL=http://localhost:8001
+ML_SERVICE_URL=http://127.0.0.1:8001
+ML_HISTORY_BARS=60
+
+# Logging
+LOG_PRETTY=true
+LOG_LEVEL=info
+
+# Config Path
+REGIME_CONFIG=./regime_config.live.yaml
+```
+
+### 9.2 YAML Configuration Reference (v7.8)
+
+**Archivo:** `binance-futures-bot-ts/regime_config.live.yaml`
+
+El archivo YAML es la **fuente central** para toda la configuración de trading.
+
+#### Estructura Completa
+
+```yaml
+# ═══════════════════════════════════════════════════════════════
+# NINJA v7.8: QUALITY GATE CONFIG
+# ═══════════════════════════════════════════════════════════════
+
+# --- Symbol Capital Allocation ---
+SYMBOLS:
+  # Priority (Alpha Batch) - Higher allocation
+  BTCUSDT: 0.75
+  ETHUSDT: 0.75
+  SOLUSDT: 0.75
+  XRPUSDT: 0.75
+  ADAUSDT: 0.75
+  DOGEUSDT: 0.75
+  LINKUSDT: 0.75
+  AVAXUSDT: 0.75
+  POLUSDT: 0.75
+  
+  # Secondary (Bravo Batch) - Lower allocation
+  BNBUSDT: 0.50
+  DOTUSDT: 0.30
+  LTCUSDT: 0.30
+  # ... 12 more symbols
+
+# --- Trading Defaults ---
+TRADING:
+  capital_usage_default: 0.75      # Default capital per trade
+  min_wallet_reserve_usdt: 0       # Minimum USDT to keep
+  fee_buffer_pct: 0.0004           # Buffer for fees
+  max_risk_pct: 0                  # Max risk per trade (0 = disabled)
+  reenter_on_tp: true              # Re-enter after TP hit
+  post_exit_timeout_ms: 60000      # Cooldown after exit
+  vol_factor_reenter: 1.5          # Volume factor for re-entry
+
+# --- System Defaults ---
+SYSTEM:
+  tick_interval_ms: 5000
+  max_trades_per_day: 300
+  global_leverage_default: 10
+
+# --- Regime Definitions ---
+REGIMES:
+  BLOODBATH:
+    leverage: 20
+    entry_threshold: 0.35
+    hard_stop_roe: -0.02
+    tp_roe: 0.008
+  
+  WHALE:
+    leverage: 8
+    entry_threshold: 0.45
+    hard_stop_roe: -0.25
+    tp_roe: 0.03
+  
+  MONK:
+    leverage: 10
+    entry_threshold: 0.40
+    hard_stop_roe: -0.05
+    tp_roe: 0.02
+  
+  BUNKER:
+    leverage: 0
+    entry_threshold: 999.0
+    hard_stop_roe: 0.0
+    tp_roe: 0.0
+
+# --- Per-Symbol Overrides ---
+SYMBOL_OVERRIDES:
+  BTCUSDT:
+    WHALE: { leverage: 10, hard_stop_roe: -0.30 }
+    MONK:  { leverage: 10, hard_stop_roe: -0.07 }
+  
+  SOLUSDT:
+    WHALE: { leverage: 8, hard_stop_roe: -0.25 }
+  
+  XRPUSDT:
+    BLOODBATH: { leverage: 15 }  # Más agresivo en caos
+    WHALE: { leverage: 5, hard_stop_roe: -0.20 }
+  
+  # High Risk (Memecoins)
+  1000PEPEUSDT:
+    WHALE: { leverage: 4, hard_stop_roe: -0.30 }
+    MONK:  { leverage: 4, hard_stop_roe: -0.08 }
+```
+
+#### Secciones Clave
+
+| Sección | Propósito |
+|---------|-----------|
+| `SYMBOLS` | Define símbolos y su capital allocation (0-1) |
+| `TRADING` | Defaults globales de sizing y risk |
+| `SYSTEM` | Parámetros del bot (tick, leverage) |
+| `REGIMES` | Definición de 4 regímenes base |
+| `SYMBOL_OVERRIDES` | Ajustes por símbolo por régimen |
+
+#### Priority de Configuración
+
+```
+1. SYMBOL_OVERRIDES (más específico)
+   ↓
+2. REGIMES (base por régimen)
+   ↓
+3. SYMBOLS (capital allocation)
+   ↓
+4. TRADING/SYSTEM (defaults globales)
 ```
 
 ---
@@ -756,8 +1046,9 @@ Los siguientes comandos están disponibles globalmente desde cualquier directori
 
 | Comando | Descripción |
 |---------|-------------|
-| `audit_bot` | Descarga y analiza trades de Binance |
+| `audit_bot` | Descarga y analiza trades de Binance (CSV) |
 | `trading_report` | Muestra reportes formateados en consola |
+| `trade_report` | **Análisis completo con Peak ROI** |
 
 **Configuración de symlinks:**
 ```bash
@@ -765,35 +1056,130 @@ Los siguientes comandos están disponibles globalmente desde cualquier directori
 ls -la ~/bin/
 # audit_bot -> .../binance-futures-bot-ts/analysis/audit_bot.py
 # trading_report -> .../binance-futures-bot-ts/analysis/view_console_report.py
+# trade_report -> .../scripts/trade_report.py
 ```
 
 ### 12.2 Audit Bot (Forensic Analysis)
 
 **Archivo:** `binance-futures-bot-ts/analysis/audit_bot.py`
 
-Herramienta de análisis forense que descarga el historial de trades de Binance y genera reportes.
+Herramienta de análisis forense que descarga el historial de trades de Binance y genera reportes con análisis de Peak ROI.
 
-**Uso:**
+#### Argumentos Completos
+
+| Argumento | Descripción | Ejemplo |
+|-----------|-------------|---------|
+| `--today` | Operaciones de hoy | `audit_bot --today` |
+| `--week` | Última semana | `audit_bot --week` |
+| `--days N` | Últimos N días | `audit_bot --days 14` |
+| `--symbol SYM` | Filtrar por símbolo | `audit_bot --symbol BTCUSDT` |
+| `--status WIN/LOSS` | Filtrar por resultado | `audit_bot --status WIN` |
+| `--peak` | Incluir análisis Peak ROI | `audit_bot --week --peak` |
+| `--export` | Exportar a CSV | `audit_bot --days 30 --export` |
+
+#### Uso Básico
+
 ```bash
 # Operaciones de hoy
 audit_bot --today
 
-# Última semana, solo ganancias
-audit_bot --week --status WIN
+# Última semana con Peak ROI analysis
+audit_bot --week --peak
 
-# Filtrar por símbolo
-audit_bot --symbol SOLUSDT
+# Filtrar por símbolo y exportar
+audit_bot --symbol SOLUSDT --days 7 --export
 
-# Últimos N días
-audit_bot --days 14
+# Solo pérdidas para análisis
+audit_bot --week --status LOSS --peak
 ```
 
-**Output:**
-- `operations_history.csv` - Historial en CSV
-- `chart_equity.png` - Curva de equity
-- `chart_pnl_symbol.png` - PnL por símbolo
+#### Output Files
 
-### 12.3 Trading Report
+| Archivo | Contenido |
+|---------|-----------|
+| `operations_history.csv` | Historial completo en CSV |
+| `chart_equity.png` | Curva de equity |
+| `chart_pnl_symbol.png` | PnL por símbolo |
+| `peak_roi_analysis.csv` | Análisis de Peak ROI (con `--peak`) |
+
+### 12.3 Trade Report CLI (v7.8)
+
+**Archivo:** `scripts/trade_report.py`  
+**Comando:** `trade_report`
+
+Herramienta integral que combina historial de Binance con análisis de logs PM2 para mostrar Peak ROI de cada operación.
+
+#### Argumentos
+
+| Grupo | Argumento | Descripción |
+|-------|-----------|-------------|
+| **⏱️ Time** | `--today` | Trades de hoy |
+| | `--yesterday` | Trades de ayer |
+| | `--week` | Últimos 7 días |
+| | `--month` | Últimos 30 días |
+| | `--days N` | Últimos N días |
+| **🔍 Filters** | `--status WIN/LOSS` | Solo ganancias o pérdidas |
+| | `--symbol SOL` | Filtrar por símbolo |
+| | `--side LONG/SHORT` | Filtrar por dirección |
+| **📈 Analysis** | `--peak` | Incluir análisis Peak ROI |
+| | `--salvable 3.0` | Threshold para salvabilidad (default: 3%) |
+
+#### Ejemplos de Uso
+
+```bash
+# Trades de hoy con Peak ROI
+trade_report --today --peak
+
+# Pérdidas de ayer con análisis
+trade_report --yesterday --status LOSS --peak
+
+# Últimos 3 días de SOL
+trade_report --days 3 --symbol SOL
+
+# Semana completa, solo SHORTs perdedores
+trade_report --week --status LOSS --side SHORT --peak
+```
+
+#### Output de Ejemplo
+
+```
+� TRADE REPORT - Last 7 Days
+════════════════════════════════════════════════════════════════════════════════
+
+Par          Lado    Peak+        Peak-        Salvable@3%?
+────────────────────────────────────────────────────────────────────────────────
+ADAUSDT      LONG    +4.23%       -6.50%       ✅ SÍ
+ADAUSDT      SHORT   +47.06%      -10.21%      ✅ SÍ
+AVAXUSDT     LONG    +19.62%      -8.22%       ✅ SÍ
+BNBUSDT      SHORT   +2.24%       -1.12%       ❌ NO
+BTCUSDT      LONG    +2.30%       -0.97%       ❌ NO
+SOLUSDT      LONG    +22.61%      -3.29%       ✅ SÍ
+SOLUSDT      SHORT   +23.96%      -7.91%       ✅ SÍ
+════════════════════════════════════════════════════════════════════════════════
+
+📈 RESUMEN:
+   Posiciones que alcanzaron +3% ROI: 19/21
+   → Con trailing stop al 3%, estas posiciones hubieran cerrado en ganancia.
+```
+
+#### Interpretación de Columnas
+
+| Columna | Significado |
+|---------|-------------|
+| **Peak+** | Máximo ROI positivo alcanzado durante la posición |
+| **Peak-** | Máximo ROI negativo (drawdown) alcanzado |
+| **Salvable@3%?** | ✅ si Peak+ >= 3% (podría haberse salvado con trailing stop) |
+
+#### Características
+
+| Feature | Incluido |
+|---------|----------|
+| Filtros de tiempo | ✅ `--today`, `--yesterday`, `--week`, `--days N` |
+| Filtros de status | ✅ `--status WIN/LOSS` |
+| Peak ROI Analysis | ✅ `--peak` (parsea logs completos) |
+| 21 símbolos | ✅ Todos los Alpha + Bravo |
+
+### 12.4 Trading Report
 
 **Archivo:** `binance-futures-bot-ts/analysis/view_console_report.py`
 
@@ -1074,6 +1460,44 @@ const [price, wallet, pos] = await Promise.all([
 ---
 
 ## 19. Changelog
+
+### v7.8 (8 de Enero, 2026) - Quality Gate + Dynamic Symbols
+
+> [!NOTE]
+> Esta versión introduce el **Quality Gate** para filtrar modelos automáticamente y el **SymbolManager** para hot-reload de símbolos sin reiniciar el bot.
+
+#### Nuevas Características
+
+| Feature | Descripción | Archivos |
+|---------|-------------|----------|
+| **SymbolManager** | Hot-reload de símbolos vía fs.watch | `src/app/SymbolManager.ts` |
+| **Quality Gate** | Solo opera símbolos con accuracy >= 55% | `src/app/core/NinjaConfigManager.ts` |
+| **Alpha/Bravo Training** | Dual training schedule (2am/6am CDMX) | `scripts/run_priority_train.sh` |
+| **YAML Config Migration** | Trading config movido de .env a YAML | `regime_config.live.yaml` |
+| **BotHandle** | Runners detenibles para hot-reload | `src/app/bot.ts` |
+
+#### SymbolManager (Hot-Reload)
+
+- Detecta cambios en `metadata.json` vía `fs.watch`
+- Debounce de 5 segundos para evitar sincronización excesiva
+- Activa/desactiva runners sin reiniciar el bot
+- No cierra posiciones al desactivar símbolo
+
+#### Quality Gate (55% Threshold)
+
+- `getActiveSymbols()` filtra símbolos por accuracy
+- Símbolos vetados se desactivan automáticamente
+- Reporte de training muestra status (✅ ACTIVE / ⛔ VETOED)
+
+#### Config Migration (.env → YAML)
+
+| Antes (.env) | Ahora (YAML) |
+|--------------|--------------|
+| `SYMBOLS=BTCUSDT:10:0.75` | `SYMBOLS: BTCUSDT: 0.75` |
+| `LEVERAGE=10` | `SYSTEM.global_leverage_default: 10` |
+| `CAPITAL_USAGE_PCT=0.75` | `TRADING.capital_usage_default: 0.75` |
+
+---
 
 ### v6.2 (6 de Enero, 2026) - Smart Cooldown + Adaptive Threshold
 
