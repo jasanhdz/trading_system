@@ -122,7 +122,7 @@ class V2ModelManager:
         # 🛂 QUALITY GATE: Cache de metadatos (NINJA v7.8)
         # ═══════════════════════════════════════════════════════
         self.metadata_cache: Dict[str, dict] = {}
-        self.QUALITY_THRESHOLD = 0.50  # 50% - Modelos por debajo son vetados
+        self.QUALITY_THRESHOLD = 0.55  # 55% - Modelos por debajo son vetados (XRP bloqueado)
         
     def _clean_symbol(self, symbol: str) -> str:
         # ADA/USDT:USDT -> ADAUSDT
