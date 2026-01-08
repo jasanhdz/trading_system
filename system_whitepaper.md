@@ -1,6 +1,6 @@
-# 🥷 NINJA Trading System v7.8 - Technical Whitepaper
+# 🥷 NINJA Trading System v8.1 - Technical Whitepaper
 
-**Versión:** 7.8 (Quality Gate + Dynamic Symbols)  
+**Versión:** 8.1 (Native Brackets + Smart Sizing)  
 **Fecha:** 8 de Enero, 2026  
 **Estado:** Producción (Estable)
 
@@ -26,6 +26,7 @@ El **NINJA Trading System v7.8** es un sistema de trading algorítmico de alta f
 | **v7.3** | Stability & Precision | Anti-Amnesia, Monotonicity, Immortal TP |
 | **v7.6** | The Trend Commander | Zero-Floor Logic, High Water Mark, Tiered Ratchet |
 | **v7.8** | Quality Gate | Dynamic Symbols, Hot-Reload, Alpha/Bravo Training |
+| **v8.1** | Native Brackets | Smart Sizing, Micro-Ratchet, Tight Stops |
 
 ---
 
@@ -1460,6 +1461,37 @@ const [price, wallet, pos] = await Promise.all([
 ---
 
 ## 19. Changelog
+
+### v8.1 (8 de Enero, 2026) - Native Brackets + Smart Sizing
+
+> [!IMPORTANT]
+> **Native Brackets v8.0**: El bot ahora gestiona Stops y TPs directamente en Binance desde el segundo 0, eliminando el riesgo de "bot crash = posición desnuda".
+> **Smart Sizing**: Asignación de capital dinámica basada en la precisión histórica del modelo (Meritocracia).
+
+#### Nuevas Características
+
+| Feature | Descripción | Archivos |
+|---------|-------------|----------|
+| **Native Brackets** | Stops físicos en Binance sincronizados con el Régimen | `ensure-brackets.ts` |
+| **Smart Sizing** | Capital dinámico (Elite +20%, Mediocre -40%) | `sizing.ts` |
+| **Micro-Ratchet** | Trailing Stop (Escudo) se activa al 2.2% ROI | `strategy-runner.ts` |
+| **Armadura** | Hard Stops más estrictos para Majors (BTC -15%) | `regime_config.live.yaml` |
+
+#### Native Brackets (v8.0)
+- **Seguridad Total:** Si el bot muere, el Stop Loss en Binance te salva.
+- **Regime Aware:** El Stop se ajusta automáticamente si cambia el régimen (ej. de WHALE a MONK).
+- **TP Inmortal:** El Take Profit persiste en el exchange.
+
+#### Smart Sizing (Calibre)
+- **Elite (>80% Acc):** Multiplicador 1.2x (Ej. BNB)
+- **High (>65% Acc):** Multiplicador 1.1x (Ej. SOL)
+- **Mediocre (<60% Acc):** Multiplicador 0.6x (Protección de capital)
+
+#### Ajustes Tácticos
+- **Torniquete:** Ratchet Threshold bajado de 3.0% a 2.2% para asegurar fees antes.
+- **Armadura:** Reducción de Hard Stops en Majors (BTC -15%, ETH -18%) para cortar pérdidas rápido.
+
+---
 
 ### v7.8 (8 de Enero, 2026) - Quality Gate + Dynamic Symbols
 

@@ -48,3 +48,10 @@ backtest_*.csv
 *.joblib
 *.h5
 *.keras
+
+# Archived Logs
+*.log.*
+*.gz
+*.zip
+*.tar
+archive/
