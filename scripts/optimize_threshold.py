@@ -1,343 +1,203 @@
-#!/usr/bin/env python3
-"""
-Re-optimización de Thresholds con Restricción de Trades Mínimos
-
-Encuentra el threshold óptimo que:
-1. Genera al menos MIN_TRADES operaciones
-2. Maximiza Sharpe Ratio (o PnL)
-
-Usage:
-    python scripts/optimize_threshold.py --symbol BTCUSDT --timeframe 1h --min-trades 20
-"""
+import argparse
 import sys
 from pathlib import Path
-import click
-import json
+import sqlite3
+import pandas as pd
 import numpy as np
-import torch
+import json
+import logging
+from sklearn.preprocessing import RobustScaler
+from sklearn.metrics import accuracy_score, f1_score
+from xgboost import XGBClassifier
 
+# Add repo root to path
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.append(str(REPO_ROOT))
+sys.path.append(str(REPO_ROOT))
 
-from ml.advanced_models.predictor import AdvancedPredictor
-from ml.advanced_models.dataset import load_sequence_dataset, AdvancedDatasetConfig
-from utils.logger import setup_logger
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("ThresholdOptimizer")
 
-logger = setup_logger("optimize_threshold")
-MODEL_DIR = REPO_ROOT / "models" / "advanced"
+DB_PATH = REPO_ROOT / "data" / "market_data_v2.db"
+CONFIG_PATH = REPO_ROOT / "config" / "threshold_config.json"
+PREDICT_HORIZON = 60 # 10 minutes
 
+def load_data_from_db(symbol):
+    conn = sqlite3.connect(DB_PATH)
+    # Query normalizada
+    db_symbol = symbol if "/" in symbol else symbol.replace("USDT", "/USDT:USDT")
+    
+    query = f"""
+    SELECT 
+        o.timestamp, o.mid_price as price, o.micro_price,
+        o.bid_depth_20 as bid_depth, o.ask_depth_20 as ask_depth, 
+        o.spread_pct as bid_ask_spread,
+        o.obi_5, o.obi_10, o.obi_20 as obi,
+        d.funding_rate, d.open_interest,
+        d.taker_buy_vol, d.taker_sell_vol
+    FROM orderbook_metrics o
+    JOIN derivatives_data d ON o.timestamp = d.timestamp AND o.symbol = d.symbol
+    WHERE o.symbol = '{db_symbol}'
+    ORDER BY o.timestamp ASC
+    """
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
-def _symbol_key(symbol: str) -> str:
-    return symbol.replace("/", "").replace(":", "").replace("-", "").upper()
+def add_robust_meta_features(df, window=12):
+    df = df.copy()
+    
+    # Features básicas de volatilidad y tendencia
+    df['mean_obi_12'] = df['obi'].rolling(window).mean()
+    df['max_obi_12'] = df['obi'].rolling(window).max()
+    df['std_obi_12'] = df['obi'].rolling(window).std()
+    
+    # Volumen
+    df['total_volume'] = df['taker_buy_vol'] + df['taker_sell_vol']
+    df['mean_volume_12'] = df['total_volume'].rolling(window).mean()
+    df['volume_trend'] = df['total_volume'] / (df['mean_volume_12'] + 1e-8)
+    
+    # Pendiente
+    df['slope_price_12'] = (df['price'] - df['price'].shift(window)) / window
+    
+    # CVD (Cumulative Volume Delta)
+    df['cvd_12'] = (df['taker_buy_vol'] - df['taker_sell_vol']).rolling(window).sum()
+    df['cvd_norm_12'] = df['cvd_12'] / (df['mean_volume_12'] * window + 1e-8)
 
+    # Volatilidad
+    df['std_price_12'] = df['price'].rolling(window).std()
+    df['volatility_ratio'] = df['std_price_12'] / (df['price'] + 1e-8)
+    
+    return df.dropna()
 
-def simulate_trades(predictions, returns, threshold, min_confidence_diff=0.1):
-    """Simula trades con threshold dado."""
-    trades = []
-    equity = 1.0
-    equity_curve = [equity]
-    
-    for i in range(len(predictions)):
-        class_probs = predictions[i]
-        long_prob = class_probs[1]
-        short_prob = class_probs[2]
-        
-        diff = abs(long_prob - short_prob)
-        
-        # Señal Long
-        if long_prob > threshold and diff > min_confidence_diff:
-            ret = returns[i]
-            equity *= (1 + ret)
-            trades.append({'side': 'LONG', 'return': ret})
-        
-        # Señal Short  
-        elif short_prob > threshold and diff > min_confidence_diff:
-            ret = -returns[i]  # Invertir rendimiento para short
-            equity *= (1 + ret)
-            trades.append({'side': 'SHORT', 'return': ret})
-        
-        equity_curve.append(equity)
-    
-    if not trades:
-        return {'n_trades': 0, 'pnl': 0.0, 'sharpe': 0.0, 'win_rate': 0.0, 'max_dd': 0.0}
-    
-    trade_returns = np.array([t['return'] for t in trades])
-    pnl = (equity - 1.0) * 100
-    sharpe = (trade_returns.mean() / (trade_returns.std() + 1e-8)) * np.sqrt(252)
-    win_rate = (trade_returns > 0).sum() / len(trade_returns)
-    
-    # Max Drawdown
-    equity_curve = np.array(equity_curve)
-    running_max = np.maximum.accumulate(equity_curve)
-    drawdown = (equity_curve - running_max) / running_max
-    max_dd = abs(drawdown.min()) * 100
-    
-    return {
-        'n_trades': len(trades),
-        'pnl': pnl,
-        'sharpe': sharpe,
-        'win_rate': win_rate * 100,
-        'max_dd': max_dd
-    }
-
-
-@click.command()
-@click.option("--symbol", default="BTCUSDT", help="Trading symbol")
-@click.option("--timeframe", default="1h", help="Timeframe")
-@click.option("--min-trades", default=20, help="Mínimo de trades requeridos")
-@click.option("--metric", default="sharpe", type=click.Choice(["sharpe", "pnl"]), help="Métrica a optimizar")
-@click.option("--min-diff", default=0.1, help="Diferencia mínima de confianza entre clases")
-@click.option("--model-dir", default=None, help="Directorio base de modelos personalizado")
-def main(symbol: str, timeframe: str, min_trades: int, metric: str, min_diff: float, model_dir: str):
-    """Re-optimiza threshold con restricción de mínimo de trades."""
-    
-    print(f"\n{'='*80}")
-    print(f"OPTIMIZANDO THRESHOLD: {symbol} {timeframe}")
-    print(f"Restricción: Mínimo {min_trades} trades")
-    print(f"Métrica: {metric.upper()}")
-    print(f"Min Diff: {min_diff}")
-    print(f"{'='*80}\n")
-    
-    # Cargar modelo
-    symbol_key = _symbol_key(symbol)
-    
-    if model_dir:
-        # Si se especifica directorio, asumimos que es la ruta base donde están los modelos
-        # O la ruta directa? Para ser consistente con train_production_ready, 
-        # si train guarda en custom_dir/SYMBOL/TF, aquí deberíamos buscar ahí.
-        # Pero train_production_ready guarda EXACTAMENTE en model_dir si se provee.
-        # Así que si el usuario proveyó .../ADAUSDT/1h, esa es la ruta.
-        model_path = Path(model_dir)
+def update_config(symbol, threshold):
+    # Load existing or create new
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, 'r') as f:
+            try:
+                config = json.load(f)
+            except:
+                config = {}
     else:
-        model_path = MODEL_DIR / symbol_key / timeframe
+        config = {}
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     
-    if not model_path.exists():
-        logger.error(f"Modelo no encontrado: {model_path}")
-        return
+    # Normalize symbol key (e.g. ETHUSDT)
+    clean_symbol = symbol.replace("/", "").replace(":", "").replace("-", "")
+    config[clean_symbol] = threshold
     
-    # Cargar metadata
-    meta_path = model_path / "meta.json"
-    results_path = model_path / "production_training_results.json"
-    
-    meta = {}
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text())
-        except:
-            pass
-            
-    # Fallback a production_training_results.json si faltan claves
-    if 'prediction_horizon' not in meta and results_path.exists():
-        try:
-            results = json.loads(results_path.read_text())
-            config = results.get('config', {})
-            # Mapear config a meta
-            meta.update(config)
-            # Asegurar tipos correctos
-            if 'symbol' in config:
-                meta['symbol'] = config['symbol']
-        except Exception as e:
-            logger.warning(f"Error leyendo results.json: {e}")
+    with open(CONFIG_PATH, 'w') as f:
+        json.dump(config, f, indent=2)
+    logger.info(f"💾 Saved to {CONFIG_PATH}")
 
-    # Validar claves requeridas
-    required_keys = ['symbol', 'timeframe', 'sequence_length', 'prediction_horizon', 'target_return']
-    missing = [k for k in required_keys if k not in meta]
-    if missing:
-        logger.error(f"Metadata incompleta. Faltan: {missing}")
+def optimize_symbol(symbol):
+    logger.info(f"🧪 Starting Threshold Optimization for {symbol}...")
+    
+    # Load Data
+    df = load_data_from_db(symbol)
+    if len(df) < 1000:
+        logger.error(f"❌ Not enough data for {symbol} ({len(df)} rows).")
         return
 
-    # Cargar predictor
-    predictor = AdvancedPredictor(
-        model_path=model_path,
-        scaler_path=model_path / "scaler.pkl",
-        meta_path=model_path / "meta.json" # Predictor might re-read this, but we passed validation
-    )
+    # Prepare Base Features
+    df['future_price'] = df['price'].shift(-PREDICT_HORIZON)
+    df['return'] = (df['future_price'] - df['price']) / df['price']
+    df = add_robust_meta_features(df)
     
-    # Cargar datos de test (últimos 15%)
-    # Normalizar símbolo para dataset (ej: ADAUSDT -> ADA/USDT:USDT si es necesario)
-    # La lógica exacta depende de cómo load_sequence_dataset maneja los símbolos.
-    # En train_production_ready se usa: symbol.replace("USDT", "/USDT") + ":USDT"
-    # Vamos a replicar esa lógica si el símbolo no tiene "/"
+    feature_cols = [
+        'bid_depth', 'ask_depth', 'bid_ask_spread', 'obi_5', 'obi_10', 'obi',
+        'micro_price', 'funding_rate', 'open_interest', 'taker_buy_vol', 'taker_sell_vol',
+        'mean_obi_12', 'max_obi_12', 'std_obi_12', 'slope_price_12', 
+        'mean_volume_12', 'volume_trend', 'cvd_12', 'cvd_norm_12', 
+        'std_price_12', 'volatility_ratio'
+    ]
     
-    dataset_symbol = meta['symbol']
-    if "USDT" in dataset_symbol and "/" not in dataset_symbol:
-         dataset_symbol = dataset_symbol.replace("USDT", "/USDT") + ":USDT"
-
-    config = AdvancedDatasetConfig(
-        symbol=dataset_symbol,
-        timeframe=meta['timeframe'],
-        sequence_length=meta['sequence_length'],
-        prediction_horizon=meta['prediction_horizon'],
-        target_return=meta['target_return'],
-        max_history_days=1000,
-    )
+    df = df.dropna()
     
-    features, class_labels, regression_targets, feature_names = load_sequence_dataset(config)
+    # Grid Search Range (0.10% to 1.00%)
+    thresholds = [
+        0.0010, 0.0012, 0.0015, 0.0018, 0.0020, 
+        0.0022, 0.0025, 0.0030, 0.0035, 0.0040, 
+        0.0050, 0.0060, 0.0070, 0.0080, 0.0090, 0.0100
+    ]
     
-    # Scale features manually since we bypass predictor pipeline
-    # Note: Scaler expects selected features ONLY if feature selection was done before scaling
-    # But in training: Selection -> Scaling. So Scaler expects 32 features.
-    # We need to apply selection THEN scaling?
-    
-    # Let's check predictor logic.
-    # Predictor loads scaler.
-    # Predictor loads selector.
-    
-    # We should use predictor's artifacts.
-    # But predictor stores them per fold in ensemble_pipelines.
-    # For single model, it's in predictor.scaler (if loaded globally) or pipeline['scaler'].
-    
-    # Since we iterate pipelines, we should do it inside the loop?
-    # Or can we assume global scaler?
-    # ETH 1h has global scaler.pkl.
-    
-    # Correct order:
-    # 1. Select features (if selector exists)
-    # 2. Scale features (if scaler exists)
-    
-    # But wait, load_sequence_dataset returns ALL features.
-    
-    # Let's do it inside the loop to be safe and compatible with ensembles.
-    
-    # Usar últimos 15% como test
-    n_samples = len(features)
-    test_start = int(n_samples * 0.85)
-    
-    X_test = features[test_start:]
-    y_test_reg = regression_targets[test_start:]
-    
-    print(f"Datos de test: {len(X_test)} muestras\n")
-    
-    # Obtener predicciones
-    print("Generando predicciones...")
-    predictions = []
-    
-    for i in range(config.sequence_length, len(X_test)):
-        window = X_test[i-config.sequence_length:i]
-        # Predict with ensemble
-        probs_sum = np.zeros(3)
-        
-        for pipeline in predictor.ensemble_pipelines:
-            model = pipeline['model']
-            selector = pipeline['selector']
-            scaler = pipeline['scaler']
-            
-            # 1. Apply feature selection if available
-            window_input = window
-            if selector:
-                try:
-                    window_input = selector.transform(window)
-                except Exception as e:
-                    if hasattr(selector, 'support_'):
-                        window_input = window[:, selector.support_]
-                    else:
-                        raise e
-            
-            # 2. Apply scaling if available
-            if scaler:
-                window_input = scaler.transform(window_input)
-            
-            # Convert to tensor
-            
-            # Convert to tensor
-            window_tensor = torch.FloatTensor(window_input).unsqueeze(0).to(predictor.device)
-            
-            model.eval()
-            with torch.no_grad():
-                if hasattr(model, 'predict_proba'):
-                    probs = model.predict_proba(window_tensor).cpu().numpy()[0]
-                else:
-                    # Fallback for DeepTemporalNet or models returning dict
-                    outputs = model(window_tensor)
-                    if isinstance(outputs, dict) and 'logits' in outputs:
-                        logits = outputs['logits']
-                    elif isinstance(outputs, torch.Tensor):
-                        logits = outputs
-                    else:
-                        # Assume tuple or other format, take first element as logits
-                        logits = outputs[0]
-                        
-                    probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]
-                
-                probs_sum += probs
-        
-        avg_probs = probs_sum / len(predictor.ensemble_pipelines)
-        predictions.append(avg_probs)
-    
-    predictions = np.array(predictions)
-    returns = y_test_reg[config.sequence_length:]
-    
-    print(f"Predicciones generadas: {len(predictions)}\n")
-    
-    # Buscar threshold óptimo
-    print("Buscando threshold óptimo...\n")
-    
-    thresholds = np.arange(0.35, 0.75, 0.01)
     results = []
     
-    for thr in thresholds:
-        metrics = simulate_trades(predictions, returns, thr, min_confidence_diff=min_diff)
+    logger.info(f"📊 Testing {len(thresholds)} thresholds on {len(df)} samples...")
+    
+    for th in thresholds:
+        # Labeling
+        conditions = [(df['return'] < -th), (df['return'] > th)]
+        choices = [0, 2]
+        df['label'] = np.select(conditions, choices, default=1)
         
-        if metrics['n_trades'] >= min_trades:
-            results.append({
-                'threshold': thr,
-                **metrics
-            })
-    
+        # Check Class Balance
+        counts = df['label'].value_counts(normalize=True)
+        neutral_pct = counts.get(1, 0)
+        
+        if neutral_pct > 0.90:
+            logger.warning(f"   ⚠️ Threshold {th*100:.2f}% too high (Neutral > 90%). Skipping.")
+            continue
+            
+        # Split
+        split_idx = int(len(df) * 0.8)
+        train_df = df.iloc[:split_idx]
+        val_df = df.iloc[split_idx:]
+        
+        X_train = train_df[feature_cols].values
+        y_train = train_df['label'].values
+        X_val = val_df[feature_cols].values
+        y_val = val_df['label'].values
+        
+        # Scale
+        scaler = RobustScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_val_scaled = scaler.transform(X_val)
+        
+        # Train Fast XGBoost
+        # Try to use GPU if available, else CPU
+        try:
+            model = XGBClassifier(
+                n_estimators=100, 
+                learning_rate=0.1, 
+                max_depth=6, 
+                n_jobs=-1,
+                eval_metric='mlogloss',
+                device='cuda',
+                tree_method='hist'
+            )
+            model.fit(X_train_scaled, y_train)
+        except Exception:
+             # Fallback to CPU
+             model = XGBClassifier(
+                 n_estimators=100, 
+                 learning_rate=0.1, 
+                 max_depth=6, 
+                 n_jobs=-1, 
+                 eval_metric='mlogloss'
+             )
+             model.fit(X_train_scaled, y_train)
+
+        preds = model.predict(X_val_scaled)
+        acc = accuracy_score(y_val, preds)
+        f1 = f1_score(y_val, preds, average='weighted')
+        
+        logger.info(f"   Threshold {th*100:.2f}% -> Acc: {acc:.2%} | F1: {f1:.4f} | Neutral: {neutral_pct:.1%}")
+        results.append({'threshold': th, 'accuracy': acc, 'f1': f1})
+
     if not results:
-        print(f"❌ No se encontró threshold que genere >={min_trades} trades")
-        print("   Intenta reducir min_trades o revisar el modelo")
+        logger.error("❌ No valid thresholds found.")
         return
-    
-    # Ordenar por métrica
-    if metric == "sharpe":
-        results.sort(key=lambda x: x['sharpe'], reverse=True)
-    else:
-        results.sort(key=lambda x: x['pnl'], reverse=True)
-    
-    best = results[0]
-    
-    print(f"{'='*80}")
-    print("MEJOR CONFIGURACIÓN")
-    print(f"{'='*80}\n")
-    print(f"Threshold: {best['threshold']:.2f}")
-    print(f"Trades: {best['n_trades']}")
-    print(f"PnL: {best['pnl']:.2f}%")
-    print(f"Sharpe: {best['sharpe']:.2f}")
-    print(f"Win Rate: {best['win_rate']:.1f}%")
-    print(f"Max Drawdown: {best['max_dd']:.2f}%\n")
-    
-    # Top 5
-    print("Top 5 Configuraciones:\n")
-    for i, res in enumerate(results[:5], 1):
-        print(f"{i}. Thr={res['threshold']:.2f} | Trades={res['n_trades']} | "
-              f"PnL={res['pnl']:.1f}% | Sharpe={res['sharpe']:.2f}")
-    
-    # Guardar threshold óptimo
-    threshold_path = model_path / "optimal_threshold.json"
-    
-    # Convert numpy types to python types
-    def convert_types(obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return obj
 
-    threshold_data = {
-        'threshold': float(best['threshold']),
-        'min_trades_constraint': int(min_trades),
-        'optimized_for': metric,
-        'backtest_metrics': {k: convert_types(v) for k, v in best.items()}
-    }
+    # Find Best
+    best = max(results, key=lambda x: x['accuracy'])
+    logger.info(f"🏆 WINNER for {symbol}: {best['threshold']*100:.2f}% (Acc: {best['accuracy']:.2%})")
     
-    threshold_path.write_text(json.dumps(threshold_data, indent=2))
-    print(f"\n✅ Threshold guardado en: {threshold_path}")
-    print(f"{'='*80}\n")
-
+    # Save to Config
+    update_config(symbol, best['threshold'])
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--symbol', type=str, required=True)
+    args = parser.parse_args()
+    optimize_symbol(args.symbol)

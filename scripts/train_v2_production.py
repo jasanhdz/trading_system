@@ -135,9 +135,28 @@ def train_model_for_symbol(symbol):
         df['return'] = (df['future_price'] - df['price']) / df['price']
         
         # ══════════════════════════════════════════════════════════════════
-        # LÓGICA DE THRESHOLD ADAPTATIVO (NINJA v6.1)
+        # LÓGICA DE THRESHOLD ADAPTATIVO (NINJA v6.1 + Tuning Lab)
         # ══════════════════════════════════════════════════════════════════
-        if "BTC" in symbol or "ETH" in symbol:
+        
+        # 1. Intentar cargar config dinámica
+        CONFIG_PATH = REPO_ROOT / "config" / "threshold_config.json"
+        custom_threshold = None
+        
+        if CONFIG_PATH.exists():
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    t_config = json.load(f)
+                    # Normalizar clave
+                    key = clean_symbol.replace("USDT", "") + "USDT"
+                    if key in t_config:
+                        custom_threshold = t_config[key]
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to load threshold config: {e}")
+
+        if custom_threshold:
+            THRESHOLD = custom_threshold
+            logger.info(f"🧪 Using Optimized Threshold for {symbol}: {THRESHOLD*100:.2f}%")
+        elif "BTC" in symbol or "ETH" in symbol:
             THRESHOLD = 0.0015
             logger.info(f"⚖️ Adaptive Threshold for Major ({symbol}): {THRESHOLD*100}%")
         else:
