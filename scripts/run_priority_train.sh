@@ -25,15 +25,28 @@ export HSA_ENABLE_SDMA=0
 # 🦁 ALPHA SYMBOLS (9 Símbolos)
 # ═══════════════════════════════════════════════════════════════════════════
 ALPHA_SYMBOLS=(
-    "BTC/USDT:USDT"
-    "ETH/USDT:USDT"
-    "SOL/USDT:USDT"
-    "XRP/USDT:USDT"
-    "ADA/USDT:USDT"
-    "DOGE/USDT:USDT"
-    "LINK/USDT:USDT"
-    "AVAX/USDT:USDT"
-    "POL/USDT:USDT"
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🗡️ OPERACIÓN PUNTA DE LANZA (The Spearhead Squad)
+    # ═══════════════════════════════════════════════════════════════════════
+    "WLD/USDT:USDT"       # Monster (Acc 89.8%)
+    "1000PEPE/USDT:USDT"  # Monster (Acc 88.6%)
+    "SEI/USDT:USDT"       # Monster (Acc 87.0%)
+    "AVAX/USDT:USDT"      # Leader (Acc 86.7%)
+    "BTC/USDT:USDT"       # Leader (The King)
+    "ETH/USDT:USDT"       # Leader (The Queen)
+    "SOL/USDT:USDT"       # Leader (Volume)
+    "BNB/USDT:USDT"       # Sniper (Win Rate 83%)
+    "LTC/USDT:USDT"       # Sniper (Win Rate 77%)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 💤 DORMANT / LEGACY SYMBOLS (Moved to Brave/24h)
+    # ═══════════════════════════════════════════════════════════════════════
+    # "ETH/USDT:USDT"
+    # "XRP/USDT:USDT"
+    # "ADA/USDT:USDT"
+    # "DOGE/USDT:USDT"
+    # "LINK/USDT:USDT"
+    # "POL/USDT:USDT"
 )
 
 echo "[$DATE] 🎯 Training ${#ALPHA_SYMBOLS[@]} ALPHA symbols in Parallel..." >> $LOG_FILE
