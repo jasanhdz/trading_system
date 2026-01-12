@@ -9,6 +9,7 @@ import joblib
 import json
 import logging
 import shutil
+import gc # Necesario para liberar RAM manualmente
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import accuracy_score, f1_score
@@ -44,6 +45,19 @@ def add_robust_meta_features(df, window=12):
     """
     df = df.copy()
     
+    # --- FEATURES TEMPORALES (NUEVO) ---
+    # Convertir timestamp (ms) a objeto datetime
+    df['dt'] = pd.to_datetime(df['timestamp'], unit='ms')
+    
+    # 1. Indicador binario de fin de semana (Sábado=5, Domingo=6)
+    df['is_weekend'] = df['dt'].dt.dayofweek.isin([5, 6]).astype(int)
+    
+    # 2. Codificación Cíclica de la hora (Vital para entender aperturas de mercado)
+    # Usamos Seno/Coseno para que el modelo entienda que las 23:59 está cerca de las 00:01
+    df['hour'] = df['dt'].dt.hour
+    df['hour_sin'] = np.sin(2 * np.pi * df['hour']/24.0)
+    df['hour_cos'] = np.cos(2 * np.pi * df['hour']/24.0)
+
     # Features básicas de volatilidad y tendencia
     df['mean_obi_12'] = df['obi'].rolling(window).mean()
     df['max_obi_12'] = df['obi'].rolling(window).max()
@@ -65,7 +79,8 @@ def add_robust_meta_features(df, window=12):
     df['std_price_12'] = df['price'].rolling(window).std()
     df['volatility_ratio'] = df['std_price_12'] / (df['price'] + 1e-8)
     
-    return df.dropna()
+    # Limpieza: eliminar columnas auxiliares de tiempo
+    return df.drop(columns=['dt', 'hour']).dropna()
 
 def load_data_from_db(symbol):
     conn = sqlite3.connect(DB_PATH)
@@ -174,7 +189,9 @@ def train_model_for_symbol(symbol):
             'micro_price', 'funding_rate', 'open_interest', 'taker_buy_vol', 'taker_sell_vol',
             'mean_obi_12', 'max_obi_12', 'std_obi_12', 'slope_price_12', 
             'mean_volume_12', 'volume_trend', 'cvd_12', 'cvd_norm_12', 
-            'std_price_12', 'volatility_ratio'
+            'std_price_12', 'volatility_ratio',
+            # --- NUEVAS FEATURES ---
+            'is_weekend', 'hour_sin', 'hour_cos' 
         ]
         
         df = df.dropna()
@@ -206,18 +223,39 @@ def train_model_for_symbol(symbol):
                 ys.append(labels[i + seq_len])
             return np.array(Xs), np.array(ys)
             
-        X_train, y_train = to_sequences(X_train_scaled, y_train_raw, SEQ_LEN)
-        X_val, y_val = to_sequences(X_val_scaled, y_val_raw, SEQ_LEN)
+        # --- OPTIMIZACIÓN DE MEMORIA: Paso 1 ---
+        # Escalar y crear secuencias
+        X_train_seq, y_train_seq = to_sequences(X_train_scaled, y_train_raw, SEQ_LEN)
+        X_val_seq, y_val_seq = to_sequences(X_val_scaled, y_val_raw, SEQ_LEN)
         
-        if len(X_train) < 100:
-             logger.warning("Not enough sequences.")
-             shutil.rmtree(temp_dir)
-             return
+        # Preparar datos para XGBoost (Flattened - Last Step) ANTES de borrar todo
+        # XGBoost necesita CPU RAM usualmente, así que guardamos una copia ligera
+        X_train_flat = X_train_seq[:, -1, :].copy()
+        X_val_flat = X_val_seq[:, -1, :].copy()
+        y_train_flat = y_train_seq.copy()
+        y_val_flat = y_val_seq.copy()
 
-        # Tensores
+        # 🧹 LIBERAR RAM: Borramos DataFrames y arrays intermedios que ya no sirven
+        del df, train_df, val_df, X_train_scaled, X_val_scaled, X_train_raw, X_val_raw
+        gc.collect() # Forzamos la limpieza de la RAM del CPU
+
+        # --- OPTIMIZACIÓN DE VRAM: Paso 2 ---
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        train_ds = TensorDataset(torch.FloatTensor(X_train), torch.LongTensor(y_train))
-        train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
+        
+        # Movemos el dataset COMPLETO a la VRAM de la tarjeta AMD desde el inicio
+        # Nota: Si no hay GPU, se queda en CPU pero como Tensor
+        X_train_gpu = torch.FloatTensor(X_train_seq).to(device)
+        y_train_gpu = torch.LongTensor(y_train_seq).to(device)
+        
+        # Ahora que está en GPU, borramos la copia de la RAM (secuencias pesadas)
+        del X_train_seq, y_train_seq
+        gc.collect()
+
+        train_ds = TensorDataset(X_train_gpu, y_train_gpu)
+        
+        # --- VELOCIDAD: Paso 3 ---
+        # Aumentamos el batch_size de 64 a 512 para aprovechar la tarjeta
+        train_loader = DataLoader(train_ds, batch_size=512, shuffle=True)
         input_dim = len(feature_cols)
 
         # --- ENTRENAMIENTO (Guardando en temp_dir) ---
@@ -231,7 +269,7 @@ def train_model_for_symbol(symbol):
         tcn.train()
         for ep in range(25):
             for Xb, yb in train_loader:
-                Xb, yb = Xb.to(device), yb.to(device)
+                # Ya no necesitamos .to(device) aquí porque ya viven en la GPU
                 optim.zero_grad()
                 out = tcn(Xb)
                 loss = crit(out['logits'], yb)
@@ -242,16 +280,25 @@ def train_model_for_symbol(symbol):
         with open(temp_dir / "tcn_config.json", 'w') as f:
             json.dump({'model_config': {'input_dim': input_dim, 'num_channels': [32, 64, 128], 'kernel_size': 3, 'dropout': 0.2}}, f)
 
+        # Liberar memoria de TCN antes de XGBoost si es posible (aunque TCN es pequeño)
+        # Pero los tensores de entrenamiento en GPU ya no se necesitan para XGBoost
+        del X_train_gpu, y_train_gpu, train_ds, train_loader
+        torch.cuda.empty_cache()
+        gc.collect()
+
         # 2. XGBoost
         logger.info("Training XGBoost (Temp)...")
-        X_train_flat = X_train[:, -1, :]
-        X_val_flat = X_val[:, -1, :]
+        # Usamos los datos flat que guardamos antes
         
-        xgb = XGBoostTradingModel(use_gpu=(device=="cuda"))
-        xgb.train(X_train_flat, y_train, X_val_flat, y_val)
+        xgb = XGBoostTradingModel(use_gpu=False) # Force CPU to avoid ROCm deadlock
+        xgb.train(X_train_flat, y_train_flat, X_val_flat, y_val_flat)
         xgb.save(str(temp_dir / "xgboost.joblib"))
         with open(temp_dir / "xgboost_config.json", 'w') as f:
             json.dump({}, f)
+        
+        # Limpiar datos de entrenamiento de XGBoost
+        del X_train_flat, y_train_flat
+        gc.collect()
         
         # ══════════════════════════════════════════════════════════════════
         # 📊 EVALUACIÓN DE MÉTRICAS PARA EL DIARIO
@@ -262,8 +309,9 @@ def train_model_for_symbol(symbol):
         tcn.eval()
         all_preds_tcn = []
         all_targets = []
-        val_ds = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
-        val_loader = DataLoader(val_ds, batch_size=64, shuffle=False)
+        # Usamos los datos de validación que quedaron en RAM (X_val_seq)
+        val_ds = TensorDataset(torch.FloatTensor(X_val_seq), torch.LongTensor(y_val_seq))
+        val_loader = DataLoader(val_ds, batch_size=512, shuffle=False)
         
         with torch.no_grad():
             for Xb, yb in val_loader:
@@ -286,14 +334,14 @@ def train_model_for_symbol(symbol):
         # --- EVALUACIÓN XGBOOST ---
         xgb_output = xgb.predict(X_val_flat)
         xgb_preds = np.argmax(xgb_output['probs'], axis=1)
-        xgb_acc = accuracy_score(y_val, xgb_preds)
-        xgb_f1 = f1_score(y_val, xgb_preds, average='weighted', zero_division=0)
+        xgb_acc = accuracy_score(y_val_flat, xgb_preds)
+        xgb_f1 = f1_score(y_val_flat, xgb_preds, average='weighted', zero_division=0)
         
         diary.log_entry(
             symbol=symbol,
             model_type="XGBOOST",
             version=VERSION,
-            metrics={"accuracy": float(xgb_acc), "f1_score": float(xgb_f1), "samples": len(y_val)}
+            metrics={"accuracy": float(xgb_acc), "f1_score": float(xgb_f1), "samples": len(y_val_flat)}
         )
         
         logger.info(f"📓 Diary Entry Saved: TCN Acc={tcn_acc:.2%} | XGB Acc={xgb_acc:.2%}")
@@ -314,7 +362,7 @@ def train_model_for_symbol(symbol):
             "f1_score": float(best_f1),
             "tcn_accuracy": float(tcn_acc),
             "xgb_accuracy": float(xgb_acc),
-            "samples": len(y_val),
+            "samples": len(y_val_flat),
             "models": ["TCN", "XGBOOST"]
         }
         

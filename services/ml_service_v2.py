@@ -265,6 +265,32 @@ class V2ModelManager:
         # 1. Feature Engineering (Derived Features)
         df = df.copy()
         
+        # --- TEMPORAL FEATURES (NEW) ---
+        if 'timestamp' in df.columns:
+            try:
+                # Handle both numeric (ms) and datetime objects
+                if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+                     df['dt'] = pd.to_datetime(df['timestamp'], unit='ms')
+                else:
+                     df['dt'] = df['timestamp']
+                     
+                df['is_weekend'] = df['dt'].dt.dayofweek.isin([5, 6]).astype(int)
+                df['hour'] = df['dt'].dt.hour
+                df['hour_sin'] = np.sin(2 * np.pi * df['hour']/24.0)
+                df['hour_cos'] = np.cos(2 * np.pi * df['hour']/24.0)
+                
+                # Cleanup temp columns
+                if 'dt' in df.columns and df['dt'] is not df['timestamp']:
+                     df.drop(columns=['dt'], inplace=True)
+                if 'hour' in df.columns:
+                     df.drop(columns=['hour'], inplace=True)
+                     
+                LOGGER.info(f"✅ Injected temporal features for {clean_sym}")
+            except Exception as e:
+                LOGGER.error(f"❌ Failed to inject temporal features: {e}")
+        else:
+            LOGGER.warning(f"⚠️ 'timestamp' missing for {clean_sym}, cannot inject temporal features")
+        
         # FIX: Map Redis 'spread_pct' to model's 'bid_ask_spread'
         if 'spread_pct' in df.columns and 'bid_ask_spread' not in df.columns:
             df['bid_ask_spread'] = df['spread_pct']

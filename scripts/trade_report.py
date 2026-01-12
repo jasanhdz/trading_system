@@ -1,18 +1,19 @@
 #!/home/jasan/Develop/trading_system/binance-futures-bot-ts/.venv/bin/python3
 """
-📊 TRADE REPORT - Comprehensive Trade Analysis with Peak ROI
-=============================================================
+📊 TRADE REPORT (FIXED) - Comprehensive Trade Analysis with Peak ROI
+=====================================================================
 Combines Binance trade history with PM2 log analysis to show:
 - Entry/Exit times and prices
 - PnL and ROI
 - Peak ROI (positive and negative) during trade lifetime
 - Salvability analysis (could trailing stop have saved the trade?)
 
-Usage:
-  trade_report --today                    # Today's trades
-  trade_report --yesterday --status LOSS  # Yesterday's losses with peak ROI
-  trade_report --week --status WIN        # Week's winning trades
-  trade_report --peak                     # Include Peak ROI analysis (slower)
+Fixes:
+- Added 1000PEPE/USDT
+- Fetches 1 day of history to catch entries for trades closing today (avoids pagination limits)
+- Filters operations AFTER grouping to handle orphan exits
+- Updated default salvable threshold to 2.2%
+- Added error logging for API fetch failures
 """
 import ccxt
 import pandas as pd
@@ -26,8 +27,10 @@ import argparse
 
 # Config
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent / "binance-futures-bot-ts"
-DOTENV_PATH = PROJECT_ROOT / ".env"
+# PROJECT_ROOT is not reliable when script is in ~/bin
+# Use absolute path for reliability
+DOTENV_PATH = Path("/home/jasan/Develop/trading_system/binance-futures-bot-ts/.env")
+# Point to the correct log file location
 LOG_FILE = Path.home() / ".pm2/logs/01-Trading-Bot-out.log"
 
 load_dotenv(DOTENV_PATH)
@@ -41,7 +44,7 @@ TARGET_SYMBOLS = [
     'DOGE/USDT', 'LINK/USDT', 'AVAX/USDT', 'POL/USDT',
     # Secondary (Bravo Batch)
     'BNB/USDT', 'DOT/USDT', 'LTC/USDT', 'UNI/USDT', 'ATOM/USDT',
-    'NEAR/USDT', 'PEPE/USDT', 'FET/USDT', 'SEI/USDT', 'WLD/USDT',
+    'NEAR/USDT', '1000PEPE/USDT', 'FET/USDT', 'SEI/USDT', 'WLD/USDT',
     'INJ/USDT', 'APT/USDT'
 ]
 
@@ -67,7 +70,7 @@ def parse_args():
     
     analysis_group = parser.add_argument_group('📈 Analysis')
     analysis_group.add_argument('--peak', action='store_true', help='Include Peak ROI analysis (parses logs)')
-    analysis_group.add_argument('--salvable', type=float, default=3.0, help='ROI threshold for salvability (default: 3.0%%)')
+    analysis_group.add_argument('--salvable', type=float, default=2.2, help='ROI threshold for salvability (default: 2.2%%)')
     
     return parser.parse_args()
 
@@ -114,8 +117,10 @@ def fetch_trades(start_date, end_date):
         'enableRateLimit': True
     })
     
-    # Convert to timestamp
-    since = int(start_date.timestamp() * 1000)
+    # Fetch from 1 day BEFORE start_date to catch recent entries, but avoid pagination limits
+    # If we miss the entry, the orphan exit logic will handle it.
+    lookback_start = start_date - timedelta(days=1)
+    since = int(lookback_start.timestamp() * 1000)
     
     all_trades = []
     for symbol in TARGET_SYMBOLS:
@@ -129,6 +134,7 @@ def fetch_trades(start_date, end_date):
                 t['position_side'] = info.get('positionSide', 'BOTH')
             all_trades.extend(trades)
         except Exception as e:
+            print(f"⚠️ Error fetching {symbol}: {e}")
             pass
     
     if not all_trades:
@@ -141,8 +147,8 @@ def fetch_trades(start_date, end_date):
     if df['datetime'].dt.tz is not None:
         df['datetime'] = df['datetime'].dt.tz_localize(None)
     
-    # Filter by date range
-    df = df[(df['datetime'] >= start_date) & (df['datetime'] <= end_date)]
+    # DO NOT filter by date here. We need all trades to reconstruct operations.
+    # Filtering happens in main() after grouping.
     
     return df
 
@@ -173,6 +179,21 @@ def group_into_operations(df):
                     position['exit_qty'] = trade['amount']
                     operations.append(position)
                     position = None
+                else:
+                    # Orphan exit (entry was before lookback period)
+                    # We can still report it if we want, but we miss entry price/time
+                    # For now, let's skip or create a partial?
+                    # Creating partial to ensure PnL is counted
+                    operations.append({
+                        'symbol': symbol.replace('/USDT', '').replace('/', ''),
+                        'side': 'LONG' if side == 'sell' else 'SHORT', # Exit side is opposite of entry
+                        'entry_time': None,
+                        'entry_price': 0.0, # Unknown
+                        'entry_qty': trade['amount'],
+                        'exit_time': trade['datetime'],
+                        'exit_price': trade['price'],
+                        'pnl': pnl
+                    })
             else:
                 # This is an entry
                 if position is None:
@@ -189,7 +210,7 @@ def group_into_operations(df):
     
     return operations
 
-def parse_log_for_peak_roi(operations):
+def parse_log_for_peak_roi(operations, threshold=3.0):
     """Parse PM2 logs to find Peak ROI for each operation's specific lifetime."""
     if not LOG_FILE.exists():
         print("⚠️  Log file not found, skipping Peak ROI analysis")
@@ -261,7 +282,7 @@ def parse_log_for_peak_roi(operations):
         if relevant_rois:
             op['peak_pos'] = max(relevant_rois)
             op['peak_neg'] = min(relevant_rois)
-            op['salvable'] = op['peak_pos'] >= 3.0
+            op['salvable'] = op['peak_pos'] >= threshold
             op['roi_samples'] = len(relevant_rois)
         else:
             op['peak_pos'] = None
@@ -295,7 +316,7 @@ def print_report_simple(operations, args, label):
     show_peak = args.peak and any(op.get('peak_pos') is not None for op in operations)
     
     if show_peak:
-        print(f"{'Par':<8} {'Lado':<6} {'Entrada':<14} {'Salida':<14} {'P.Entrada':<12} {'P.Salida':<12} {'PnL':<10} {'Peak+':<8} {'Peak-':<8} {'@3%?'}")
+        print(f"{'Par':<8} {'Lado':<6} {'Entrada':<14} {'Salida':<14} {'P.Entrada':<12} {'P.Salida':<12} {'PnL':<10} {'Peak+':<8} {'Peak-':<8} {'@{args.salvable}%?'}")
         print("-"*100)
     else:
         print(f"{'Par':<8} {'Lado':<6} {'Entrada':<14} {'Salida':<14} {'P.Entrada':<12} {'P.Salida':<12} {'PnL':<10}")
@@ -352,6 +373,21 @@ def main():
     # Group into operations
     operations = group_into_operations(df)
     
+    # Filter operations by time range (Exit time must be in range, or Entry time if Open)
+    # We primarily want CLOSED trades in the range for PnL reports
+    filtered_ops = []
+    for op in operations:
+        # If exit time exists, check if it's in range
+        if op['exit_time']:
+             if start <= op['exit_time'] <= end:
+                 filtered_ops.append(op)
+        # If open (no exit time), check entry time
+        elif op['entry_time']:
+             if start <= op['entry_time'] <= end:
+                 filtered_ops.append(op)
+    
+    operations = filtered_ops
+    
     # Apply filters BEFORE counting
     if args.status:
         if args.status == 'WIN':
@@ -374,7 +410,7 @@ def main():
     
     # Parse logs for Peak ROI if requested
     if args.peak:
-        operations = parse_log_for_peak_roi(operations)
+        operations = parse_log_for_peak_roi(operations, args.salvable)
     
     # Print report (filters already applied)
     print_report_simple(operations, args, label)

@@ -26,7 +26,7 @@ export HSA_ENABLE_SDMA=0
 # ═══════════════════════════════════════════════════════════════════════════
 ALPHA_SYMBOLS=(
     # ═══════════════════════════════════════════════════════════════════════
-    # 🗡️ OPERACIÓN PUNTA DE LANZA (The Spearhead Squad)
+    # 🗡️ OPERACIÓN PUNTA DE LANZA (The Spearhead Squad - 9 Symbols)
     # ═══════════════════════════════════════════════════════════════════════
     "WLD/USDT:USDT"       # Monster (Acc 89.8%)
     "1000PEPE/USDT:USDT"  # Monster (Acc 88.6%)
@@ -37,16 +37,6 @@ ALPHA_SYMBOLS=(
     "SOL/USDT:USDT"       # Leader (Volume)
     "BNB/USDT:USDT"       # Sniper (Win Rate 83%)
     "LTC/USDT:USDT"       # Sniper (Win Rate 77%)
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # 💤 DORMANT / LEGACY SYMBOLS (Moved to Brave/24h)
-    # ═══════════════════════════════════════════════════════════════════════
-    # "ETH/USDT:USDT"
-    # "XRP/USDT:USDT"
-    # "ADA/USDT:USDT"
-    # "DOGE/USDT:USDT"
-    # "LINK/USDT:USDT"
-    # "POL/USDT:USDT"
 )
 
 echo "[$DATE] 🎯 Training ${#ALPHA_SYMBOLS[@]} ALPHA symbols in Parallel..." >> $LOG_FILE

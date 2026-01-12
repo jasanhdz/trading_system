@@ -31,21 +31,30 @@ export HSA_ENABLE_SDMA=0
 
 # BRAVE SYMBOLS (The Rest)
 BRAVE_SYMBOLS=(
-    # --- Ex-Alpha (Moved here) ---
-    "XRP/USDT:USDT"
-    "ADA/USDT:USDT"
-    "DOGE/USDT:USDT"
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🛡️ BRAVE BATTALION (The Remaining 12 Symbols)
+    # ═══════════════════════════════════════════════════════════════════════
+    # --- Beta-1 (Momentum) ---
     "LINK/USDT:USDT"
     "POL/USDT:USDT"
-
-    # --- Standard Secondary ---
+    "ADA/USDT:USDT"
+    "XRP/USDT:USDT"
+    
+    # --- Beta-2 (Meme) ---
+    "DOGE/USDT:USDT"
+    
+    # --- Gamma-1 (Stable) ---
     "DOT/USDT:USDT"
     "UNI/USDT:USDT"
     "ATOM/USDT:USDT"
+    
+    # --- Gamma-2 (Runners) ---
     "NEAR/USDT:USDT"
-    "FET/USDT:USDT"
-    "INJ/USDT:USDT"
     "APT/USDT:USDT"
+    "INJ/USDT:USDT"
+    
+    # --- Delta (High Risk) ---
+    "FET/USDT:USDT"
 )
 
 echo "[$DATE] 🛡️ Training BRAVE symbols (${#BRAVE_SYMBOLS[@]} symbols)..." >> $LOG_FILE
