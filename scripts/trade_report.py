@@ -70,7 +70,7 @@ def parse_args():
     
     analysis_group = parser.add_argument_group('📈 Analysis')
     analysis_group.add_argument('--peak', action='store_true', help='Include Peak ROI analysis (parses logs)')
-    analysis_group.add_argument('--salvable', type=float, default=2.2, help='ROI threshold for salvability (default: 2.2%%)')
+    analysis_group.add_argument('--salvable', type=float, default=1.3, help='ROI threshold for salvability (default: 1.3%%)')
     
     return parser.parse_args()
 

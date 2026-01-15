@@ -26,16 +26,16 @@ export HSA_ENABLE_SDMA=0
 # Símbolos con datos pero no en producción activa
 # ═══════════════════════════════════════════════════════════════════════════
 BRAVO_SYMBOLS=(
-    "BNB/USDT:USDT"
+    "DOGE/USDT:USDT"
+    "LINK/USDT:USDT"
+    "POL/USDT:USDT"
+    "XRP/USDT:USDT"
+    "ADA/USDT:USDT"
     "DOT/USDT:USDT"
-    "LTC/USDT:USDT"
     "UNI/USDT:USDT"
     "ATOM/USDT:USDT"
     "NEAR/USDT:USDT"
-    "1000PEPE/USDT:USDT"
     "FET/USDT:USDT"
-    "SEI/USDT:USDT"
-    "WLD/USDT:USDT"
     "INJ/USDT:USDT"
     "APT/USDT:USDT"
 )

@@ -108,7 +108,7 @@ class V2ModelManager:
         
         # FIX: LRU Tracking para evicción de VRAM
         self.last_accessed: Dict[str, float] = {}
-        self.MAX_MODELS_IN_VRAM = 12  # Optimized for GTX 1660 6GB (12 * 250MB ≈ 3GB, leaves 3GB headroom) 
+        self.MAX_MODELS_IN_VRAM = 10  # Optimized for GTX 1660 6GB (10 * 250MB ≈ 2.5GB, leaves 3.5GB headroom) 
         
         LOGGER.info(f"🚀 ML Service initialized on device: {self.device} | Max Models VRAM: {self.MAX_MODELS_IN_VRAM}")
         
@@ -123,6 +123,9 @@ class V2ModelManager:
         # ═══════════════════════════════════════════════════════
         self.metadata_cache: Dict[str, dict] = {}
         self.QUALITY_THRESHOLD = 0.55  # 55% - Modelos por debajo son vetados (XRP bloqueado)
+        
+        # FIX: Contador para higiene periódica
+        self.prediction_count = 0
         
     def _clean_symbol(self, symbol: str) -> str:
         # ADA/USDT:USDT -> ADAUSDT
@@ -163,6 +166,8 @@ class V2ModelManager:
             del self.last_accessed[oldest]
         
         # CRITICAL: Forzar liberación de memoria de caché de PyTorch
+        import gc
+        gc.collect() # Force Python GC first
         if self.device == "cuda":
             torch.cuda.empty_cache()
 
@@ -235,6 +240,15 @@ class V2ModelManager:
 
     def predict(self, symbol: str, df: pd.DataFrame) -> dict:
         clean_sym = self._clean_symbol(symbol)
+        
+        # FIX: Higiene Periódica (Cada 50 predicciones)
+        self.prediction_count += 1
+        if self.prediction_count % 50 == 0:
+            LOGGER.info(f"🧹 Periodic Hygiene (Count: {self.prediction_count}): Forcing GC & Cache Clear")
+            import gc
+            gc.collect()
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
         
         # Load ensemble first (this populates metadata_cache)
         ensemble = self.get_ensemble(symbol)

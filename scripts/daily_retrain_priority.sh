@@ -21,15 +21,15 @@ export HSA_ENABLE_SDMA=0
 # Frecuencia: Cada 12 Horas
 # ═══════════════════════════════════════════════════════════════════════════
 PRIORITY_SYMBOLS=(
-    "DOGE/USDT:USDT"
-    "LINK/USDT:USDT"
+    "WLD/USDT:USDT"
+    "1000PEPE/USDT:USDT"
+    "SEI/USDT:USDT"
     "AVAX/USDT:USDT"
-    "POL/USDT:USDT"
-    "ETH/USDT:USDT"
-    "XRP/USDT:USDT"
-    "SOL/USDT:USDT"
-    "ADA/USDT:USDT"
     "BTC/USDT:USDT"
+    "SOL/USDT:USDT"
+    "ETH/USDT:USDT"
+    "BNB/USDT:USDT"
+    "LTC/USDT:USDT"
 )
 
 echo "[$DATE] 🎯 Training ${#PRIORITY_SYMBOLS[@]} ALPHA symbols..." >> $LOG_FILE
