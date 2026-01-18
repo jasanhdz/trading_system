@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1768766739170,
+    "symbol": "ETH/USDT",
+    "brain": "PHANTOM",
+    "type": "SHORT",
+    "status": "OPEN",
+    "entry_price": 3343.63,
+    "quantity": 0.004486142306415483,
+    "margin": 5.0,
+    "leverage": 3,
+    "sl_price": 3393.7844499999997,
+    "tp_price": 3143.0122,
+    "be_price": 3336.94274,
+    "be_roe": 0.1,
+    "trailing_dev": 0.015,
+    "entry_time": "2026-01-18T20:00:00",
+    "confidence": 0.9344241619110107,
+    "is_breakeven": false,
+    "peak_price": 3343.63,
+    "pnl": 0
+  }
+]
