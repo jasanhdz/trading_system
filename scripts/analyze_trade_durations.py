@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Project Phantom V8: ETH Specialist Backtest
-Target: Validate Phantom model trained on 11,519 drop examples.
+Analizar la duración de los 503 trades del backtest original de Phantom V8.
+Este script modifica temporalmente simulate_trade para capturar la duración de cada trade.
 """
 import pandas as pd
 import numpy as np
@@ -49,41 +49,39 @@ def is_forbidden_time(timestamp):
     return day in FORBIDDEN_DAYS or hour in FORBIDDEN_HOURS
 
 def check_phantom_trigger(df, idx):
-    """
-    Phantom Trigger: CVD-based entry.
-    Requires negative CVD slope + weakness.
-    """
     if idx < 50:
         return False
     
     row = df.iloc[idx]
     
-    # 1. CVD Slope negative (distribution)
     if pd.isna(row['cvd_slope']) or row['cvd_slope'] > 0:
         return False
     
-    # 2. CVD Z-Score below average (selling pressure)
     if pd.isna(row['cvd_z']) or row['cvd_z'] > 0.5:
         return False
     
-    # 3. Bearish candle
     if row['close_eth'] >= row['open_eth']:
         return False
     
-    # 4. ETH weaker than BTC
     if pd.isna(row['weakness_score']) or row['weakness_score'] < 0:
         return False
     
     return True
 
-def simulate_trade(entry_price, future_candles, leverage):
+def simulate_trade(entry_price, future_candles, leverage, entry_idx):
+    """
+    Versión modificada que captura la duración exacta del trade.
+    """
     sl_price = entry_price * (1 + SL_PCT)
     tp_price = entry_price * (1 - TP_PCT)
     be_price = entry_price * (1 - 0.003)
     peak_price = entry_price
     is_breakeven = False
     
-    for i, row in future_candles.iterrows():
+    trade_duration = 0  # En candles (5 minutos cada una)
+    exit_candle_idx = None
+    
+    for relative_i, (abs_idx, row) in enumerate(future_candles.iterrows()):
         if row['low_eth'] < peak_price:
             peak_price = row['low_eth']
         
@@ -96,48 +94,53 @@ def simulate_trade(entry_price, future_candles, leverage):
         if is_breakeven:
             trailing_sl = peak_price * (1 + TRAILING_DEV)
             if row['high_eth'] >= trailing_sl:
-                return trailing_sl, "TRAILING", is_breakeven
+                trade_duration = relative_i + 1
+                exit_candle_idx = abs_idx
+                return trailing_sl, "TRAILING", is_breakeven, trade_duration, exit_candle_idx
         
         if row['high_eth'] >= sl_price:
-            return sl_price, "STOP_LOSS", is_breakeven
+            trade_duration = relative_i + 1
+            exit_candle_idx = abs_idx
+            return sl_price, "STOP_LOSS", is_breakeven, trade_duration, exit_candle_idx
         
         if row['low_eth'] <= tp_price:
-            return tp_price, "TAKE_PROFIT", is_breakeven
+            trade_duration = relative_i + 1
+            exit_candle_idx = abs_idx
+            return tp_price, "TAKE_PROFIT", is_breakeven, trade_duration, exit_candle_idx
     
-    return future_candles.iloc[-1]['close_eth'], "TIME_LIMIT", is_breakeven
+    trade_duration = len(future_candles)
+    exit_candle_idx = future_candles.index[-1]
+    return future_candles.iloc[-1]['close_eth'], "TIME_LIMIT", is_breakeven, trade_duration, exit_candle_idx
 
 def main():
-    print("礪 PROJECT PHANTOM V8: ETH BACKTEST 礪")
-    print("=" * 60)
-    print(" Key Features:")
-    print("   - CVD Proxy trigger")
-    print("   - 12-feature PhantomNet")
-    print("   - Deep Breath exit (10% BE ROE)")
-    print("   - Trained on 11,519 drop examples")
+    print("📊 ANÁLISIS DE DURACIÓN: 503 TRADES ORIGINALES")
     print("=" * 60)
     
     # Load features
     if not Path(FEATURES_PATH).exists():
-        print("❌ Features not found. Run phantom_data_generator.py first.")
+        print("❌ Features not found.")
         return
     
     df = pd.read_csv(FEATURES_PATH)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
-    print(f"\n Data: {len(df)} candles")
+    print(f"\n📈 Data: {len(df)} candles")
     
     # Load model
     if not Path(MODEL_PATH).exists():
-        print("❌ Model not found. Run train_phantom_dqn.py first.")
+        print("❌ Model not found.")
         return
     
+    # Force CPU to avoid ROCm issues
     device = torch.device("cpu")
-    model = PhantomNet(input_dim=12, output_dim=2).to(device)
-    try:
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=True))
-    except:
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=False))
+    model = PhantomNet().to(device)
+    checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=False)
+    # Handle both possible checkpoint structures
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
     model.eval()
-    print("✅ Phantom model loaded")
+    print("✅ Phantom model loaded (CPU mode)\n")
     
     # State
     balance = INITIAL_BALANCE
@@ -146,6 +149,9 @@ def main():
     circuit_breaker_until = None
     blocked_by_sentinel = 0
     phantom_triggers = 0
+    
+    # ANÁLISIS DE DURACIONES
+    durations = []
     
     for idx in range(200, len(df) - HORIZON):
         row = df.iloc[idx]
@@ -171,7 +177,7 @@ def main():
         # Build state vector (12 features)
         state = np.array([
             row['cvd_z'] if not pd.isna(row['cvd_z']) else 0,
-            row['cvd_slope'] / 10000 if not pd.isna(row['cvd_slope']) else 0,  # Normalized
+            row['cvd_slope'] / 10000 if not pd.isna(row['cvd_slope']) else 0,
             row['weakness_score'] if not pd.isna(row['weakness_score']) else 0,
             row['volatility_z'] if not pd.isna(row['volatility_z']) else 0,
             float(row['is_fakeout']) if not pd.isna(row['is_fakeout']) else 0,
@@ -194,6 +200,7 @@ def main():
         
         if action == 1 and confidence > CONFIDENCE_THRESHOLD:
             entry_price = row['close_eth']
+            entry_time = row['timestamp']
             
             # House Money
             leverage = BASE_LEVERAGE
@@ -206,8 +213,12 @@ def main():
             future = df.iloc[idx+1 : idx+HORIZON+1]
             if len(future) < HORIZON: continue
             
-            # Simulate Trade
-            exit_price, reason, hit_be = simulate_trade(entry_price, future, leverage)
+            # Simulate Trade (CON CAPTURA DE DURACIÓN)
+            exit_price, reason, hit_be, duration, exit_idx = simulate_trade(entry_price, future, leverage, idx)
+            
+            exit_time = df.loc[exit_idx, 'timestamp']
+            duration_hours = duration * 5 / 60  # 5 min candles
+            duration_days = duration_hours / 24
             
             raw_pnl = (entry_price - exit_price) * quantity
             fees = (entry_price * quantity * FEE_RATE) + (exit_price * quantity * FEE_RATE)
@@ -215,61 +226,76 @@ def main():
             
             balance += net_pnl
             if balance < 0: balance = 0
-            
             if balance > peak_balance:
                 peak_balance = balance
             
-            # Circuit Breaker
-            current_dd = (peak_balance - balance) / peak_balance if peak_balance > 0 else 0
-            if current_dd >= CIRCUIT_BREAKER_DD:
-                circuit_breaker_until = idx + CIRCUIT_BREAKER_CANDLES
-            
-            trades.append({
-                'entry_time': row['timestamp'],
-                'reason': reason,
+            # Guardar duración
+            durations.append({
+                'trade_num': len(trades) + 1,
+                'entry_time': entry_time,
+                'exit_time': exit_time,
+                'duration_candles': duration,
+                'duration_hours': duration_hours,
+                'duration_days': duration_days,
+                'exit_reason': reason,
                 'pnl': net_pnl,
-                'balance': balance,
-                'hit_be': hit_be,
-                'confidence': confidence
+                'balance': balance
             })
             
-            if balance <= 0: break
+            trades.append({
+                'timestamp': row['timestamp'],
+                'entry_price': entry_price,
+                'exit_price': exit_price,
+                'exit_reason': reason,
+                'net_pnl': net_pnl,
+                'confidence': confidence,
+                'balance': balance
+            })
+            
+            # Circuit Breaker
+            drawdown_pct = (peak_balance - balance) / peak_balance
+            if drawdown_pct >= CIRCUIT_BREAKER_DD:
+                circuit_breaker_until = idx + CIRCUIT_BREAKER_CANDLES
     
-    print(f"\n PHANTOM V8 RESULTS:")
-    print(f"  Phantom Triggers: {phantom_triggers}")
-    print(f"  Sentinel Blocked: {blocked_by_sentinel}")
+    # Crear DataFrame de duraciones
+    df_durations = pd.DataFrame(durations)
     
-    if not trades:
-        print("  ❌ No trades executed")
-        return
+    print(f"\n📊 RESULTADOS:")
+    print(f"  Total Trades: {len(trades)}")
+    print(f"  Final Balance: ${balance:.2f}")
+    print(f"  ROI: {(balance - INITIAL_BALANCE) / INITIAL_BALANCE * 100:.2f}%\n")
     
-    df_trades = pd.DataFrame(trades)
-    final = df_trades.iloc[-1]['balance']
-    ret = ((final - INITIAL_BALANCE) / INITIAL_BALANCE) * 100
+    print("📈 ESTADÍSTICAS DE DURACIÓN:")
+    print(f"  Media: {df_durations['duration_hours'].mean():.1f} horas ({df_durations['duration_days'].mean():.2f} días)")
+    print(f"  Mediana: {df_durations['duration_hours'].median():.1f} horas ({df_durations['duration_days'].median():.2f} días)")
+    print(f"  Mínimo: {df_durations['duration_hours'].min():.1f} horas ({df_durations['duration_days'].min():.2f} días)")
+    print(f"  Máximo: {df_durations['duration_hours'].max():.1f} horas ({df_durations['duration_days'].max():.2f} días)")
+    print(f"  Desv. Est: {df_durations['duration_hours'].std():.1f} horas\n")
     
-    gross_profit = df_trades[df_trades['pnl'] > 0]['pnl'].sum()
-    gross_loss = abs(df_trades[df_trades['pnl'] <= 0]['pnl'].sum())
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
-    win_rate = len(df_trades[df_trades['pnl'] > 0]) / len(df_trades) * 100
-    mdd = ((df_trades['balance'].cummax() - df_trades['balance']) / df_trades['balance'].cummax()).max() * 100
+    # Distribución por exit reason
+    print("📊 DISTRIBUCIÓN POR EXIT REASON:")
+    for reason in df_durations['exit_reason'].unique():
+        subset = df_durations[df_durations['exit_reason'] == reason]
+        print(f"  {reason}:")
+        print(f"    Count: {len(subset)}")
+        print(f"    Avg Duration: {subset['duration_hours'].mean():.1f} horas ({subset['duration_days'].mean():.2f} días)")
     
-    # Exit Analysis
-    reasons = df_trades['reason'].value_counts()
-    be_hits = df_trades['hit_be'].sum()
+    # Guardar reporte detallado
+    output_path = "reports/trade_durations_503.csv"
+    df_durations.to_csv(output_path, index=False)
+    print(f"\n💾 Reporte guardado: {output_path}")
     
-    print(f"\n Final: ${final:.2f} ({ret:+.2f}%)")
-    print(f" Peak: ${peak_balance:.2f}")
-    print(f" Max DD: {mdd:.2f}%")
-    print(f" Trades: {len(df_trades)}")
-    print(f"✅ Win Rate: {win_rate:.2f}%")
-    print(f"⚖️ Profit Factor: {profit_factor:.2f}")
-    print(f"\n Exit Analysis:")
-    for reason, count in reasons.items():
-        print(f"   {reason}: {count}")
-    print(f"   BE Activations: {be_hits}")
+    # Top 10 trades más largos
+    print("\n🐢 TOP 10 TRADES MÁS LARGOS:")
+    top_10_longest = df_durations.nlargest(10, 'duration_hours')
+    for _, trade in top_10_longest.iterrows():
+        print(f"  Trade #{int(trade['trade_num'])}: {trade['duration_days']:.1f} días ({trade['exit_reason']}) | Entry: {trade['entry_time']} | Exit: {trade['exit_time']}")
     
-    df_trades.to_csv("reports/phantom_v8_backtest.csv", index=False)
-    print("\n Report: reports/phantom_v8_backtest.csv")
+    # Top 10 trades más cortos
+    print("\n🐇 TOP 10 TRADES MÁS CORTOS:")
+    top_10_shortest = df_durations.nsmallest(10, 'duration_hours')
+    for _, trade in top_10_shortest.iterrows():
+        print(f"  Trade #{int(trade['trade_num'])}: {trade['duration_hours']:.1f} horas ({trade['exit_reason']}) | Entry: {trade['entry_time']} | Exit: {trade['exit_time']}")
 
 if __name__ == "__main__":
     main()

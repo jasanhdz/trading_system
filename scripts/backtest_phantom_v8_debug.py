@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """
-Project Phantom V8: ETH Specialist Backtest
-Target: Validate Phantom model trained on 11,519 drop examples.
+Project Phantom V8: ETH Service Client Backtest (DEBUG VERSION)
+Target: Verify ML Service Logic by decoupling backtest execution.
 """
 import pandas as pd
 import numpy as np
-import torch
 import sys
 import os
+import requests
+import json
 from pathlib import Path
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from scripts.train_phantom_dqn import PhantomNet
-
 # Config
-MODEL_PATH = "models/phantom_eth/phantom_net_best.pth"
 FEATURES_PATH = "data/phantom_features.csv"
+ML_SERVICE_URL = "http://127.0.0.1:8002/ml-v2/backtest_predict"
 
 # V8 Params (Optimized for ETH institutional moves)
 INITIAL_BALANCE = 20.0
@@ -30,7 +29,6 @@ TP_PCT = 0.06        # 6% TP
 TRAILING_DEV = 0.015 # 1.5% trailing
 BE_TRIGGER_ROE = 0.10  # 10% ROE before BE
 
-CONFIDENCE_THRESHOLD = 0.55  # Slightly relaxed for more trades
 HORIZON = 288
 
 # Equity Protection
@@ -48,33 +46,35 @@ def is_forbidden_time(timestamp):
     day = timestamp.strftime('%A')
     return day in FORBIDDEN_DAYS or hour in FORBIDDEN_HOURS
 
-def check_phantom_trigger(df, idx):
+def get_service_prediction(row):
     """
-    Phantom Trigger: CVD-based entry.
-    Requires negative CVD slope + weakness.
+    Call the ML Service for a prediction using precalculated features.
     """
-    if idx < 50:
-        return False
-    
-    row = df.iloc[idx]
-    
-    # 1. CVD Slope negative (distribution)
-    if pd.isna(row['cvd_slope']) or row['cvd_slope'] > 0:
-        return False
-    
-    # 2. CVD Z-Score below average (selling pressure)
-    if pd.isna(row['cvd_z']) or row['cvd_z'] > 0.5:
-        return False
-    
-    # 3. Bearish candle
-    if row['close_eth'] >= row['open_eth']:
-        return False
-    
-    # 4. ETH weaker than BTC
-    if pd.isna(row['weakness_score']) or row['weakness_score'] < 0:
-        return False
-    
-    return True
+    try:
+        # Construct payload with precalculated features
+        payload = {
+            "symbol": "ETHUSDT",
+            "custom_candles": [], # Required by schema but ignored if precalculated_features is present
+            "precalculated_features": {
+                "cvd_slope": float(row['cvd_slope']) if not pd.isna(row['cvd_slope']) else 0.0,
+                "cvd_z": float(row['cvd_z']) if not pd.isna(row['cvd_z']) else 0.0,
+                "weakness_score": float(row['weakness_score']) if not pd.isna(row['weakness_score']) else 0.0,
+                "close": float(row['close_eth']),
+                "open": float(row['open_eth'])
+            }
+        }
+        
+        response = requests.post(ML_SERVICE_URL, json=payload)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("action", "PASS"), data.get("confidence", 0.0)
+        else:
+            print(f"Service Error {response.status_code}: {response.text}")
+            return "PASS", 0.0
+            
+    except Exception as e:
+        print(f"Service Exception: {e}")
+        return "PASS", 0.0
 
 def simulate_trade(entry_price, future_candles, leverage):
     sl_price = entry_price * (1 + SL_PCT)
@@ -99,6 +99,7 @@ def simulate_trade(entry_price, future_candles, leverage):
                 return trailing_sl, "TRAILING", is_breakeven
         
         if row['high_eth'] >= sl_price:
+            print(f"[PY DEBUG SL] Time: {row['timestamp']} | High: {row['high_eth']} | SL: {sl_price} | Entry: {entry_price}")
             return sl_price, "STOP_LOSS", is_breakeven
         
         if row['low_eth'] <= tp_price:
@@ -107,37 +108,17 @@ def simulate_trade(entry_price, future_candles, leverage):
     return future_candles.iloc[-1]['close_eth'], "TIME_LIMIT", is_breakeven
 
 def main():
-    print("礪 PROJECT PHANTOM V8: ETH BACKTEST 礪")
-    print("=" * 60)
-    print(" Key Features:")
-    print("   - CVD Proxy trigger")
-    print("   - 12-feature PhantomNet")
-    print("   - Deep Breath exit (10% BE ROE)")
-    print("   - Trained on 11,519 drop examples")
+    print("礪 PROJECT PHANTOM V8: SERVICE CLIENT BACKTEST (DEBUG) 礪")
     print("=" * 60)
     
     # Load features
     if not Path(FEATURES_PATH).exists():
-        print("❌ Features not found. Run phantom_data_generator.py first.")
+        print("❌ Features not found.")
         return
     
     df = pd.read_csv(FEATURES_PATH)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     print(f"\n Data: {len(df)} candles")
-    
-    # Load model
-    if not Path(MODEL_PATH).exists():
-        print("❌ Model not found. Run train_phantom_dqn.py first.")
-        return
-    
-    device = torch.device("cpu")
-    model = PhantomNet(input_dim=12, output_dim=2).to(device)
-    try:
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=True))
-    except:
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=False))
-    model.eval()
-    print("✅ Phantom model loaded")
     
     # State
     balance = INITIAL_BALANCE
@@ -162,37 +143,12 @@ def main():
             blocked_by_sentinel += 1
             continue
         
-        # Phantom Trigger
-        if not check_phantom_trigger(df, idx):
-            continue
+        # Call Service
+        action, confidence = get_service_prediction(row)
         
-        phantom_triggers += 1
-        
-        # Build state vector (12 features)
-        state = np.array([
-            row['cvd_z'] if not pd.isna(row['cvd_z']) else 0,
-            row['cvd_slope'] / 10000 if not pd.isna(row['cvd_slope']) else 0,  # Normalized
-            row['weakness_score'] if not pd.isna(row['weakness_score']) else 0,
-            row['volatility_z'] if not pd.isna(row['volatility_z']) else 0,
-            float(row['is_fakeout']) if not pd.isna(row['is_fakeout']) else 0,
-            row['vol_ratio'] - 1.0 if not pd.isna(row['vol_ratio']) else 0,
-            row['staleness'] / 10 if not pd.isna(row['staleness']) else 0,
-            row['velocity_sm'] / row['close_eth'] * 1000 if not pd.isna(row['velocity_sm']) else 0,
-            row['acceleration_sm'] / row['close_eth'] * 1000 if not pd.isna(row['acceleration_sm']) else 0,
-            row['dist_ema20'] * 100 if not pd.isna(row['dist_ema20']) else 0,
-            row['dist_ema200'] * 100 if not pd.isna(row['dist_ema200']) else 0,
-            0  # Reserved
-        ], dtype=np.float32)
-        
-        state = np.nan_to_num(state, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        state_t = torch.FloatTensor(state).unsqueeze(0).to(device)
-        with torch.no_grad():
-            q_values = model(state_t)
-            action = torch.argmax(q_values).item()
-            confidence = torch.softmax(q_values, dim=1)[0][1].item()
-        
-        if action == 1 and confidence > CONFIDENCE_THRESHOLD:
+        if action == "SHORT":
+            phantom_triggers += 1
+            
             entry_price = row['close_eth']
             
             # House Money
@@ -206,7 +162,6 @@ def main():
             future = df.iloc[idx+1 : idx+HORIZON+1]
             if len(future) < HORIZON: continue
             
-            # Simulate Trade
             exit_price, reason, hit_be = simulate_trade(entry_price, future, leverage)
             
             raw_pnl = (entry_price - exit_price) * quantity
@@ -226,6 +181,8 @@ def main():
             
             trades.append({
                 'entry_time': row['timestamp'],
+                'entry_price': entry_price,
+                'exit_price': exit_price,
                 'reason': reason,
                 'pnl': net_pnl,
                 'balance': balance,
@@ -235,7 +192,7 @@ def main():
             
             if balance <= 0: break
     
-    print(f"\n PHANTOM V8 RESULTS:")
+    print(f"\n SERVICE CLIENT RESULTS:")
     print(f"  Phantom Triggers: {phantom_triggers}")
     print(f"  Sentinel Blocked: {blocked_by_sentinel}")
     
@@ -244,6 +201,8 @@ def main():
         return
     
     df_trades = pd.DataFrame(trades)
+    df_trades.to_csv('reports/python_trades.csv', index=False)
+    print(f" Report: reports/python_trades.csv")
     final = df_trades.iloc[-1]['balance']
     ret = ((final - INITIAL_BALANCE) / INITIAL_BALANCE) * 100
     
@@ -268,8 +227,8 @@ def main():
         print(f"   {reason}: {count}")
     print(f"   BE Activations: {be_hits}")
     
-    df_trades.to_csv("reports/phantom_v8_backtest.csv", index=False)
-    print("\n Report: reports/phantom_v8_backtest.csv")
+    df_trades.to_csv("reports/phantom_v8_service_client_results.csv", index=False)
+    print("\n Report: reports/phantom_v8_service_client_results.csv")
 
 if __name__ == "__main__":
     main()

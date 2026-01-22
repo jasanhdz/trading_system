@@ -33,29 +33,39 @@ def main():
     # The TS bot needs: timestamp, open, high, low, close, volume
     # Our features file has: open_eth, high_eth, low_eth, close_eth, volume_eth
     
-    export_data = []
+    export_data_eth = []
+    export_data_btc = []
     
     for idx, row in df.iterrows():
-        export_data.append({
-            "timestamp": row['timestamp'].timestamp() * 1000, # MS for TS
+        # ETH Candle
+        export_data_eth.append({
+            "timestamp": row['timestamp'].timestamp() * 1000,
             "open": row['open_eth'],
             "high": row['high_eth'],
             "low": row['low_eth'],
             "close": row['close_eth'],
-            "volume": row['volume_eth'],
-            # Include BTC data if needed for context, but ML service fetches it live usually.
-            # For backtest injection, we might need to inject BTC too if ML service uses it.
-            # ML service uses fetch_candles("BTCUSDT").
-            # We should probably export BTC candles too if we want full isolation.
-            # But for now let's assume we just inject the ETH candles and maybe ML service can still fetch BTC?
-            # No, if we want deterministic backtest, we should inject both.
-            # But let's start with ETH injection.
+            "volume": row['volume_eth']
+        })
+        
+        # BTC Candle
+        export_data_btc.append({
+            "timestamp": row['timestamp'].timestamp() * 1000,
+            "open": row['open_btc'],
+            "high": row['high_btc'],
+            "low": row['low_btc'],
+            "close": row['close_btc'],
+            "volume": row['volume_btc']
         })
         
     with open(OUTPUT_PATH, 'w') as f:
-        json.dump(export_data, f)
+        json.dump(export_data_eth, f)
         
-    print(f"✅ Exported {len(export_data)} candles to {OUTPUT_PATH}")
+    btc_output_path = OUTPUT_PATH.replace("candles.json", "btc_candles.json")
+    with open(btc_output_path, 'w') as f:
+        json.dump(export_data_btc, f)
+        
+    print(f"✅ Exported {len(export_data_eth)} ETH candles to {OUTPUT_PATH}")
+    print(f"✅ Exported {len(export_data_btc)} BTC candles to {btc_output_path}")
 
 if __name__ == "__main__":
     main()

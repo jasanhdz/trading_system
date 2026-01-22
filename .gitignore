@@ -6,7 +6,7 @@ __pycache__/
 .venv_cuda/
 .venv_rocm57/
 .venv_rocm62/
-experiments/
+
 
 # Database & Data
 *.db
@@ -54,6 +54,4 @@ backtest_*.csv
 *.gz
 *.zip
 *.tar
-archive/
-archive/
 scripts/archived/
