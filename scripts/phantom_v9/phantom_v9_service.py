@@ -23,7 +23,7 @@ from scripts.phantom_v9.train_phantom_dqn import PhantomNet
 DB_URL = "sqlite:///data/binance_candles.db"
 SYMBOL = "ETH/USDT"
 MODEL_PATH = "models/phantom_v9/phantom_v9_best.pth"
-PORT = 5000
+PORT = 8001
 
 # Logging
 logging.basicConfig(
@@ -57,27 +57,17 @@ def initialize():
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
-        if self.path == '/predict':
+        if self.path == '/ml-v2/predict':
             try:
                 content_length = int(self.headers['Content-Length'])
                 post_data = self.rfile.read(content_length)
                 data = json.loads(post_data)
                 
-                # Expecting OHLCV data for the last N candles to calculate features
-                # Or just the features directly?
-                # The TS bot sends a request. In the backtest we sent 'timestamp' and looked up data.
-                # In production, the bot should probably send the features OR the service fetches live data.
-                # Given the architecture, the service should probably fetch the latest data from DB or API.
-                # BUT, the bot is running live.
-                
-                # Let's assume the bot sends the symbol and we fetch the latest data from the DB 
-                # (which should be updated by the bot or another process).
-                # OR, simpler: The bot sends the latest candle? No, we need history for features.
-                
-                # DECISION: The service will fetch the latest 500 candles from the DB to calculate features.
-                # This assumes the DB is being updated by the bot (BinanceAdapter).
-                
                 symbol = data.get('symbol', SYMBOL)
+                
+                # Normalize symbol for DB (ETHUSDT -> ETH/USDT)
+                if "/" not in symbol and symbol.endswith("USDT"):
+                    symbol = f"{symbol[:-4]}/USDT"
                 
                 # 1. Fetch Data
                 db = DatabaseManager(DB_URL)
@@ -93,7 +83,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 row = df.iloc[-1] # Latest candle
                 
                 # 3. Check Setup (Filter)
-                # Match logic from detect_phantom_tops.py
                 near_resistance = abs(row['dist_ema_20']) < 0.005 
                 is_tired = row['staleness'] > 15
                 is_volatile = abs(row['vol_z']) > 0.2
@@ -101,20 +90,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 
                 is_setup = near_resistance and is_tired and is_volatile and is_rejection
                 
-                response = {}
-                
-                if not is_setup:
-                    response = {
-                        'action': 0, 
-                        'confidence': 0.0, 
-                        'reason': 'Not a setup',
-                        'features': {
-                            'dist_ema_20': float(row['dist_ema_20']),
-                            'staleness': float(row['staleness']),
-                            'vol_z': float(row['vol_z'])
-                        }
-                    }
-                else:
+                short_prob = 0.0
+                features = {
+                    'cvd_slope': float(row['cvd_slope']),
+                    'cvd_z': float(row['vol_z']),
+                    'weakness': float(row['weakness_score']),
+                    'volatility_z': float(row['vol_z'])
+                }
+
+                if is_setup:
                     # 4. Inference
                     state = np.array([
                         row['velocity'] / row['close'] * 10000,
@@ -134,20 +118,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                     state_t = torch.FloatTensor(state).unsqueeze(0)
                     with torch.no_grad():
                         q_values = model(state_t)
-                        action = torch.argmax(q_values).item()
+                        # action = torch.argmax(q_values).item()
                         confidence = torch.softmax(q_values, dim=1)[0][1].item()
-                    
-                    response = {
-                        'action': action,
-                        'confidence': confidence,
-                        'close': float(row['close']),
-                        'timestamp': int(row['timestamp']),
-                        'features': {
-                            'cvd_slope': float(row['cvd_slope']),
-                            'cvd_z': float(row['vol_z']), # Using vol_z as proxy for now
-                            'weakness': float(row['weakness_score'])
-                        }
-                    }
+                        short_prob = confidence
+
+                # Construct V2-compatible response
+                response = {
+                    'symbol': symbol,
+                    'long_prob': 0.0, # Phantom V9 is Short-Only
+                    'short_prob': short_prob,
+                    'neutral_prob': 1.0 - short_prob,
+                    'consensus_level': 0, # Legacy
+                    'meta_verdict': 'SHORT' if short_prob > 0.5 else 'NEUTRAL',
+                    'features': features
+                }
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')

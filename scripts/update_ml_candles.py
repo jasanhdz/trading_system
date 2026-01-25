@@ -20,11 +20,10 @@ if BOT_ENV_PATH.exists():
 
 # Import project modules
 sys.path.append(str(REPO_ROOT))
-sys.path.append(str(REPO_ROOT / "binance_futures_bot_py" / "src"))
 
 from data.collectors.binance_collector import BinanceDataCollector
-from data.storage.database_manager import DatabaseManager  # Changed import
-from infra.config import Config
+from data.storage.database_manager import DatabaseManager
+from config.settings import settings
 from utils.logger import setup_logger
 
 logger = setup_logger("update_ml_candles")
@@ -32,7 +31,7 @@ logger = setup_logger("update_ml_candles")
 # NEW CONFIGURATION
 CANDLES_DB_URL = "sqlite:///data/binance_candles.db"
 TARGET_SYMBOLS = [
-    'XRP/USDT', 'SOL/USDT', 'BTC/USDT',
+    'ETH/USDT', 'XRP/USDT', 'SOL/USDT', 'BTC/USDT',
     'DOGE/USDT', 'AVAX/USDT', 'NEAR/USDT', 'FET/USDT'
 ]
 TARGET_TIMEFRAMES = ["5m"]
