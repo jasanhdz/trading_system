@@ -65,18 +65,26 @@ class RequestHandler(BaseHTTPRequestHandler):
                 
                 symbol = data.get('symbol', SYMBOL)
                 
-                # Normalize symbol for DB (ETHUSDT -> ETH/USDT)
-                if "/" not in symbol and symbol.endswith("USDT"):
-                    symbol = f"{symbol[:-4]}/USDT"
+                # 1. Fetch Data (Real-Time from Binance)
+                # We need enough history for indicators (e.g. EMA 200). 1000 candles is safe.
+                import ccxt
+                exchange = ccxt.binance({'enableRateLimit': True})
                 
-                # 1. Fetch Data
-                db = DatabaseManager(DB_URL)
-                df = db.get_ohlcv_data(symbol, '5m', limit=1000)
+                # Map symbol to CCXT format (ETHUSDT -> ETH/USDT)
+                ccxt_symbol = symbol
+                if "/" not in ccxt_symbol and ccxt_symbol.endswith("USDT"):
+                    ccxt_symbol = f"{ccxt_symbol[:-4]}/USDT"
                 
-                if df.empty:
-                    raise ValueError("No data found in DB")
-                    
-                if 'timestamp' not in df.columns: df = df.reset_index()
+                # Fetch OHLCV
+                ohlcv = exchange.fetch_ohlcv(ccxt_symbol, '5m', limit=1000)
+                
+                if not ohlcv:
+                    raise ValueError("No data received from Binance")
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df.set_index('timestamp', inplace=True)
                 
                 # 2. Calculate DNA
                 df = calculate_phantom_dna(df)
@@ -90,37 +98,43 @@ class RequestHandler(BaseHTTPRequestHandler):
                 
                 is_setup = near_resistance and is_tired and is_volatile and is_rejection
                 
-                short_prob = 0.0
+                # 4. Inference (Always run to get probability)
+                state = np.array([
+                    row['velocity'] / row['close'] * 10000,
+                    row['acceleration'] / row['close'] * 10000,
+                    row['cvd_slope'] / 1e6,
+                    row['bear_trap'],
+                    row['vol_z'],
+                    row['volume_ratio'],
+                    row['dist_ema_20'] * 100,
+                    row['dist_ema_200'] * 100,
+                    row['staleness'] / 50.0,
+                    row['weakness_score'],
+                    row['is_fakeout'],
+                    0.0 # reserved
+                ], dtype=np.float32)
+                
+                state_t = torch.FloatTensor(state).unsqueeze(0)
+                with torch.no_grad():
+                    q_values = model(state_t)
+                    confidence = torch.softmax(q_values, dim=1)[0][1].item()
+                    short_prob = confidence
+
+                # DEBUG: Log setup conditions and probability
+                # logger.info(f"SETUP CHECK: setup={is_setup} prob={short_prob:.4f} | res={near_resistance} tired={is_tired} vol={is_volatile} rej={is_rejection}")
+
                 features = {
                     'cvd_slope': float(row['cvd_slope']),
                     'cvd_z': float(row['vol_z']),
                     'weakness': float(row['weakness_score']),
-                    'volatility_z': float(row['vol_z'])
+                    'volatility_z': float(row['vol_z']),
+                    # Add setup flags for TS logging/filtering
+                    'is_setup': 1.0 if is_setup else 0.0,
+                    'near_resistance': 1.0 if near_resistance else 0.0,
+                    'is_tired': 1.0 if is_tired else 0.0,
+                    'is_volatile': 1.0 if is_volatile else 0.0,
+                    'is_rejection': 1.0 if is_rejection else 0.0
                 }
-
-                if is_setup:
-                    # 4. Inference
-                    state = np.array([
-                        row['velocity'] / row['close'] * 10000,
-                        row['acceleration'] / row['close'] * 10000,
-                        row['cvd_slope'] / 1e6,
-                        row['bear_trap'],
-                        row['vol_z'],
-                        row['volume_ratio'],
-                        row['dist_ema_20'] * 100,
-                        row['dist_ema_200'] * 100,
-                        row['staleness'] / 50.0,
-                        row['weakness_score'],
-                        row['is_fakeout'],
-                        0.0 # reserved
-                    ], dtype=np.float32)
-                    
-                    state_t = torch.FloatTensor(state).unsqueeze(0)
-                    with torch.no_grad():
-                        q_values = model(state_t)
-                        # action = torch.argmax(q_values).item()
-                        confidence = torch.softmax(q_values, dim=1)[0][1].item()
-                        short_prob = confidence
 
                 # Construct V2-compatible response
                 response = {
@@ -129,7 +143,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     'short_prob': short_prob,
                     'neutral_prob': 1.0 - short_prob,
                     'consensus_level': 0, # Legacy
-                    'meta_verdict': 'SHORT' if short_prob > 0.5 else 'NEUTRAL',
+                    'meta_verdict': 'SHORT' if (short_prob > 0.5 and is_setup) else 'NEUTRAL', # Only verdict SHORT if setup is good
                     'features': features
                 }
                 

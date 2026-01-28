@@ -146,6 +146,9 @@ class PhantomManager:
                 probs = torch.softmax(q_values, dim=1)
                 short_prob = probs[0][1].item()
                 
+                # DEBUG: Log raw output
+                LOGGER.info(f"PREDICT DEBUG: symbol={symbol} q_values={q_values.cpu().numpy()} probs={probs.cpu().numpy()} short_prob={short_prob}")
+                
             # 4. Decision
             # Enforce Weakness Rule (ETH must be weaker than BTC) - Matches Backtest V8
             weakness_score = float(state[2])
