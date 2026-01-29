@@ -33,11 +33,17 @@ def main():
     print(f"👻 PHANTOM V9: THE REBORN (20x + BREAKEVEN TRIGGER) 👻")
     
     db = DatabaseManager(DB_URL)
-    df = db.get_ohlcv_data(SYMBOL, '5m', limit=50000)
+    df = db.get_ohlcv_data(SYMBOL, '5m', limit=400000)
     if 'timestamp' not in df.columns: df = df.reset_index()
     
     df = calculate_phantom_dna(df)
     candidates = detect_eth_setups(df)
+    
+    # Filter for TS Data Range (2025-01-16 to 2025-07-08)
+    start_date = pd.Timestamp("2025-01-16")
+    end_date = pd.Timestamp("2025-07-08")
+    candidates = candidates[(candidates['timestamp'] >= start_date) & (candidates['timestamp'] <= end_date)]
+    # Do NOT reset index, we need the original indices to map back to df
     
     device = torch.device("cpu")
     model = PhantomNet(input_dim=12, output_dim=2).to(device)
@@ -52,9 +58,7 @@ def main():
     
     print(f"Testing on {len(candidates)} candidates...")
     
-    for i in range(len(candidates)):
-        cand_idx = candidates.index[i]
-        row = candidates.iloc[i]
+    for cand_idx, row in candidates.iterrows():
         
         if is_forbidden_time(row['timestamp']): continue
         
