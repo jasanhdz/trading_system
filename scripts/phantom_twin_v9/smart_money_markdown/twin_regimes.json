@@ -1,0 +1,92 @@
+[
+    {
+        "start_date": "2022-07-19",
+        "end_date": "2022-08-04",
+        "duration": 16,
+        "avg_hurst": 0.7842201089359957
+    },
+    {
+        "start_date": "2022-08-08",
+        "end_date": "2022-09-02",
+        "duration": 25,
+        "avg_hurst": 0.7835160182676387
+    },
+    {
+        "start_date": "2022-09-13",
+        "end_date": "2022-09-23",
+        "duration": 10,
+        "avg_hurst": 0.7858863967917233
+    },
+    {
+        "start_date": "2022-11-08",
+        "end_date": "2022-11-14",
+        "duration": 6,
+        "avg_hurst": 0.7870545852515007
+    },
+    {
+        "start_date": "2023-03-14",
+        "end_date": "2023-03-24",
+        "duration": 10,
+        "avg_hurst": 0.7815749908136806
+    },
+    {
+        "start_date": "2023-04-19",
+        "end_date": "2023-04-27",
+        "duration": 8,
+        "avg_hurst": 0.7895025721840413
+    },
+    {
+        "start_date": "2023-12-11",
+        "end_date": "2023-12-20",
+        "duration": 9,
+        "avg_hurst": 0.7905317298768935
+    },
+    {
+        "start_date": "2023-12-24",
+        "end_date": "2023-12-29",
+        "duration": 5,
+        "avg_hurst": 0.7932421807214111
+    },
+    {
+        "start_date": "2024-01-02",
+        "end_date": "2024-01-24",
+        "duration": 22,
+        "avg_hurst": 0.7869584358934729
+    },
+    {
+        "start_date": "2024-02-13",
+        "end_date": "2024-06-03",
+        "duration": 111,
+        "avg_hurst": 0.7832067206627836
+    },
+    {
+        "start_date": "2024-06-11",
+        "end_date": "2024-06-28",
+        "duration": 17,
+        "avg_hurst": 0.7846487292908516
+    },
+    {
+        "start_date": "2024-07-03",
+        "end_date": "2024-08-16",
+        "duration": 44,
+        "avg_hurst": 0.7876604825142316
+    },
+    {
+        "start_date": "2024-08-20",
+        "end_date": "2024-08-28",
+        "duration": 8,
+        "avg_hurst": 0.7886322499132165
+    },
+    {
+        "start_date": "2024-09-01",
+        "end_date": "2024-09-06",
+        "duration": 5,
+        "avg_hurst": 0.7872159467121151
+    },
+    {
+        "start_date": "2024-10-30",
+        "end_date": "2024-12-30",
+        "duration": 61,
+        "avg_hurst": 0.78440869808762
+    }
+]

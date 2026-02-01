@@ -55,3 +55,4 @@ backtest_*.csv
 *.zip
 *.tar
 scripts/archived/
+archive/
