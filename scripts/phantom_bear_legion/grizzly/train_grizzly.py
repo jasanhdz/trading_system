@@ -17,15 +17,15 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 
 # Fix path to include project root (3 levels up from scripts/phantom_bear_legion/train_grizzly.py)
-ROOT_DIR = Path(__file__).parent.parent.parent
+ROOT_DIR = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(ROOT_DIR))
 
 # Import Feature Calculation if needed (for missing columns)
 from scripts.phantom_v9.detect_phantom_tops import calculate_phantom_dna
 
 # Config
-DATASET_PATH = Path(__file__).parent / "data/dataset_bear_crash.csv"
-MODEL_DIR = Path(__file__).parent / "models"
+DATASET_PATH = Path(__file__).parent.parent / "data/dataset_bear_crash.csv"
+MODEL_DIR = Path(__file__).parent.parent / "models"
 MODEL_NAME = "grizzly_v1.pth"
 
 # GRIZZLY PARAMETERS (Aggressive)

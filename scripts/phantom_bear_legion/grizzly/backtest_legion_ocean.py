@@ -14,7 +14,7 @@ import torch
 from pathlib import Path
 
 # Fix path
-ROOT_DIR = Path(__file__).parent.parent.parent
+ROOT_DIR = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(ROOT_DIR))
 
 from scripts.phantom_v9.detect_phantom_tops import calculate_phantom_dna

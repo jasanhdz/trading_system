@@ -17,14 +17,14 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 
 # Fix path
-ROOT_DIR = Path(__file__).parent.parent.parent
+ROOT_DIR = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(ROOT_DIR))
 
 from scripts.phantom_v9.detect_phantom_tops import calculate_phantom_dna
 
 # Config
-DATASET_PATH = Path(__file__).parent / "data/dataset_bear_grinder.csv"
-MODEL_DIR = Path(__file__).parent / "models"
+DATASET_PATH = Path(__file__).parent.parent / "data/dataset_bear_grinder.csv"
+MODEL_DIR = Path(__file__).parent.parent / "models"
 MODEL_NAME = "panda_v1.pth"
 
 # PANDA PARAMETERS (Conservative)
