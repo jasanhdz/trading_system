@@ -139,13 +139,31 @@ class BinanceDataCollector(BaseDataCollector):
                     since = since.replace(tzinfo=timezone.utc)
                 since_ms = int(since.timestamp() * 1000)
             
-            # Obtener datos
-            ohlcv = self.exchange.fetch_ohlcv(
-                symbol=market_symbol,
-                timeframe=timeframe,
-                since=since_ms,
-                limit=min(limit, 1000)  # Binance limit
-            )
+            # Obtener datos usando el endpoint nativo para atrapar el Taker Buy Volume
+            market = self.exchange.market(market_symbol)
+            binance_id = market['id']
+            
+            params = {
+                'symbol': binance_id,
+                'interval': self.exchange.timeframes.get(timeframe, timeframe),
+                'limit': min(limit, 1000)
+            }
+            if since_ms:
+                params['startTime'] = since_ms
+                
+            raw_klines = self.exchange.fapiPublicGetKlines(params)
+            
+            ohlcv = []
+            for k in raw_klines:
+                ohlcv.append([
+                    int(k[0]),       # timestamp
+                    float(k[1]),     # open
+                    float(k[2]),     # high
+                    float(k[3]),     # low
+                    float(k[4]),     # close
+                    float(k[5]),     # volume
+                    float(k[9])      # taker buy volume (CVD component)
+                ])
             
             if not ohlcv:
                 self.logger.warning(f"No data returned for {symbol} {timeframe}")

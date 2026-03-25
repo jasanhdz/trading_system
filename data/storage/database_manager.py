@@ -82,7 +82,8 @@ class DatabaseManager:
                     high=float(row['high']),
                     low=float(row['low']),
                     close=float(row['close']),
-                    volume=float(row['volume'])
+                    volume=float(row['volume']),
+                    buy_volume=float(row['buy_volume']) if 'buy_volume' in row and pd.notna(row['buy_volume']) else None
                 )
                 records.append(record)
             
@@ -99,43 +100,26 @@ class DatabaseManager:
         end_date: datetime = None,
         limit: int = None
     ) -> pd.DataFrame:
-        # Obtener datos OHLCV como DataFrame
-        with self.get_session() as session:
-            query = session.query(OHLCVData).filter(
-                OHLCVData.symbol == symbol,
-                OHLCVData.timeframe == timeframe
-            )
+        # Bypass SQLAlchemy for massive performance + avoid mysterious table locks
+        import sqlite3
+        conn = sqlite3.connect(self.database_url.replace("sqlite:///", ""))
+        
+        limit_clause = f"ORDER BY timestamp DESC LIMIT {limit}" if limit else "ORDER BY timestamp ASC"
+        query = f"SELECT timestamp, open, high, low, close, volume, buy_volume FROM ohlcv_data WHERE symbol='{symbol}' AND timeframe='{timeframe}' {limit_clause}"
+        
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        if df.empty:
+            return pd.DataFrame()
             
-            if start_date:
-                query = query.filter(OHLCVData.timestamp >= start_date)
-            if end_date:
-                query = query.filter(OHLCVData.timestamp <= end_date)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df.set_index('timestamp', inplace=True)
+        
+        if limit:
+            df = df.sort_index(ascending=True)
             
-            query = query.order_by(OHLCVData.timestamp)
-            
-            if limit:
-                query = query.limit(limit)
-            
-            results = query.all()
-            
-            if not results:
-                return pd.DataFrame()
-            
-            # Convertir a DataFrame
-            data = []
-            for record in results:
-                data.append({
-                    'timestamp': record.timestamp,
-                    'open': record.open,
-                    'high': record.high,
-                    'low': record.low,
-                    'close': record.close,
-                    'volume': record.volume
-                })
-            
-            df = pd.DataFrame(data)
-            df.set_index('timestamp', inplace=True)
-            return df
+        return df
     
     def get_latest_timestamp(self, symbol: str, timeframe: str) -> Optional[datetime]:
         # Obtener el timestamp más reciente para un símbolo/timeframe

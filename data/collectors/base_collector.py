@@ -67,15 +67,17 @@ class BaseDataCollector(ABC):
         if not raw_data:
             return pd.DataFrame()
         
-        df = pd.DataFrame(raw_data, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume'
-        ])
+        columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        if len(raw_data[0]) >= 7:
+            columns.append('buy_volume')
+            
+        df = pd.DataFrame(raw_data, columns=columns)
         
         # Convertir timestamp a datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         
         # Convertir a float
-        numeric_cols = ['open', 'high', 'low', 'close', 'volume']
+        numeric_cols = [c for c in columns if c != 'timestamp']
         df[numeric_cols] = df[numeric_cols].astype(float)
         
         # Eliminar duplicados

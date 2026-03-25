@@ -17,7 +17,7 @@ class Settings:
     # Database Configuration
     DATABASE_URL = os.getenv(
         "DATABASE_URL", 
-        f"sqlite:///{BASE_DIR}/data/xrp_trading.db"
+        f"sqlite:///{BASE_DIR}/data/binance_candles.db"
     )
     
     # Exchange API Keys
@@ -25,8 +25,8 @@ class Settings:
     BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
     
     # Trading Configuration - CORREGIDO: Consistencia en símbolo
-    SYMBOL = os.getenv("SYMBOL", "XRP/USDT")  # Formato CCXT
-    BINANCE_SYMBOL = os.getenv("SYMBOL", "XRPUSDT")  # Formato Binance nativo
+    SYMBOL = os.getenv("SYMBOL", "ETH/USDT")  # Formato CCXT
+    BINANCE_SYMBOL = os.getenv("SYMBOL", "ETHUSDT")  # Formato Binance nativo
     LEVERAGE = int(os.getenv("LEVERAGE", "10"))  # Reducido de 50 a 10 (más conservador)
     
     TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]

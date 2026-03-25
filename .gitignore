@@ -13,8 +13,9 @@ __pycache__/
 *.db-shm
 *.db-wal
 *.sqlite
-data/raw/
+data/
 logs/
+binance-futures-bot-ts/logs/
 
 # Security
 .env
@@ -48,6 +49,10 @@ backtest_*.csv
 *.joblib
 *.h5
 *.keras
+*.npz
+*.pt
+*.pth
+*.safetensors
 
 # Archived Logs
 *.log.*
@@ -56,3 +61,6 @@ backtest_*.csv
 *.tar
 scripts/archived/
 archive/
+data/
+*.npz
+*.db

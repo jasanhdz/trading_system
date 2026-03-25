@@ -31,8 +31,7 @@ logger = setup_logger("update_ml_candles")
 # NEW CONFIGURATION
 CANDLES_DB_URL = "sqlite:///data/binance_candles.db"
 TARGET_SYMBOLS = [
-    'ETH/USDT', 'XRP/USDT', 'SOL/USDT', 'BTC/USDT',
-    'DOGE/USDT', 'AVAX/USDT', 'NEAR/USDT', 'FET/USDT'
+    'ETH/USDT',  # Only trading ETH for now
 ]
 TARGET_TIMEFRAMES = ["5m"]
 
@@ -71,8 +70,8 @@ def fmt_ts(ts) -> str:
 @click.option(
     "--days",
     type=int,
-    default=365,
-    help="Backfill window in days (default 365).",
+    default=1460,
+    help="Backfill window in days (default 1460 = 4 years).",
 )
 def main(days: int) -> None:
     """Download / refresh OHLCV history for Berzerker symbols."""

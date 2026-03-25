@@ -19,6 +19,7 @@ class OHLCVData(Base):
     low = Column(Float, nullable=False)
     close = Column(Float, nullable=False)
     volume = Column(Float, nullable=False)
+    buy_volume = Column(Float, nullable=True) # Taker buy base asset volume
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Índices para optimizar consultas

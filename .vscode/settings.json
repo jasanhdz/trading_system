@@ -1,0 +1,6 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv_rocm62/bin/python",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}"
+    ]
+}
