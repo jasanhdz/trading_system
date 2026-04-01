@@ -167,7 +167,9 @@ def get_signal(df: pd.DataFrame):
     window = df[market_features].iloc[-WINDOW_SIZE:].values.astype(np.float32)
     
     # Account state (flat position for inference)
-    account = np.array([1.0, 1.0, 0.0, 0.0], dtype=np.float32)
+    # Must match matrix_env.py exactly when flat:
+    # [balance_norm=1.0, leverage_used=0.0, pnl_pct=0.0, in_trade=0.0]
+    account = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
     
     obs = {
         'market': window,
@@ -407,12 +409,18 @@ async def get_exit_signal(req: ExitRequest):
             "action": str_action,
             "confidence": confidence,
             "features_used": {
-                "current_pnl": req.current_pnl,
-                "mfe": req.mfe,
-                "mae": req.mae,
-                "time_decay": time_decay,
-                "atr_norm": atr_norm,
-                "current_atr": current_atr
+                "current_pnl": float(req.current_pnl),
+                "mfe": float(req.mfe),
+                "mae": float(req.mae),
+                "time_decay": float(time_decay),
+                "atr_norm": float(atr_norm),
+                "drawdown_from_peak": float(drawdown_from_peak),
+                "roe_velocity": float(roe_velocity),
+                "roe_acceleration": float(roe_acceleration),
+                "cvd_z": float(cvd_z_val),
+                "cvd_roc": float(cvd_roc_val),
+                "distance_to_tp": float(distance_to_tp),
+                "volume_ratio": float(volume_ratio)
             }
         }
     except Exception as e:

@@ -295,58 +295,80 @@ class MatrixExitEnvV2(gym.Env):
     def _compute_close_reward(self, net_pnl, gross_roe):
         """
         Reward for AI choosing to close.
-        Key: reward based on ACTUAL captured PnL, but with bonuses
-        for good timing (closing before decline, closing at peaks).
+        V3 REBALANCE: Heavily penalizes premature exits.
+        Only rewards closing when:
+        1. We captured meaningful profit (>15% ROE)
+        2. Momentum is dying (deceleration confirmed)
+        3. We're preserving gains from a significant peak
         """
-        reward = net_pnl  # Base: actual PnL captured
+        reward = 0.0
         
-        # BONUS: Close during deceleration WITH profit
-        if net_pnl > 0 and len(self.roe_history) >= 2:
-            velocity = self.roe_history[-1] - self.roe_history[-2]
-            if velocity < 0:
-                # Closing during pullback while still in profit = smart
-                reward += abs(velocity) * 5.0
+        # === GATE: Minimum ROE to consider closing profitable ===
+        MIN_MEANINGFUL_ROE = 0.15  # 15% ROE minimum for a "good" exit
         
-        # BONUS: Saved from future loss (if near peak and decelerating)
-        if self.peak_roe > 0.1:  # More than 10% ROE peak
-            drawdown_pct = (self.peak_roe - gross_roe) / self.peak_roe
-            if drawdown_pct > 0.05:  # Already gave back 5%+
-                saved_ratio = net_pnl / max(self.peak_roe, 1e-10)
-                reward += saved_ratio * 2.0  # Reward proportional to what we saved
-        
-        # PENALTY: Closing too early (below 10% ROE when peak was high)
-        if net_pnl > 0 and net_pnl < 0.10 and self.steps_taken < 5:
-            reward -= 0.1  # Small penalty for premature exits
-        
-        # PENALTY: Closing in loss when we could still recover
-        if net_pnl < 0 and self.steps_taken < self.max_steps * 0.3:
-            reward += net_pnl * 0.5  # Extra pain for panic selling early
+        if net_pnl > MIN_MEANINGFUL_ROE:
+            # Good close: captured meaningful profit
+            reward = net_pnl * 2.0  # 2x multiplier for locking in real gains
+            
+            # BONUS: Closing during deceleration (smart timing)
+            if len(self.roe_history) >= 2:
+                velocity = self.roe_history[-1] - self.roe_history[-2]
+                if velocity < 0:
+                    reward += abs(velocity) * 10.0  # Big bonus for reading momentum death
+            
+            # BONUS: Preserved gains from a significant peak
+            if self.peak_roe > 0.20:
+                capture_ratio = net_pnl / self.peak_roe  # How much of peak we kept
+                reward += capture_ratio * 3.0  # Reward proportional to capture efficiency
+                
+        elif net_pnl > 0:
+            # Premature close: profit but too small
+            # HEAVY PENALTY: teach patience
+            reward = -0.5 + net_pnl * 0.5  # Net negative for tiny profits
+            
+        else:
+            # Closing in loss
+            if self.steps_taken < self.max_steps * 0.25:
+                # Panic selling early = extra pain
+                reward = net_pnl * 2.0  # Double the loss penalty
+            else:
+                # Late-stage loss cut is acceptable
+                reward = net_pnl * 0.8
         
         return reward
     
     def _compute_hold_reward(self, current_roe, net_pnl):
         """
-        Reward for holding. Encourages holding during momentum,
-        penalizes holding during decline.
+        Reward for holding. V3 REBALANCE: 
+        Strong positive rewards for riding momentum.
+        The agent must learn that HOLDING is the default winning action.
         """
         reward = 0.0
         
-        # Micro PnL tracking (incentive to be in the right direction)
         if len(self.roe_history) >= 2:
             velocity = self.roe_history[-1] - self.roe_history[-2]
             
             if velocity > 0:
-                # Momentum positive: small reward for patience
-                reward += 0.005 * (1 + current_roe)  # More reward at higher ROE
-            elif velocity < 0 and current_roe > 0.05:
-                # Decelerating WHILE in profit: gentle pressure to close
-                reward -= 0.003 * abs(velocity) * 10
+                # Momentum positive: STRONG reward for patience (was 0.005, now 0.05-0.15)
+                reward += 0.05 * (1 + current_roe * 5.0)  # Scales with profit level
+                
+            elif velocity < 0 and current_roe > 0.15:
+                # Decelerating while in meaningful profit: gentle pressure
+                reward -= 0.01 * abs(velocity) * 5.0
+                
+            elif velocity < 0 and current_roe <= 0:
+                # Losing momentum while in the red: small pain
+                reward -= 0.005
         
-        # Drawdown pressure: if we gave back a lot from peak, punish holding
-        if self.peak_roe > 0.1:
+        # BONUS: Surviving and still in profit = patience pays
+        if net_pnl > 0 and self.steps_taken > 3:
+            reward += 0.02  # Constant drip reward for profitable patience
+        
+        # Drawdown pressure: only if we gave back A LOT from peak
+        if self.peak_roe > 0.15:
             dd = (self.peak_roe - current_roe) / max(self.peak_roe, 1e-10)
-            if dd > 0.3:  # Gave back 30%+ of peak gains
-                reward -= 0.01 * dd
+            if dd > 0.50:  # Gave back 50%+ of peak gains (was 30%)
+                reward -= 0.02 * dd
         
         return reward
 

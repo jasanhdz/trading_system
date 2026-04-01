@@ -134,7 +134,7 @@ def main():
                     "batch_size": 512,
                     "n_epochs": 10,
                     "gamma": 0.99,
-                    "ent_coef": 0.05,
+                    "ent_coef": 0.15,
                     "verbose": 1,
                     "seed": args.seed,
                 }
@@ -156,7 +156,7 @@ def main():
             batch_size=512,     # Smaller batch for 32D model
             n_epochs=10,
             gamma=0.99,
-            ent_coef=0.05,      # V10: Moderate exploration
+            ent_coef=0.15,      # V10: High exploration to break Monk Mode
             seed=args.seed,
             device=device,
         )

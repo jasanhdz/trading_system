@@ -35,6 +35,7 @@ from scripts.phantom_v30.matrix_env import PhantomMatrixEnv
 CHAMPION_PATH = "models/phantom_v30_champion.zip"
 CHALLENGER_A_PATH = "models/phantom_v30_challenger_a.zip"
 CHALLENGER_B_PATH = "models/phantom_v30_challenger_b.zip"
+SAFE_CHECKPOINT_PATH = "models/phantom_v31_safe_checkpoint.zip"  # Best survivor vault
 
 # Training Config
 NUM_ENVS = 512  # 512 envs × 32 steps = 16,384 buffer
@@ -291,10 +292,21 @@ def continuous_train():
             else:
                 print(f"🛡️ DEFENSE! Champion retains title.")
 
-            # --- ONGOING LEARNING: Save best challenger to accumulate ---
+            # --- ONGOING LEARNING: 3-Tier Survivor Vault ---
             if best_chall_path and os.path.exists(best_chall_path):
-                shutil.copy2(best_chall_path, "models/phantom_v31_latest_challenger.zip")
-                print(f"📥 Saved {best_chall_name} (${best_chall_score:.2f}) as ongoing baseline for next iteration.")
+                if best_chall_dd < 0.90:
+                    # ✅ SAFE: Save as ongoing baseline AND update the safe checkpoint vault
+                    shutil.copy2(best_chall_path, "models/phantom_v31_latest_challenger.zip")
+                    shutil.copy2(best_chall_path, SAFE_CHECKPOINT_PATH)
+                    print(f"📥 Saved {best_chall_name} (${best_chall_score:.2f} | DD: {best_chall_dd*100:.1f}%) as ongoing baseline + safe checkpoint.")
+                else:
+                    # 💀 SUICIDAL: Restore from safe checkpoint (preserves progress) or champion (last resort)
+                    if os.path.exists(SAFE_CHECKPOINT_PATH):
+                        shutil.copy2(SAFE_CHECKPOINT_PATH, "models/phantom_v31_latest_challenger.zip")
+                        print(f"💀 MUTATION REJECTED: {best_chall_name} ({best_chall_dd*100:.1f}% DD). Restoring from SAFE CHECKPOINT (preserving progress).")
+                    else:
+                        shutil.copy2(CHAMPION_PATH, "models/phantom_v31_latest_challenger.zip")
+                        print(f"� MUTATION REJECTED: {best_chall_name} ({best_chall_dd*100:.1f}% DD). No safe checkpoint found, restoring Champion baseline.")
 
             # Cleanup challenger files
             for _, path in challengers:

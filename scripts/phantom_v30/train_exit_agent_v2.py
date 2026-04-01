@@ -35,10 +35,10 @@ from scripts.phantom_v30.matrix_exit_env_v2 import MatrixExitEnvV2
 # === Config ===
 CHAMPION_PATH = "models/phantom_exit_champion_v2.zip"
 CHALLENGER_PATH = "models/phantom_exit_challenger_v2.zip"
-TOTAL_TIMESTEPS = 500_000       # 500k steps per iteration
-NUM_ENVS = 8                    # 8 parallel CPU environments
-N_ITERATIONS = 10               # Total training iterations
-EVAL_EPISODES = 200             # Evaluation episodes per seed
+TOTAL_TIMESTEPS = 300_000       # Fast iterations (300k)
+NUM_ENVS = 16                   # Max parallelism for CPU
+N_ITERATIONS = 999999           # Loop indefinitely
+EVAL_EPISODES = 50              # Faster evaluations
 EVAL_SEEDS = [42, 137, 256, 1337, 7777]
 
 
@@ -175,12 +175,12 @@ def train_iteration(tensors_train, tensors_val, iteration: int):
             "MlpPolicy",
             env,
             learning_rate=1e-4,
-            n_steps=2048,
+            n_steps=128,        # QUICK UPDATES (optimized)
             batch_size=256,
             n_epochs=10,
             gamma=0.99,
             gae_lambda=0.95,
-            ent_coef=0.02,      # More exploration for V2 (12D space is larger)
+            ent_coef=0.03,      # Higher exploration for V3
             vf_coef=0.5,
             max_grad_norm=0.5,
             device="cpu",
@@ -197,7 +197,7 @@ def train_iteration(tensors_train, tensors_val, iteration: int):
         model.learn(
             total_timesteps=TOTAL_TIMESTEPS,
             callback=ProgressCallback(TOTAL_TIMESTEPS),
-            reset_num_timesteps=False
+            reset_num_timesteps=True
         )
     except KeyboardInterrupt:
         print("\n🛑 Training interrupted by user")
@@ -215,8 +215,12 @@ def train_iteration(tensors_train, tensors_val, iteration: int):
     # === EVALUATION (Validation Set) ===
     print(f"\n🏟️ COLISEUM: Evaluating on validation data...")
     
-    champ_results = evaluate_model(CHAMPION_PATH, tensors_val)
-    print_eval_report("Champion (Current)", champ_results)
+    if os.path.exists(CHAMPION_PATH):
+        champ_results = evaluate_model(CHAMPION_PATH, tensors_val)
+        print_eval_report("Champion (Current)", champ_results)
+    else:
+        print("  ⚠️ No champion exists yet (first training run)")
+        champ_results = {'avg_pnl': -np.inf, 'win_rate': 0.0}
     
     challenger_results = evaluate_model(CHALLENGER_PATH, tensors_val)
     print_eval_report("Challenger (New)", challenger_results)
@@ -286,9 +290,11 @@ def main():
     print(f"📊 Val:   {tensors_val['n_candles']:,} candles")
     
     # Training loop
-    for iteration in range(1, N_ITERATIONS + 1):
+    iteration = 1
+    while True:
         try:
             results = train_iteration(tensors_train, tensors_val, iteration)
+            iteration += 1
             
             # Heartbeat
             try:
@@ -296,9 +302,8 @@ def main():
             except Exception:
                 pass
             
-            if iteration < N_ITERATIONS:
-                print(f"\n⏸️ Sleeping 5s before iteration {iteration + 1}...")
-                time.sleep(5)
+            print(f"\n⏸️ Sleeping 5s before next iteration...")
+            time.sleep(5)
                 
         except KeyboardInterrupt:
             print(f"\n🛑 Training stopped by user at iteration {iteration}")
