@@ -419,14 +419,6 @@ class PhantomMatrixEnv(VecEnv):
         self.entry_prices = np.where(liquidated, 0.0, self.entry_prices)
         new_equity = np.where(liquidated, 0.0, new_equity)
         
-        # 🚨 PENALIZACIÓN EXTREMA POR DRAWDOWN: Si el DD supera el 70%, castigamos a la IA
-        # Esto le enseñará a cerrar posiciones manuales ANTES de que el DD llegue al 80% o liquidación
-        current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
-        dd_penalty = np.where(current_dd > 0.70, -10.0 * (current_dd - 0.70), 0.0)
-        
-        # 🚨 PENALIZACIÓN POR LIQUIDACIÓN MASIVA
-        dd_penalty = np.where(liquidated, -100.0, dd_penalty)
-        
         # ═══════════════ REWARD V11.2: Maestría sin Miedo (Bug-Fixed) ═══════════════
         # V11.2 fixes: fee shaping order-of-operations bug that gave free reward on flips
         
@@ -437,8 +429,6 @@ class PhantomMatrixEnv(VecEnv):
         
         # 1. BASE: PnL Real (Sin Asimetría)
         reward = log_return * 100.0
-        
-        # 1.b REMOVED: SYMMETRY BONUS FOR SHORTS (Was causing unbalanced Short-only behavior)
         
         # 2. CLOSE SETTLEMENT: First, settle the fee debt from the PREVIOUS open
         # This MUST happen BEFORE we set new pending_fee_recovery for any new open
@@ -452,7 +442,6 @@ class PhantomMatrixEnv(VecEnv):
         self.pending_fee_recovery = np.where(just_closed_trade | liquidated, 0.0, self.pending_fee_recovery)
         
         reward += execution_bonus
-        reward += dd_penalty
         
         # 3. OPEN SHAPING: Now handle new opens (including the open part of flips)
         # Give back the entry fee as reward so PPO doesn't fear opening positions
