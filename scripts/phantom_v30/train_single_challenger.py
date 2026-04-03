@@ -130,11 +130,12 @@ def main():
                 device=device,
                 custom_objects={
                     "learning_rate": cosine_lr_schedule,
-                    "n_steps": 32,
-                    "batch_size": 512,
-                    "n_epochs": 10,
+                    "n_steps": 128,       # V12: 512 envs × 128 = 65,536 buffer (4x more context)
+                    "batch_size": 1024,   # V12: Stable gradients (64 mini-batches from 65K buffer)
+                    "n_epochs": 6,        # V12: Reduced (avoids overfitting the larger buffer)
                     "gamma": 0.99,
-                    "ent_coef": 0.15,
+                    "gae_lambda": 0.95,   # V12: Standard advantage estimation
+                    "ent_coef": 0.05,     # V12: Back to 0.05 (0.15 was collapsing entropy too fast)
                     "verbose": 1,
                     "seed": args.seed,
                 }
@@ -152,11 +153,12 @@ def main():
             policy_kwargs=POLICY_KWARGS,
             verbose=1,
             learning_rate=cosine_lr_schedule,
-            n_steps=32,         # 512 envs × 32 steps = 16,384 buffer
-            batch_size=512,     # Smaller batch for 32D model
-            n_epochs=10,
+            n_steps=128,         # V12: 512 envs × 128 = 65,536 buffer (was 32 = 16K)
+            batch_size=1024,     # V12: 64 mini-batches (was 32 mini-batches)
+            n_epochs=6,          # V12: Less epochs per update (was 10)
             gamma=0.99,
-            ent_coef=0.15,      # V10: High exploration to break Monk Mode
+            gae_lambda=0.95,     # V12: Explicit GAE lambda
+            ent_coef=0.05,       # V12: Moderate exploration (was 0.15, caused entropy collapse)
             seed=args.seed,
             device=device,
         )

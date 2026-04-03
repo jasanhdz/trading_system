@@ -38,8 +38,8 @@ CHALLENGER_B_PATH = "models/phantom_v30_challenger_b.zip"
 SAFE_CHECKPOINT_PATH = "models/phantom_v31_safe_checkpoint.zip"  # Best survivor vault
 
 # Training Config
-NUM_ENVS = 512  # 512 envs × 32 steps = 16,384 buffer
-TOTAL_TIMESTEPS = 5_000_000  # V10: 5M steps (sufficient for 32D)
+NUM_ENVS = 512  # 512 envs × 128 steps = 65,536 buffer (4x more context)
+TOTAL_TIMESTEPS = 8_000_000  # V12: 8M steps to compensate larger n_steps
 MIN_VIABLE_SCORE = 25.0  # V10: $25 minimum ($5 ROI from $20)
 MAX_DD_THRESHOLD = 0.80  # V11.2: Survival filter — no kamikaze champions allowed
 
