@@ -419,21 +419,22 @@ class PhantomMatrixEnv(VecEnv):
         self.entry_prices = np.where(liquidated, 0.0, self.entry_prices)
         new_equity = np.where(liquidated, 0.0, new_equity)
         
-        # ═══════════════ REWARD V11.2: Maestría sin Miedo (Bug-Fixed) ═══════════════
-        # V11.2 fixes: fee shaping order-of-operations bug that gave free reward on flips
+        # ═══════════════ REWARD V13: Asymmetric Greed & Variance Compression ═══════════════
         
         safe_prev = np.maximum(prev_equity, 1e-10)
         safe_new = np.maximum(new_equity, 1e-10)
         
         log_return = np.log(safe_new / safe_prev)
         
-        # 1. BASE: PnL Real (Sin Asimetría)
-        reward = log_return * 100.0
+        # 1. BASE: Variance Compression & Asymmetric Greed
+        # Multiply by 10.0 instead of 100.0 to prevent PPO gradient explosion at 20x.
+        # Asymmetry: Winners get 15x, losers get 10x. EV of trading becomes positive computationally.
+        reward = np.where(log_return > 0, log_return * 15.0, log_return * 10.0)
         
-        # 2. CLOSE SETTLEMENT: First, settle the fee debt from the PREVIOUS open
-        # This MUST happen BEFORE we set new pending_fee_recovery for any new open
+        # 2. CLOSE SETTLEMENT: Sniper bonus for taking profit
         closed_profit = just_closed_trade & (closed_trade_pnl > 0)
-        execution_bonus = np.where(closed_profit, 2.0, 0.0)
+        # Give +0.5 reward for locking in a win (equivalent to 5% equity jump on new scale)
+        execution_bonus = np.where(closed_profit, 0.5, 0.0)
         
         # Subtract the fee we "lent" when the trade was opened
         execution_bonus = np.where(just_closed_trade, execution_bonus - self.pending_fee_recovery, execution_bonus)
@@ -443,37 +444,38 @@ class PhantomMatrixEnv(VecEnv):
         
         reward += execution_bonus
         
-        # 3. OPEN SHAPING: Now handle new opens (including the open part of flips)
-        # Give back the entry fee as reward so PPO doesn't fear opening positions
+        # 3. FIXED OPEN SHAPING: Refund fee in % to prevent entry fear (fixed previous bug)
         just_opened = open_trade_fee > 0
-        reward += open_trade_fee * 100.0
-        self.pending_fee_recovery = np.where(just_opened, open_trade_fee * 100.0, self.pending_fee_recovery)
+        fee_pct = open_trade_fee / safe_prev
+        refund_reward = fee_pct * 10.0  # Perfectly matches the log_return * 10 scale
         
-        # 4. IDLE PENALTY: Choque eléctrico (Electric Shock)
-        # To force the baby V31 to move and take action since it's starting from zero.
-        # Doing nothing is no longer safe. It drains massive reward very quickly.
+        reward += np.where(just_opened, refund_reward, 0.0)
+        self.pending_fee_recovery = np.where(just_opened, refund_reward, self.pending_fee_recovery)
+        
+        # 4. IDLE PENALTY: Kept same absolute size to force action strongly in relative terms
         idle_penalty = np.where(
             self.flat_steps > 200, -0.1,
             np.where(self.flat_steps > 50, -0.05, 0.0)
         )
         reward += idle_penalty
         
-        # 5. ENTRY ATTEMPT BONUS: Reward trying (to jumpstart action)
-        entry_bonus = np.where(just_opened, 0.8, 0.0)  # Bumped to 0.8 momentarily to force V31 to trade
+        # 5. ENTRY ATTEMPT BONUS
+        entry_bonus = np.where(just_opened, 0.1, 0.0)
         reward += entry_bonus
         
         # 6. FLIP PENALTY: Discourage overtrading
         flipped = flip_long | flip_short
-        reward = np.where(flipped, reward - 0.5, reward)
+        reward = np.where(flipped, reward - 0.2, reward)
         
-        # 7. DEATH PENALTY: Liquidation or Ruin 
+        # 7. DEATH PENALTY: Removed -50 Cliff (Variance reduction)
+        # We cap the natural loss strictly at -10.0 so gradients don't explode
         ruined = liquidated | (new_equity < INITIAL_BALANCE * 0.1)
-        # 8. TERROR PENALTY: Drawdown > 80% (Instant Muerte)
         current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
         over_dd = current_dd > 0.80
         
         ruined = ruined | over_dd
-        reward = np.where(ruined, -50.0, reward)
+        # Rather than punishing them infinitely, we give a strict painful ceiling (-10.0)
+        reward = np.where(ruined, -10.0, reward)
         
         # Update tracking (kept for observation/debugging, no reward impact)
         self.hold_steps = np.where(in_pos, self.hold_steps + 1, 0)
