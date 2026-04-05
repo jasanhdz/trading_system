@@ -41,7 +41,7 @@ SAFE_CHECKPOINT_PATH = "models/phantom_v31_safe_checkpoint.zip"  # Best survivor
 NUM_ENVS = 512  # 512 envs × 128 steps = 65,536 buffer (4x more context)
 TOTAL_TIMESTEPS = 8_000_000  # V12: 8M steps to compensate larger n_steps
 MIN_VIABLE_SCORE = 25.0  # V10: $25 minimum ($5 ROI from $20)
-MAX_DD_THRESHOLD = 0.80  # V11.2: Survival filter — no kamikaze champions allowed
+MAX_DD_THRESHOLD = 0.96  # V13.1: Kamikaze filter — 96% DD allowed (let them surf the wicks)
 
 
 def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
