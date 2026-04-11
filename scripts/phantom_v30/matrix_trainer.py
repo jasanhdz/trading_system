@@ -58,7 +58,7 @@ def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
     np.random.seed(seed)
 
     action_counts = {0: 0, 1: 0, 2: 0, 3: 0}
-    MAX_STEPS = 8000  # V33.1: Cover full 14-day validation set
+    MAX_STEPS = 8000
     
     obs = eval_env.reset()
     peak_equities = np.full(eval_env.num_envs, float(eval_env.balances[0]))

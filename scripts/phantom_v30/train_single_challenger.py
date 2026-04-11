@@ -53,11 +53,11 @@ def main():
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--num-envs", type=int, default=128)
     parser.add_argument("--timesteps", type=int, default=2_000_000)
-    parser.add_argument("--d-model", type=int, default=48)
+    parser.add_argument("--d-model", type=int, default=32)
     args = parser.parse_args()
     
-    # V10: Evidence-based architecture (32D converges, 64D doesn't)
-    n_heads = 2 if args.d_model <= 32 else 4
+    # V31: Evidence-based architecture (32D is too small for 15 features, up to 48D)
+    n_heads = 2 if args.d_model <= 48 else 4 # Keep 2 heads for stability
     n_layers = 1 if args.d_model <= 32 else 2
     
     POLICY_KWARGS = dict(
