@@ -107,18 +107,42 @@ def load_tensor_data(device: str = "cuda:0", days: int | None = None, split: str
     cvd_roc[~np.isfinite(cvd_roc)] = 0.0
     
     # 7. Candle Progress (Timestamp modulo)
-    # Allows AI to differentiate between a 10s old candle and a 290s old candle
-    # If the bot queries mid-way, it will know CVD is partial.
     timestamps = pd.to_numeric(df.index).values  # Usually in ns or ms
-    # Convert to ms (if assuming ns index from resample)
     if timestamps[0] > 1e16:
         timestamps = timestamps / 1e6
     candle_progress = (timestamps % 300000) / 300000.0  # 5 min = 300k ms
     candle_progress = candle_progress.astype(np.float32)
     
-    # Stack features: (N, 11)
-    features = np.stack([log_ret, high_norm, low_norm, vol_norm, rsi_norm, ema_9_norm, ema_21_norm, ema_200_norm, cvd_z, cvd_roc, candle_progress], axis=1)
+    # --- Advanced Expert Features ---
+    # 8. MTF EMA Slopes (1H = 12 periods, 4H = 48 periods)
+    ema_12 = close_s.ewm(span=12, adjust=False).mean()
+    ema_48 = close_s.ewm(span=48, adjust=False).mean()
+    ema_1h_slope = (ema_12.diff() / (ema_12.shift(1) + 1e-8)).fillna(0).values.astype(np.float32)
+    ema_4h_slope = (ema_48.diff() / (ema_48.shift(1) + 1e-8)).fillna(0).values.astype(np.float32)
+    ema_1h_slope = np.clip(ema_1h_slope * 1000, -10, 10)  # scale up for nn
+    ema_4h_slope = np.clip(ema_4h_slope * 1000, -10, 10)
     
+    # 9. Volume Z-Score (Climax Detection)
+    vol_s = pd.Series(volume)
+    vol_ma20 = vol_s.rolling(window=20).mean()
+    vol_std20 = vol_s.rolling(window=20).std()
+    vol_z_arr = ((vol_s - vol_ma20) / (vol_std20 + 1e-8)).fillna(0).clip(-5, 10).values.astype(np.float32)
+    
+    # 10. CVD Divergence Flag
+    price_roc3 = close_s.diff(3).fillna(0).values
+    cvd_roc3 = pd.Series(cvd_z).diff(3).fillna(0).values
+    cvd_div = np.zeros_like(cvd_z)
+    cvd_div[(price_roc3 < -close*0.001) & (cvd_roc3 > 0.5)] = 1.0  # Bullish Div (Price down > 0.1%, but CVD strongly up)
+    cvd_div[(price_roc3 > close*0.001) & (cvd_roc3 < -0.5)] = -1.0 # Bearish Div
+    cvd_div = cvd_div.astype(np.float32)
+
+    # Stack features: (N, 15)
+    features = np.stack([
+        log_ret, high_norm, low_norm, vol_norm, rsi_norm, 
+        ema_9_norm, ema_21_norm, ema_200_norm, 
+        cvd_z, cvd_roc, candle_progress,
+        ema_1h_slope, ema_4h_slope, vol_z_arr, cvd_div
+    ], axis=1)    
     # Skip first 24 rows (NaN from rolling window)
     features = features[24:]
     close = close[24:]

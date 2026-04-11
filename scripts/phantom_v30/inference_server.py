@@ -149,13 +149,40 @@ def get_signal(df: pd.DataFrame):
     candle_progress_arr[-1] = (now_ms % 300000) / 300000.0  # Only last candle matters
     df['candle_progress'] = candle_progress_arr
 
+    # --- Advanced Expert Features ---
+    # 8. MTF EMA Slopes (1H = 12 periods, 4H = 48 periods)
+    ema_12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema_48 = df['close'].ewm(span=48, adjust=False).mean()
+    df['ema_1h_slope'] = ((ema_12.diff() / (ema_12.shift(1) + 1e-8)).clip(-10/1000, 10/1000) * 1000).fillna(0).astype(np.float32)
+    df['ema_4h_slope'] = ((ema_48.diff() / (ema_48.shift(1) + 1e-8)).clip(-10/1000, 10/1000) * 1000).fillna(0).astype(np.float32)
+    
+    # 9. Volume Z-Score (Climax Detection)
+    vol_s = df['volume']
+    vol_ma20 = vol_s.rolling(window=20).mean()
+    vol_std20 = vol_s.rolling(window=20).std()
+    df['vol_z'] = ((vol_s - vol_ma20) / (vol_std20 + 1e-8)).fillna(0).clip(-5, 10).astype(np.float32)
+    
+    # 10. CVD Divergence Flag
+    price_roc3 = df['close'].diff(3).fillna(0).values
+    cvd_roc3 = pd.Series(cvd_z).diff(3).fillna(0).values
+    cvd_div = np.zeros_like(cvd_z)
+    cvd_div[(price_roc3 < -df['close'].values*0.001) & (cvd_roc3 > 0.5)] = 1.0  # Bullish Div
+    cvd_div[(price_roc3 > df['close'].values*0.001) & (cvd_roc3 < -0.5)] = -1.0 # Bearish Div
+    df['cvd_div'] = cvd_div.astype(np.float32)
+
     # Auto-detect model's expected feature count (backward compat)
     try:
         model_n_features = model.observation_space['market'].shape[-1]
     except Exception:
         model_n_features = 10
     
-    if model_n_features >= 11:
+    if model_n_features >= 15:
+        market_features = [
+            'log_ret', 'high_norm', 'low_norm', 'vol_norm', 'rsi_norm', 
+            'ema_9_norm', 'ema_21_norm', 'ema_200_norm', 'cvd_z', 'cvd_roc', 'candle_progress',
+            'ema_1h_slope', 'ema_4h_slope', 'vol_z', 'cvd_div'
+        ]
+    elif model_n_features >= 11:
         market_features = ['log_ret', 'high_norm', 'low_norm', 'vol_norm', 'rsi_norm', 'ema_9_norm', 'ema_21_norm', 'ema_200_norm', 'cvd_z', 'cvd_roc', 'candle_progress']
     else:
         market_features = ['log_ret', 'high_norm', 'low_norm', 'vol_norm', 'rsi_norm', 'ema_9_norm', 'ema_21_norm', 'ema_200_norm', 'cvd_z', 'cvd_roc']
@@ -229,7 +256,7 @@ async def predict(req: PredictRequest):
         import ccxt
         exchange = ccxt.binanceusdm({'enableRateLimit': True})
         # Note: req.symbol is already native "ETHUSDT" coming from TS
-        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 100})
+        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 1000})
         
         ohlcv = []
         for k in raw_klines:
@@ -285,7 +312,7 @@ async def get_exit_signal(req: ExitRequest):
         exchange = ccxt.binanceusdm({'enableRateLimit': True})
         
         # Fetch 100 limit to ensure EWMA for CVD has enough warmup
-        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 100})
+        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 1000})
         
         ohlcv = []
         for k in raw_klines:

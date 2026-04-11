@@ -26,7 +26,7 @@ INITIAL_BALANCE = 20.0    # ⚔️ KAMIKAZE MODE: $20 to $500 ⚔️
 LEVERAGE = 20.0           # ⚔️ 20x Leverage ⚔️
 MAINTENANCE_MARGIN_RATE = 0.004 # 0.4% MMR
 WINDOW_SIZE = 64
-N_FEATURES = 11  # log_ret, high_norm, low_norm, vol_norm, rsi_norm, ema9, ema21, ema200, cvd_z, cvd_roc, candle_progress
+N_FEATURES = 15  # log_ret, high_norm, low_norm, vol_norm, rsi_norm, ema9, ema21, ema200, cvd_z, cvd_roc, candle_progress, ema_1h, ema_4h, vol_z, cvd_div
 
 
 class PhantomMatrixEnv(VecEnv):
@@ -451,6 +451,33 @@ class PhantomMatrixEnv(VecEnv):
         
         reward += np.where(just_opened, refund_reward, 0.0)
         self.pending_fee_recovery = np.where(just_opened, refund_reward, self.pending_fee_recovery)
+        
+        # --- MUTATION 1: MTF ACTION MASKING PENALTY ---
+        # Feature 12 is ema_4h_slope
+        current_features = self.features[new_idx] 
+        ema_4h_slope = current_features[:, 12]
+        # Severe penalty if going LONG when 4H is crashing heavily (<-1.0)
+        suicide_long = just_opened & (actions == 1) & (ema_4h_slope < -1.0)
+        suicide_short = just_opened & (actions == 2) & (ema_4h_slope > 1.0)
+        reward = np.where(suicide_long | suicide_short, reward - 1.5, reward)
+        
+        # --- MUTATION 2: RSI EXHAUSTION MASKING (DYNAMIC PROBABILITY BURN) ---
+        # Feature 4 is rsi_norm. > 0.6 is RSI > 80 (Overbought climax). <-0.6 is RSI < 20 (Oversold bounce area)
+        rsi_norm = current_features[:, 4]
+        exhausted_long = just_opened & (actions == 1) & (rsi_norm > 0.6)
+        exhausted_short = just_opened & (actions == 2) & (rsi_norm < -0.6)
+        reward = np.where(exhausted_long | exhausted_short, reward - 1.5, reward)
+
+        # --- MUTATION 3: ORGANIC SNIPER REWARD (Take money and run) ---
+        # If the AI mathematically pushed the "CLOSE" button (actions == 3) purely on its own will,
+        # AND it had more than +10% ROE (+0.5% raw price diff), it gets an absolute Sniper Bonus!
+        organic_sniper = close_mask & (price_diff_pct > 0.005)
+        reward = np.where(organic_sniper, reward + 1.0, reward)
+        
+        # --- MUTATION 2: EQUITY CURVE BLEED PENALTY ---
+        # Teach AI to fear floating losses > -1% price (-20% ROE)
+        bleeding_penalty = np.where((self.positions != 0) & (price_diff_pct < -0.01), -0.05, 0.0)
+        reward += bleeding_penalty
         
         # 4. IDLE PENALTY: Kept same absolute size to force action strongly in relative terms
         idle_penalty = np.where(

@@ -39,12 +39,12 @@ def cosine_lr_schedule(progress_remaining: float) -> float:
     progress = 1.0 - progress_remaining  # 0.0 → 1.0
     
     if progress < warmup_pct:
-        # Linear warmup from 3e-5 to 3e-4
-        return 3e-5 + (progress / warmup_pct) * (3e-4 - 3e-5)
+        # Linear warmup from 5e-5 to 5e-4
+        return 5e-5 + (progress / warmup_pct) * (5e-4 - 5e-5)
     
-    # Cosine decay from 3e-4 to 3e-5
+    # Cosine decay from 5e-4 to 5e-5
     decay_progress = (progress - warmup_pct) / (1.0 - warmup_pct)
-    return 3e-5 + 0.5 * (3e-4 - 3e-5) * (1 + np.cos(np.pi * decay_progress))
+    return 5e-5 + 0.5 * (5e-4 - 5e-5) * (1 + np.cos(np.pi * decay_progress))
 
 
 def main():
@@ -135,7 +135,7 @@ def main():
                     "n_epochs": 6,        # V12: Reduced (avoids overfitting the larger buffer)
                     "gamma": 0.99,
                     "gae_lambda": 0.95,   # V12: Standard advantage estimation
-                    "ent_coef": 0.05,     # V12: Back to 0.05 (0.15 was collapsing entropy too fast)
+                    "ent_coef": 0.10,     # V12: Back to 0.10 (0.15 was collapsing entropy too fast)
                     "verbose": 1,
                     "seed": args.seed,
                 }
@@ -158,7 +158,7 @@ def main():
             n_epochs=6,          # V12: Less epochs per update (was 10)
             gamma=0.99,
             gae_lambda=0.95,     # V12: Explicit GAE lambda
-            ent_coef=0.05,       # V12: Moderate exploration (was 0.15, caused entropy collapse)
+            ent_coef=0.10,       # V12: Moderate exploration (was 0.15, caused entropy collapse)
             seed=args.seed,
             device=device,
         )
