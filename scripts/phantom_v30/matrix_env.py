@@ -255,8 +255,8 @@ class PhantomMatrixEnv(VecEnv):
         
         # ═══════════════ BRACKET OVERRIDE (Live Bot Parity) ═══════════════
         # Live Bot Settings: 20x Leverage, -50% ROE SL, +25% ROE TP
-        HARD_STOP = -0.025   # -2.5% price = -50% ROE @ 20x
-        TAKE_PROFIT = 0.0125 # 1.25% price = +25% ROE @ 20x
+        HARD_STOP = -0.020    # -2.0% price = -40% ROE @ 20x (ALIGNED WITH PRODUCTION)
+        TAKE_PROFIT = 0.020   # +2.0% price = +40% ROE @ 20x (ALIGNED WITH PRODUCTION)
         
         # Calculate raw price variation % from entry
         safe_entry_bracket = np.maximum(self.entry_prices, 1e-10)
@@ -278,8 +278,8 @@ class PhantomMatrixEnv(VecEnv):
         # Activation at 15% ROE (which is 15% / 20x = 0.0075 raw price move)
         # Callback 30% of peak (Safety Net) or 1.5% fixed step. Let's use standard Binance logic: 
         # If price drops X% from the recorded peak, it closes. Let's use the live 1.5% trailing step (0.015)
-        TRAILING_ACTIVATION = 0.15 / LEVERAGE  # 0.0075 raw
-        TRAILING_CALLBACK = 0.015              # 1.5% callback from peak
+        TRAILING_ACTIVATION = 0.20 / LEVERAGE  # 0.010 raw = +20% ROE (ALIGNED WITH PRODUCTION)
+        TRAILING_CALLBACK = 0.005              # 0.5% callback = ~10% ROE (ALIGNED WITH PRODUCTION)
         
         trailing_hit = (self.positions != 0) & (self.peak_diff_pct >= TRAILING_ACTIVATION) & (self.peak_diff_pct - price_diff_pct >= TRAILING_CALLBACK)
         # ----------------------------
@@ -459,14 +459,14 @@ class PhantomMatrixEnv(VecEnv):
         # Severe penalty if going LONG when 4H is crashing heavily (<-1.0)
         suicide_long = just_opened & (actions == 1) & (ema_4h_slope < -1.0)
         suicide_short = just_opened & (actions == 2) & (ema_4h_slope > 1.0)
-        reward = np.where(suicide_long | suicide_short, reward - 1.5, reward)
+        reward = np.where(suicide_long | suicide_short, reward - 0.3, reward)  # V33.1: De-escalated from -1.5
         
         # --- MUTATION 2: RSI EXHAUSTION MASKING (DYNAMIC PROBABILITY BURN) ---
         # Feature 4 is rsi_norm. > 0.6 is RSI > 80 (Overbought climax). <-0.6 is RSI < 20 (Oversold bounce area)
         rsi_norm = current_features[:, 4]
         exhausted_long = just_opened & (actions == 1) & (rsi_norm > 0.6)
         exhausted_short = just_opened & (actions == 2) & (rsi_norm < -0.6)
-        reward = np.where(exhausted_long | exhausted_short, reward - 1.5, reward)
+        reward = np.where(exhausted_long | exhausted_short, reward - 0.3, reward)  # V33.1: De-escalated from -1.5
 
         # --- MUTATION 3: ORGANIC SNIPER REWARD (Take money and run) ---
         # If the AI mathematically pushed the "CLOSE" button (actions == 3) purely on its own will,

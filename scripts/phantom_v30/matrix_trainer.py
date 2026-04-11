@@ -58,7 +58,7 @@ def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
     np.random.seed(seed)
 
     action_counts = {0: 0, 1: 0, 2: 0, 3: 0}
-    MAX_STEPS = 5000
+    MAX_STEPS = 8000  # V33.1: Cover full 14-day validation set
     
     obs = eval_env.reset()
     peak_equities = np.full(eval_env.num_envs, float(eval_env.balances[0]))
@@ -182,8 +182,8 @@ def continuous_train():
             print(f"\n⚔️ Dual-GPU V10 Mode: 32D × 2 (different seeds)...")
 
             start = time.time()
-            proc_a = launch_challenger(0, CHALLENGER_A_PATH, seed_a, d_model=32)
-            proc_b = launch_challenger(1, CHALLENGER_B_PATH, seed_b, d_model=32)
+            proc_a = launch_challenger(0, CHALLENGER_A_PATH, seed_a, d_model=48)
+            proc_b = launch_challenger(1, CHALLENGER_B_PATH, seed_b, d_model=48)
 
             # Wait for both with HEARTBEAT (touch log every 10s so Watchdog knows we're alive)
             while proc_a.poll() is None or proc_b.poll() is None:

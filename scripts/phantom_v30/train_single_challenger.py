@@ -53,7 +53,7 @@ def main():
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--num-envs", type=int, default=128)
     parser.add_argument("--timesteps", type=int, default=2_000_000)
-    parser.add_argument("--d-model", type=int, default=32)
+    parser.add_argument("--d-model", type=int, default=48)
     args = parser.parse_args()
     
     # V10: Evidence-based architecture (32D converges, 64D doesn't)
