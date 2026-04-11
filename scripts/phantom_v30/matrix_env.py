@@ -487,7 +487,7 @@ class PhantomMatrixEnv(VecEnv):
         reward += idle_penalty
         
         # 5. ENTRY ATTEMPT BONUS
-        entry_bonus = np.where(just_opened, 0.1, 0.0)
+        entry_bonus = np.where(just_opened, 0.15, 0.0)
         reward += entry_bonus
         
         # 6. FLIP PENALTY: Discourage overtrading
