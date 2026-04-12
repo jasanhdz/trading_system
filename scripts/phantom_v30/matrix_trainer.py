@@ -182,8 +182,8 @@ def continuous_train():
             print(f"\n⚔️ Dual-GPU V10 Mode: 32D × 2 (different seeds)...")
 
             start = time.time()
-            proc_a = launch_challenger(0, CHALLENGER_A_PATH, seed_a, d_model=48)
-            proc_b = launch_challenger(1, CHALLENGER_B_PATH, seed_b, d_model=48)
+            proc_a = launch_challenger(0, CHALLENGER_A_PATH, seed_a, d_model=32)
+            proc_b = launch_challenger(1, CHALLENGER_B_PATH, seed_b, d_model=32)
 
             # Wait for both with HEARTBEAT (touch log every 10s so Watchdog knows we're alive)
             while proc_a.poll() is None or proc_b.poll() is None:

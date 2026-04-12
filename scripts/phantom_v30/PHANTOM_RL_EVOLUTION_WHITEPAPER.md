@@ -62,3 +62,17 @@ Para que nuestro "Francotirador Paranoico" vuelva a apretar el gatillo con ganas
 
 *   **Siguiente Ajuste:** Bajar el Castigo de RSI de `-1.5` a `-0.3`.
 *   **Premisa Experimental:** Permitirle comprar picos extremos (Momentum) sabiendo que si se equivoca, cortará el trade instintivamente sin morir electrocutado en la primera vela.
+
+---
+
+## 4. V34: De "Granja de Dopamina" a Maximizador Cuantitativo ($2k Goal)
+
+### La Epifanía del Mercado Lateral y el "Bono Plano"
+En versiones anteriores insertamos Bonos Planos (`+1.0` por hacer Sniper) para obligar a la IA a cobrar rápido ante un mercado altamente lateral (ETH estancado). Fue un parche necesario porque con `gamma=0.99` la máquina no sentía urgencia por el tiempo.
+Sin embargo, esto creó un nuevo problema: **Farming de Dopamina**.
+La IA ganaba `+0.15` por la ganancia financiera real y `+1.0` de bono artificial. La motivación real de la IA era cobrar centavos para escuchar el *Ding* del bono artificial de 1.0, limitando sus ganancias a topes absurdos ($15-$20) y perdiéndose todas las tendencias grandes.
+
+### La Receta: Multiplicadores Relacionales
+Ya que el nuevo `gamma=0.95` naturalmente introduce el sentido de urgencia por cobrar rápido (creando un Scalper nato ideal para mercado lateral), **erradicamos los bonos artificiales**.
+*   **Ajuste:** El Sniper Bonus (`+1.0`) y el Execution Bonus (`+0.5`) se reemplazaron por **Multiplicadores Exponenciales** (`reward = reward * 1.5` y `profit_pct * 15.0`).
+*   **Razón Matemática:** Ahora, si cierra con +1 Centavo, el bono 1.5x le paga migajas. Pero si cierra valientemente con +$5 dólares, el bono se vuelve gigantesco. Le enseñamos a maximizar el dinero (Compounding), no la cantidad mecánica de clics.

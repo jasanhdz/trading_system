@@ -430,10 +430,12 @@ class PhantomMatrixEnv(VecEnv):
         # Asymmetry: Winners get 15x, losers get 10x. EV of trading becomes positive computationally.
         reward = np.where(log_return > 0, log_return * 15.0, log_return * 10.0)
         
-        # 2. CLOSE SETTLEMENT: Sniper bonus for taking profit
+        # 2. CLOSE SETTLEMENT: Relational bonus for taking profit
         closed_profit = just_closed_trade & (closed_trade_pnl > 0)
-        # Give +0.5 reward for locking in a win (equivalent to 5% equity jump on new scale)
-        execution_bonus = np.where(closed_profit, 0.5, 0.0)
+        # V34: Eradicated flat +0.5 bonus to avoid dopamine farming. Now it scales directly with the PNL generated.
+        # profit_pct is the raw percentage gain of the closed trade relative to the account
+        profit_pct = np.clip(closed_trade_pnl / safe_prev, 0.0, 1.0)
+        execution_bonus = np.where(closed_profit, profit_pct * 15.0, 0.0)
         
         # Subtract the fee we "lent" when the trade was opened
         execution_bonus = np.where(just_closed_trade, execution_bonus - self.pending_fee_recovery, execution_bonus)
@@ -469,9 +471,10 @@ class PhantomMatrixEnv(VecEnv):
 
         # --- MUTATION 3: ORGANIC SNIPER REWARD (Take money and run) ---
         # If the AI mathematically pushed the "CLOSE" button (actions == 3) purely on its own will,
-        # AND it had more than +10% ROE (+0.5% raw price diff), it gets an absolute Sniper Bonus!
+        # AND it had more than +10% ROE (+0.5% raw price diff), it gets a relational multiplier, NOT a flat scalar!
+        # Multiplier of 1.5x on the reward ensures it prioritizes massive gains over tiny micro-scalps.
         organic_sniper = close_mask & (price_diff_pct > 0.005)
-        reward = np.where(organic_sniper, reward + 1.0, reward)
+        reward = np.where(organic_sniper, reward * 1.5, reward)
         
         # --- MUTATION 2: EQUITY CURVE BLEED PENALTY ---
         # Teach AI to fear floating losses > -1% price (-20% ROE)
