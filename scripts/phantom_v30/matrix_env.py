@@ -26,7 +26,7 @@ INITIAL_BALANCE = 20.0    # ⚔️ KAMIKAZE MODE: $20 to $500 ⚔️
 LEVERAGE = 20.0           # ⚔️ 20x Leverage ⚔️
 MAINTENANCE_MARGIN_RATE = 0.004 # 0.4% MMR
 WINDOW_SIZE = 64
-N_FEATURES = 15  # log_ret, high_norm, low_norm, vol_norm, rsi_norm, ema9, ema21, ema200, cvd_z, cvd_roc, candle_progress, ema_1h, ema_4h, vol_z, cvd_div
+N_FEATURES = 18  # V35: +3 acceleration features (ema_1h_accel, ema_4h_accel, cvd_accel)
 
 
 class PhantomMatrixEnv(VecEnv):

@@ -136,12 +136,28 @@ def load_tensor_data(device: str = "cuda:0", days: int | None = None, split: str
     cvd_div[(price_roc3 > close*0.001) & (cvd_roc3 < -0.5)] = -1.0 # Bearish Div
     cvd_div = cvd_div.astype(np.float32)
 
-    # Stack features: (N, 15)
+    # === MUTATION 3: ASYMMETRIC MOMENTUM ACCELERATOR (2nd derivative) ===
+    # Acceleration of EMA slopes (tells Transformer if momentum is speeding up BEFORE breakout)
+    ema_1h_accel = np.zeros_like(ema_1h_slope)
+    ema_1h_accel[1:] = ema_1h_slope[1:] - ema_1h_slope[:-1]
+    ema_1h_accel = np.clip(ema_1h_accel * 2000, -30, 30).astype(np.float32)
+
+    ema_4h_accel = np.zeros_like(ema_4h_slope)
+    ema_4h_accel[1:] = ema_4h_slope[1:] - ema_4h_slope[:-1]
+    ema_4h_accel = np.clip(ema_4h_accel * 2000, -30, 30).astype(np.float32)
+
+    # CVD acceleration (divergence momentum)
+    cvd_accel = np.zeros_like(cvd_roc)
+    cvd_accel[1:] = cvd_roc[1:] - cvd_roc[:-1]
+    cvd_accel = np.clip(cvd_accel * 2, -4, 4).astype(np.float32)
+
+    # Stack features: (N, 18) — V35: +3 acceleration features
     features = np.stack([
         log_ret, high_norm, low_norm, vol_norm, rsi_norm, 
         ema_9_norm, ema_21_norm, ema_200_norm, 
         cvd_z, cvd_roc, candle_progress,
-        ema_1h_slope, ema_4h_slope, vol_z_arr, cvd_div
+        ema_1h_slope, ema_4h_slope, vol_z_arr, cvd_div,
+        ema_1h_accel, ema_4h_accel, cvd_accel
     ], axis=1)    
     # Skip first 24 rows (NaN from rolling window)
     features = features[24:]

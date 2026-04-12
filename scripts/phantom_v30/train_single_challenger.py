@@ -15,7 +15,7 @@ import time
 import shutil
 from pathlib import Path
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.buffers import BaseBuffer
 
 # MONKEY-PATCH for ROCm gfx1032: CPU-first tensor creation
@@ -45,6 +45,18 @@ def cosine_lr_schedule(progress_remaining: float) -> float:
     # Cosine decay from 5e-4 to 5e-5
     decay_progress = (progress - warmup_pct) / (1.0 - warmup_pct)
     return 5e-5 + 0.5 * (5e-4 - 5e-5) * (1 + np.cos(np.pi * decay_progress))
+
+
+# === MUTATION 2: Risk-Seeking Entropy + Adaptive Clip Schedule ===
+class RiskSeekingCallback(BaseCallback):
+    """Moderate exploration schedule: high entropy/clip early → conservative late."""
+    def _on_step(self):
+        progress = self.num_timesteps / self.model._total_timesteps
+        # Entropy: 0.15 → 0.04 (aggressive exploration early, stabilize late)
+        self.model.ent_coef = max(0.15 * (1 - progress ** 1.5), 0.04)
+        # Clip: 0.20 → 0.12 (allow bigger policy updates early)
+        self.model.clip_range = 0.20 - 0.08 * progress
+        return True
 
 
 def main():
@@ -135,7 +147,7 @@ def main():
                     "n_epochs": 6,        # V12: Reduced (avoids overfitting the larger buffer)
                     "gamma": 0.95,
                     "gae_lambda": 0.95,   # V12: Standard advantage estimation
-                    "ent_coef": 0.10,     # V12: Back to 0.10 (0.15 was collapsing entropy too fast)
+                    "ent_coef": 0.15,     # V35: Start high for exploration (RiskSeekingCallback decays to 0.04)
                     "verbose": 1,
                     "seed": args.seed,
                 }
@@ -157,9 +169,9 @@ def main():
             batch_size=1024,     # V12: 64 mini-batches (was 32 mini-batches)
             n_epochs=6,          # V12: Less epochs per update (was 10)
             gamma=0.95,
-            clip_range=0.15,
+            clip_range=0.20,     # V35: Start permissive (RiskSeekingCallback decays to 0.12)
             gae_lambda=0.95,     # V12: Explicit GAE lambda
-            ent_coef=0.10,       # V12: Moderate exploration (was 0.15, caused entropy collapse)
+            ent_coef=0.15,       # V35: Start high for exploration (RiskSeekingCallback decays to 0.04)
             seed=args.seed,
             device=device,
         )
@@ -176,7 +188,8 @@ def main():
     print(f"   ⚡ Training started...")
     sys.stdout.flush()
 
-    model.learn(total_timesteps=args.timesteps, callback=checkpoint_cb)
+    risk_cb = RiskSeekingCallback()
+    model.learn(total_timesteps=args.timesteps, callback=[checkpoint_cb, risk_cb])
 
     elapsed = time.time() - start
     fps = args.timesteps / elapsed

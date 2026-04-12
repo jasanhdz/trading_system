@@ -76,3 +76,26 @@ La IA ganaba `+0.15` por la ganancia financiera real y `+1.0` de bono artificial
 Ya que el nuevo `gamma=0.95` naturalmente introduce el sentido de urgencia por cobrar rápido (creando un Scalper nato ideal para mercado lateral), **erradicamos los bonos artificiales**.
 *   **Ajuste:** El Sniper Bonus (`+1.0`) y el Execution Bonus (`+0.5`) se reemplazaron por **Multiplicadores Exponenciales** (`reward = reward * 1.5` y `profit_pct * 15.0`).
 *   **Razón Matemática:** Ahora, si cierra con +1 Centavo, el bono 1.5x le paga migajas. Pero si cierra valientemente con +$5 dólares, el bono se vuelve gigantesco. Le enseñamos a maximizar el dinero (Compounding), no la cantidad mecánica de clics.
+
+---
+
+## 5. V35: Ojos de Segunda Derivada + Exploración Risk-Seeking
+
+### Consultoría con Experto Externo (Lead Quant PhD RL/HFT)
+Se consultó a un experto especializado en modelos cuantitativos estilo Jane Street/RenTech. De sus 3 propuestas de mutación, se aceptaron 2 después de audité contra el código real y se rechazó 1 por bugs matemáticos fatales.
+
+### Mutación 3 (ACEPTADA): Asymmetric Momentum Accelerator
+*   **Qué es:** Features de 2ª derivada (aceleración) de las slopes EMA 1H, 4H y CVD ROC, computadas en `tensor_loader.py`.
+*   **Por qué funciona:** El Transformer ahora VE directamente si el momentum se está acelerando ANTES de un breakout. Ya no necesita deducirlo implícitamente de los slopes crudos. `N_FEATURES` pasó de 15 a 18.
+*   **Código:** `ema_1h_accel = diff(ema_1h_slope) × 2000`, clips a [-30, 30].
+
+### Mutación 2 (ACEPTADA, moderada): Risk-Seeking Entropy Schedule
+*   **Qué es:** Un callback que decae la entropía de `0.15 → 0.04` y el clip_range de `0.20 → 0.12` durante el entrenamiento.
+*   **Por qué funciona:** Al inicio el agente explora agresivamente (entropía alta) para descubrir estrategias de outlier. Al final se estabiliza (entropía baja) para no perder lo aprendido. Los valores originales del experto (0.25 / 0.28) eran demasiado agresivos para nuestro espacio discreto de 4 acciones.
+
+### Mutación 1 del Experto (RECHAZADA): Exponential Compounding Hunter
+*   **Por qué se rechazó (2 bugs fatales):**
+    1.  `equity_growth = log(equity/INITIAL_BALANCE)` = 0 al inicio → el power-law da CERO cuando más se necesita la señal (gallina-y-huevo).
+    2.  `peak_relative` es casi siempre ≤ 0, lo cual penaliza trades ganadores durante recuperaciones.
+    3.  En la versión "Fixed", `compounding_bonus = 12.0` se inyectaba en TODOS los steps sin trades (bug de gating).
+*   **Alternativa V34 mantenida:** `profit_pct × 15.0` + `organic_sniper × 1.5` funciona desde el primer centavo.
