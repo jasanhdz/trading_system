@@ -32,6 +32,57 @@ from scripts.phantom_v30.matrix_env import PhantomMatrixEnv
 from scripts.phantom_v30.train_v30 import TransformerExtractor
 
 
+class ColiseoEarlyStop(BaseCallback):
+    """
+    Guillotina de tiempo inteligente.
+    Si la política deja de moverse (KL baja + Explicación alta), 
+    no quemamos GPU en vano.
+    """
+    def __init__(self, kl_threshold: float = 0.0007, 
+                 ev_threshold: float = 0.88, 
+                 patience: int = 10):
+        super().__init__()
+        self.kl_threshold = kl_threshold
+        self.ev_threshold = ev_threshold
+        self.patience = patience
+        self.stagnant_count = 0
+        self.last_check_step = 0
+        
+    def _on_step(self) -> bool:
+        # Solo chequear cada ~1 rollout (evita spamear logs)
+        check_interval = self.model.n_steps * self.model.n_envs
+        if self.num_timesteps - self.last_check_step < check_interval:
+            return True
+            
+        self.last_check_step = self.num_timesteps
+        
+        # SB3 deposita estos valores durante model.train()
+        if not hasattr(self.model, "logger") or self.model.logger is None:
+            return True
+        kl = self.model.logger.name_to_value.get('train/approx_kl', 999.0)
+        ev = self.model.logger.name_to_value.get('train/explained_variance', -1.0)
+        loss = self.model.logger.name_to_value.get('train/loss', 999.0)
+        
+        # Condición de estancamiento: política congelada Y value function explicada
+        frozen_policy = (kl < self.kl_threshold)
+        solved_value = (ev > self.ev_threshold)
+        # Bonus: si la loss total no ha bajado en las últimas N comprobaciones, también es señal
+        if frozen_policy and solved_value:
+            self.stagnant_count += 1
+            print(f"  🐢 Stagnation {self.stagnant_count}/{self.patience} | "
+                  f"KL:{kl:.6f} EV:{ev:.3f} Loss:{loss:.4f}")
+            if self.stagnant_count >= self.patience:
+                print(f"🛑 EARLY STOP en step {self.num_timesteps:,}. "
+                      f"Política convergida. Enviando al Coliseo AHORA.")
+                return False  # SB3 detiene model.learn() inmediatamente
+        else:
+            # Resetear contador si hay movimiento (evita acumulación por ruido)
+            if self.stagnant_count > 0 and not frozen_policy:
+                print(f"  🌱 Recovery | KL:{kl:.6f} EV:{ev:.3f}")
+            self.stagnant_count = 0
+            
+        return True
+
 def cosine_lr_schedule(progress_remaining: float) -> float:
     """Cosine annealing: 3e-4 → 3e-5 with 5% linear warmup.
     progress_remaining goes from 1.0 (start) to 0.0 (end)."""
@@ -46,17 +97,24 @@ def cosine_lr_schedule(progress_remaining: float) -> float:
     decay_progress = (progress - warmup_pct) / (1.0 - warmup_pct)
     return 5e-5 + 0.5 * (5e-4 - 5e-5) * (1 + np.cos(np.pi * decay_progress))
 
-
-# === MUTATION 2: Risk-Seeking Entropy + Adaptive Clip Schedule ===
+# === MUTATION 2: Smart Entropy Schedule ===
 class RiskSeekingCallback(BaseCallback):
-    """Moderate exploration schedule: high entropy/clip early → conservative late."""
+    """Smart exploration based on Champion quality."""
+    def __init__(self, champ_pnl: float):
+        super().__init__()
+        self.champ_pnl = champ_pnl
+        self.starting_ent = 0.08 if champ_pnl >= 25.0 else 0.15
+
     def _on_step(self):
         progress = self.num_timesteps / self.model._total_timesteps
-        # Entropy: 0.15 → 0.04 (aggressive exploration early, stabilize late)
-        self.model.ent_coef = max(0.15 * (1 - progress ** 1.5), 0.04)
-        # Clip: 0.20 → 0.12 (allow bigger policy updates early)
-        self.model.clip_range = 0.20 - 0.08 * progress
+        # Entropy decays from starting_ent to 0.01 to keep model from stalling
+        self.model.ent_coef = max(self.starting_ent * (1 - progress ** 1.5), 0.01)
         return True
+
+def adaptive_clip_schedule(progress_remaining: float) -> float:
+    """Clip: 0.20 → 0.12 (allow bigger policy updates early). progress_remaining goes 1.0 -> 0.0"""
+    progress = 1.0 - progress_remaining
+    return 0.20 - 0.08 * progress
 
 
 def main():
@@ -66,6 +124,8 @@ def main():
     parser.add_argument("--num-envs", type=int, default=128)
     parser.add_argument("--timesteps", type=int, default=2_000_000)
     parser.add_argument("--d-model", type=int, default=32)
+    parser.add_argument("--champ-pnl", type=float, default=0.0)
+    parser.add_argument("--mirror", type=int, default=0)
     args = parser.parse_args()
     
     # V31: Evidence-based architecture (32D is too small for 15 features, up to 48D)
@@ -94,7 +154,7 @@ def main():
     sys.stdout.flush()
 
     # Load data
-    data = load_tensor_data("cpu", days=None, split="train")
+    data = load_tensor_data("cpu", days=None, split="train", mirror=args.mirror)
     np.random.seed(args.seed)
     env = PhantomMatrixEnv(
         features=data['features'].numpy(),
@@ -136,18 +196,19 @@ def main():
     model = None
     if base_path:
         try:
+            starting_ent = 0.08 if args.champ_pnl >= 25.0 else 0.15
             model = PPO.load(
                 base_path,
                 env=env,
                 device=device,
                 custom_objects={
                     "learning_rate": cosine_lr_schedule,
-                    "n_steps": 128,       # V12: 512 envs × 128 = 65,536 buffer (4x more context)
-                    "batch_size": 1024,   # V12: Stable gradients (64 mini-batches from 65K buffer)
-                    "n_epochs": 6,        # V12: Reduced (avoids overfitting the larger buffer)
+                    "n_steps": 256,       # V40: 512 envs × 256 = 131,072 buffer (expert recommendation)
+                    "batch_size": 2048,   # V40: 64 mini-batches to match larger buffer
+                    "n_epochs": 6,        
                     "gamma": 0.95,
-                    "gae_lambda": 0.95,   # V12: Standard advantage estimation
-                    "ent_coef": 0.15,     # V35: Start high for exploration (RiskSeekingCallback decays to 0.04)
+                    "gae_lambda": 0.95,   
+                    "ent_coef": starting_ent, 
                     "verbose": 1,
                     "seed": args.seed,
                 }
@@ -159,25 +220,26 @@ def main():
 
     if model is None:
         print(f"   🆕 Creating new model from scratch with V31 architecture...")
+        starting_ent = 0.08 if args.champ_pnl >= 25.0 else 0.15
         model = PPO(
             "MultiInputPolicy",
             env,
             policy_kwargs=POLICY_KWARGS,
             verbose=1,
             learning_rate=cosine_lr_schedule,
-            n_steps=128,         # V12: 512 envs × 128 = 65,536 buffer (was 32 = 16K)
-            batch_size=1024,     # V12: 64 mini-batches (was 32 mini-batches)
-            n_epochs=6,          # V12: Less epochs per update (was 10)
+            n_steps=256,         # V40: 512 envs × 256 = 131,072 buffer
+            batch_size=2048,     # V40: 64 mini-batches
+            n_epochs=6,          
             gamma=0.95,
-            clip_range=0.20,     # V35: Start permissive (RiskSeekingCallback decays to 0.12)
-            gae_lambda=0.95,     # V12: Explicit GAE lambda
-            ent_coef=0.15,       # V35: Start high for exploration (RiskSeekingCallback decays to 0.04)
+            clip_range=adaptive_clip_schedule,     
+            gae_lambda=0.95,     
+            ent_coef=starting_ent,       
             seed=args.seed,
             device=device,
         )
 
     checkpoint_cb = CheckpointCallback(
-        save_freq=max(500_000 // (args.num_envs * 128), 1),
+        save_freq=max(500_000 // (args.num_envs * 256), 1),
         save_path=checkpoint_dir,
         name_prefix="ckpt",
         save_replay_buffer=False,
@@ -188,8 +250,14 @@ def main():
     print(f"   ⚡ Training started...")
     sys.stdout.flush()
 
-    risk_cb = RiskSeekingCallback()
-    model.learn(total_timesteps=args.timesteps, callback=[checkpoint_cb, risk_cb])
+    # V40: Ensure LR scheduler fully resets for cyclic SGDR behavior
+    model.num_timesteps = 0
+    model._current_progress_remaining = 1.0
+    model.lr_schedule = cosine_lr_schedule
+
+    risk_cb = RiskSeekingCallback(champ_pnl=args.champ_pnl)
+    early_cb = ColiseoEarlyStop(kl_threshold=0.0007, ev_threshold=0.88, patience=10)
+    model.learn(total_timesteps=args.timesteps, callback=[checkpoint_cb, risk_cb, early_cb], reset_num_timesteps=True)
 
     elapsed = time.time() - start
     fps = args.timesteps / elapsed

@@ -26,7 +26,7 @@ INITIAL_BALANCE = 20.0    # ⚔️ KAMIKAZE MODE: $20 to $500 ⚔️
 LEVERAGE = 20.0           # ⚔️ 20x Leverage ⚔️
 MAINTENANCE_MARGIN_RATE = 0.004 # 0.4% MMR
 WINDOW_SIZE = 64
-N_FEATURES = 18  # V35: +3 acceleration features (ema_1h_accel, ema_4h_accel, cvd_accel)
+N_FEATURES = 21  # V44: +3 régimen features (adx_norm, trend_efficiency, vol_regime)
 
 
 class PhantomMatrixEnv(VecEnv):
@@ -40,7 +40,7 @@ class PhantomMatrixEnv(VecEnv):
                  num_envs: int = 2048):
         """
         Args:
-            features: (N_candles, 4) array [log_ret, high_norm, low_norm, vol_norm]
+            features: (N_candles, 21) array of market features + regime features
             close_prices: (N_candles,) array of close prices
             num_envs: number of parallel agents
         """
@@ -74,6 +74,13 @@ class PhantomMatrixEnv(VecEnv):
         self.entry_prices = np.zeros(num_envs, dtype=np.float32)
         self.hold_steps = np.zeros(num_envs, dtype=np.int32)
         self.flat_steps = np.zeros(num_envs, dtype=np.int32)
+        self.dd_duration = np.zeros(num_envs, dtype=np.int32)
+        # V44: Entry Quality Score (EQS)
+        self.entry_step = np.zeros(num_envs, dtype=np.int32)
+        self.best_price = np.zeros(num_envs, dtype=np.float32)
+        self.entry_quality = np.zeros(num_envs, dtype=np.float32)
+        # V38: Equity Milestone Curriculum tracking (5 milestones per env)
+        self.milestone_hits = np.zeros((num_envs, 5), dtype=bool)
         self.last_actions = np.full(num_envs, -1, dtype=np.int32)
         self.action_streaks = np.zeros(num_envs, dtype=np.int32)
         self.n_flips = np.zeros(num_envs, dtype=np.int32)
@@ -82,6 +89,7 @@ class PhantomMatrixEnv(VecEnv):
         self.episode_lengths = np.zeros(num_envs, dtype=np.int32)
         self.pending_fee_recovery = np.zeros(num_envs, dtype=np.float32)
         self.peak_equity = np.full(num_envs, INITIAL_BALANCE, dtype=np.float32)
+        self.max_episode_dd = np.zeros(num_envs, dtype=np.float32)
         
         # Initial reset
         # Pre-compute recency sampling weights (exponential decay, halflife=90 days)
@@ -104,6 +112,11 @@ class PhantomMatrixEnv(VecEnv):
         self.entry_prices[:] = 0.0
         self.hold_steps[:] = 0
         self.flat_steps[:] = 0
+        self.dd_duration[:] = 0
+        self.entry_step[:] = 0
+        self.best_price[:] = 0.0
+        self.entry_quality[:] = 0.0
+        self.max_episode_dd[:] = 0.0
         self.last_actions[:] = -1
         self.action_streaks[:] = 0
         self.n_flips[:] = 0
@@ -111,8 +124,8 @@ class PhantomMatrixEnv(VecEnv):
         self.episode_lengths[:] = 0
         self.pending_fee_recovery[:] = 0.0
         
-        # 70% recency-biased, 30% uniform (preserves historical diversity)
-        n_biased = int(self.num_envs * 0.7)
+        # 50% recency-biased, 50% uniform (preserves historical diversity)
+        n_biased = int(self.num_envs * 0.5)
         n_uniform = self.num_envs - n_biased
         
         biased_starts = np.random.choice(
@@ -137,6 +150,12 @@ class PhantomMatrixEnv(VecEnv):
         self.entry_prices[mask] = 0.0
         self.hold_steps[mask] = 0
         self.flat_steps[mask] = 0
+        self.dd_duration[mask] = 0
+        self.entry_step[mask] = 0
+        self.best_price[mask] = 0.0
+        self.entry_quality[mask] = 0.0
+        self.max_episode_dd[mask] = 0.0
+        self.milestone_hits[mask] = False  # V38: reset milestones on env reset
         self.last_actions[mask] = -1
         self.action_streaks[mask] = 0
         self.n_flips[mask] = 0
@@ -144,8 +163,8 @@ class PhantomMatrixEnv(VecEnv):
         self.episode_lengths[mask] = 0
         self.pending_fee_recovery[mask] = 0.0
         
-        # Same 70/30 recency bias for mid-training resets
-        n_biased = int(n_reset * 0.7)
+        # Same 50/50 recency bias for mid-training resets
+        n_biased = int(n_reset * 0.5)
         n_uniform = n_reset - n_biased
         
         biased_starts = np.random.choice(
@@ -263,7 +282,11 @@ class PhantomMatrixEnv(VecEnv):
         price_diff_pct = np.where(
             self.positions > 0,
             (current_prices - safe_entry_bracket) / safe_entry_bracket,       # LONG % diff
-            (safe_entry_bracket - current_prices) / safe_entry_bracket        # SHORT % diff
+            np.where(
+                self.positions < 0,
+                (safe_entry_bracket - current_prices) / safe_entry_bracket,   # SHORT % diff
+                0.0  # Flat = 0.0
+            )
         )
         
         # --- TRAILING STOP LOGIC ---
@@ -391,7 +414,17 @@ class PhantomMatrixEnv(VecEnv):
             self.entry_prices = np.where(can_flip, current_prices, np.where(flip_short, 0.0, self.entry_prices))
             trade_fees = np.where(flip_short, fee_close + np.where(can_flip, fee_open, 0), trade_fees)
             open_trade_fee = np.where(can_flip, fee_open, open_trade_fee)
-        
+        flipped_mask = flip_long | flip_short
+        if np.any(flipped_mask):
+            self.peak_diff_pct = np.where(flipped_mask, 0.0, self.peak_diff_pct)
+            self.dd_duration = np.where(flipped_mask, 0, self.dd_duration)
+            
+        # --- EQS TRACKING (Entry Quality Score) ---
+        new_entry = ((prev_positions == 0) & (self.positions != 0)) | flipped_mask
+        self.entry_step = np.where(new_entry, self.current_steps, self.entry_step)
+        self.best_price = np.where(new_entry, current_prices, 
+                                   np.where(self.positions != 0, np.maximum(self.best_price, current_prices), 0.0))
+            
         # ═══════════════ STEP FORWARD & LIQUIDATIONS ═══════════════
         self.current_steps += 1
         self.episode_lengths += 1
@@ -425,85 +458,138 @@ class PhantomMatrixEnv(VecEnv):
         
         log_return = np.log(safe_new / safe_prev)
         
-        # 1. BASE: Variance Compression & Asymmetric Greed
-        # Multiply by 10.0 instead of 100.0 to prevent PPO gradient explosion at 20x.
-        # Asymmetry: Winners get 15x, losers get 10x. EV of trading becomes positive computationally.
-        reward = np.where(log_return > 0, log_return * 15.0, log_return * 10.0)
+        # ═══════════════ REWARD vFinal (Simplified & Clean) ═══════════════
+        # Stripped from 9 conflicting signals to 5 clean ones.
+        # Removed: Winner Hold Bonus, Patience Bonus, Adaptive Flip, Entry Bonus.
         
-        # 2. CLOSE SETTLEMENT: Relational bonus for taking profit
+        # 1. Base asymmetric log return (V41: Hyper-Ambition 2.0x bias)
+        reward = np.where(log_return > 0, log_return * 15.0, log_return * 12.0)
+        
+        # 1.1 Winner Hold Bonus (V42: Encourage catching full trends)
+        # Only rewards holding if position is in at least 0.5% profit (ROE > 10% @ 20x)
+        same_direction = ((prev_positions > 0) & (self.positions > 0)) | ((prev_positions < 0) & (self.positions < 0))
+        hold_bonus = np.where(same_direction & (price_diff_pct > 0.005), 0.02 + 0.1 * (price_diff_pct - 0.005), 0.0)
+        reward += hold_bonus
+        
+        # 2. Power-Law (Softened Hammer) - the only strong compounding signal
         closed_profit = just_closed_trade & (closed_trade_pnl > 0)
-        # V34: Eradicated flat +0.5 bonus to avoid dopamine farming. Now it scales directly with the PNL generated.
-        # profit_pct is the raw percentage gain of the closed trade relative to the account
         profit_pct = np.clip(closed_trade_pnl / safe_prev, 0.0, 1.0)
-        execution_bonus = np.where(closed_profit, profit_pct * 15.0, 0.0)
-        
-        # Subtract the fee we "lent" when the trade was opened
-        execution_bonus = np.where(just_closed_trade, execution_bonus - self.pending_fee_recovery, execution_bonus)
-        
-        # Clear the debt for closed/liquidated positions
-        self.pending_fee_recovery = np.where(just_closed_trade | liquidated, 0.0, self.pending_fee_recovery)
-        
+        power_law = np.power(1.0 + profit_pct, 3.2) * 14.0
+        compounding_bonus = power_law * (0.8 + 4.0 * profit_pct)
+        execution_bonus = np.where(closed_profit, compounding_bonus, 0.0)
+        # Clean: Removed pending_fee_recovery subtracted logic
         reward += execution_bonus
         
-        # 3. FIXED OPEN SHAPING: Refund fee in % to prevent entry fear (fixed previous bug)
+        # === MUTACIÓN V38: EQUITY MILESTONE CURRICULUM (8M-friendly) ===
+        # Intermediate rewards at equity milestones to guide new challengers toward compounding
+        milestones = np.array([1.3, 1.6, 2.0, 2.5, 3.0])           # 30%, 60%, 100%, 150%, 200% return
+        milestone_rewards = np.array([0.8, 1.2, 1.8, 2.5, 3.5])    # growing reward
+        equity_ratio = new_equity / INITIAL_BALANCE                  # (num_envs,)
+        
+        milestone_bonus = np.zeros(self.num_envs, dtype=np.float32)
+        steps_to_milestone = np.maximum(self.episode_lengths, 1)  # Avoid div by zero
+        velocity_factor = np.clip(100.0 / steps_to_milestone, 0.5, 2.0)
+        
+        for i in range(5):
+            hit = equity_ratio >= milestones[i]
+            new_hit = hit & ~self.milestone_hits[:, i]
+            velocity_adjusted_reward = milestone_rewards[i] * velocity_factor
+            milestone_bonus += np.where(new_hit, velocity_adjusted_reward, 0.0)
+            self.milestone_hits[:, i] = self.milestone_hits[:, i] | new_hit
+        
+        reward += milestone_bonus
+        
+        # 3. Organic Sniper (take money and run)
         just_opened = open_trade_fee > 0
-        fee_pct = open_trade_fee / safe_prev
-        refund_reward = fee_pct * 10.0  # Perfectly matches the log_return * 10 scale
-        
-        reward += np.where(just_opened, refund_reward, 0.0)
-        self.pending_fee_recovery = np.where(just_opened, refund_reward, self.pending_fee_recovery)
-        
-        # --- MUTATION 1: MTF ACTION MASKING PENALTY ---
-        # Feature 12 is ema_4h_slope
-        current_features = self.features[new_idx] 
-        ema_4h_slope = current_features[:, 12]
-        # Severe penalty if going LONG when 4H is crashing heavily (<-1.0)
-        suicide_long = just_opened & (actions == 1) & (ema_4h_slope < -1.0)
-        suicide_short = just_opened & (actions == 2) & (ema_4h_slope > 1.0)
-        reward = np.where(suicide_long | suicide_short, reward - 0.3, reward)
-        
-        # --- MUTATION 2: RSI EXHAUSTION MASKING (DYNAMIC PROBABILITY BURN) ---
-        # Feature 4 is rsi_norm. > 0.6 is RSI > 80 (Overbought climax). <-0.6 is RSI < 20 (Oversold bounce area)
-        rsi_norm = current_features[:, 4]
-        exhausted_long = just_opened & (actions == 1) & (rsi_norm > 0.6)
-        exhausted_short = just_opened & (actions == 2) & (rsi_norm < -0.6)
-        reward = np.where(exhausted_long | exhausted_short, reward - 0.3, reward)
-
-        # --- MUTATION 3: ORGANIC SNIPER REWARD (Take money and run) ---
-        # If the AI mathematically pushed the "CLOSE" button (actions == 3) purely on its own will,
-        # AND it had more than +10% ROE (+0.5% raw price diff), it gets a relational multiplier, NOT a flat scalar!
-        # Multiplier of 1.5x on the reward ensures it prioritizes massive gains over tiny micro-scalps.
         organic_sniper = close_mask & (price_diff_pct > 0.005)
         reward = np.where(organic_sniper, reward * 1.5, reward)
         
-        # --- MUTATION 2: EQUITY CURVE BLEED PENALTY ---
-        # Teach AI to fear floating losses > -1% price (-20% ROE)
-        bleeding_penalty = np.where((self.positions != 0) & (price_diff_pct < -0.01), -0.05, 0.0)
+        # 4.1 Momentum Bonus
+        market_momentum = self.features[new_idx][:, 0]  # log_ret de la vela actual
+        trade_aligned = ((self.positions > 0) & (market_momentum > 0)) | ((self.positions < 0) & (market_momentum < 0))
+        momentum_bonus = np.where(trade_aligned & (price_diff_pct > 0), 0.03, 0.0)
+        reward += momentum_bonus
+        
+        # --- EQS V2: Balanced Entry Quality Score ---
+        entry_age = self.current_steps - self.entry_step
+        safe_entry = np.maximum(self.entry_prices, 1e-10)
+        
+        favor_pct = np.where(
+            self.positions > 0,
+            (current_prices - safe_entry) / safe_entry,
+            np.where(
+                self.positions < 0,
+                (safe_entry - current_prices) / safe_entry,
+                0.0
+            )
+        )
+        
+        # Bonus: A los 5 steps, +0.5% a favor es suficiente (10% ROE @ 20x)
+        # Alcanzable en ~25-30% de entradas buenas
+        is_mature = (entry_age == 5) & (self.positions != 0)
+        eqs_bonus = np.where(
+            is_mature & (favor_pct >= 0.005),
+            0.5 * np.exp(favor_pct * 20.0),
+            0.0
+        )
+        
+        # Penalty: Empezar a los 15 steps, no 10. Dar tiempo al mercado para respirar.
+        # Coeficiente reducido de 0.05 a 0.03, exponente de 1.5 a 1.2
+        is_suffering = (entry_age >= 15) & (self.positions != 0) & (favor_pct < 0)
+        eqs_penalty = np.where(
+            is_suffering,
+            -0.03 * np.power(np.abs(favor_pct) * 10.0, 1.2),
+            0.0
+        )
+        
+        reward += eqs_bonus + eqs_penalty
+        
+        # 5. MTF/RSI masking + bleeding
+        current_features = self.features[new_idx]
+        ema_4h_slope = current_features[:, 12]
+        rsi_norm = current_features[:, 4]
+        
+        suicide_long = just_opened & (actions == 1) & (ema_4h_slope < -1.5)
+        suicide_short = just_opened & (actions == 2) & (ema_4h_slope > 1.5)
+        reward = np.where(suicide_long | suicide_short, reward - 0.3, reward)
+        
+        exhausted_long = just_opened & (actions == 1) & (rsi_norm > 0.6)
+        exhausted_short = just_opened & (actions == 2) & (rsi_norm < -0.6)
+        reward = np.where(exhausted_long | exhausted_short, reward - 0.3, reward)
+        
+        # --- NUEVO: Drawdown Duration Penalty ---
+        in_drawdown = (prev_positions != 0) & (self.positions != 0) & (price_diff_pct < 0)
+        self.dd_duration = np.where(in_drawdown, self.dd_duration + 1, 0)
+        dd_duration_penalty = np.where(
+            in_drawdown,
+            -0.01 * np.power(self.dd_duration / 10.0, 1.5),
+            0.0
+        )
+        reward += dd_duration_penalty
+        
+        # --- MEJORADO: Bleeding Penalty ---
+        bleeding_penalty = np.where(
+            (prev_positions != 0) & (self.positions != 0) & (price_diff_pct < -0.005), 
+            -0.08 * np.abs(price_diff_pct) * 10.0,
+            0.0
+        )
         reward += bleeding_penalty
         
-        # 4. IDLE PENALTY: Kept same absolute size to force action strongly in relative terms
+        # 6. Anti-Overtrading (simplified, fixed values — no adaptive scaling)
+        flipped = flip_long | flip_short
+        reward = np.where(flipped, reward - 0.75, reward)
+        
         idle_penalty = np.where(
-            self.flat_steps > 200, -0.1,
-            np.where(self.flat_steps > 50, -0.05, 0.0)
+            self.flat_steps > 150, -0.35,
+            np.where(self.flat_steps > 60, -0.12, 0.0)
         )
         reward += idle_penalty
         
-        # 5. ENTRY ATTEMPT BONUS
-        entry_bonus = np.where(just_opened, 0.15, 0.0)
-        reward += entry_bonus
-        
-        # 6. FLIP PENALTY: Discourage overtrading
-        flipped = flip_long | flip_short
-        reward = np.where(flipped, reward - 0.2, reward)
-        
-        # 7. DEATH PENALTY: Removed -50 Cliff (Variance reduction)
-        # We cap the natural loss strictly at -10.0 so gradients don't explode
+        # 7. Death Penalty
         ruined = liquidated | (new_equity < INITIAL_BALANCE * 0.1)
         current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
         over_dd = current_dd > 0.80
-        
         ruined = ruined | over_dd
-        # Rather than punishing them infinitely, we give a strict painful ceiling (-10.0)
         reward = np.where(ruined, -10.0, reward)
         
         # Update tracking (kept for observation/debugging, no reward impact)
@@ -517,6 +603,46 @@ class PhantomMatrixEnv(VecEnv):
         
         # ═══════════════ DONE / RESET ═══════════════
         done = ruined | mission_accomplished | (self.current_steps >= self.n_candles - 2)
+        
+        # --- PHASE B: Continuous Risk Penalty (Real-time DD Pain) ---
+        # El dolor se siente a cada paso, no solo al morir. Alineado con (1-DD)^1.5 del Coliseo.
+        current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
+        risk_penalty = -0.06 * np.power(current_dd, 1.5) 
+        reward += risk_penalty
+        
+        # --- PHASE B: Trend Capture Bonus (Regime Awareness) ---
+        # Premiamos capturar movimientos cuando ADX es fuerte y la tendencia es limpia.
+        # Indices: 18=adx_norm, 19=trend_efficiency
+        adx_norm = current_features[:, 18]
+        trend_eff = current_features[:, 19]
+        
+        # Un ADX_norm > -0.2 equivale a un ADX > 20 aprox.
+        strong_trend = (adx_norm > -0.2)
+        # Eficiencia direccional (simplificada para premiar alineación)
+        trade_aligned = ((self.positions > 0) & (trend_eff > 0.5)) | \
+                        ((self.positions < 0) & (trend_eff < 0.4))
+        
+        # Bonus proporcional a la fuerza de la tendencia y el movimiento del precio
+        trend_bonus = np.where(
+            strong_trend & trade_aligned & (np.abs(price_diff_pct) > 0.002),
+            0.15 * (np.abs(adx_norm) + 0.5), # Escala con la fuerza del ADX
+            0.0
+        )
+        reward += trend_bonus
+
+        # --- Utility-Aware Reward Shaping (Terminal alignment) ---
+        self.max_episode_dd = np.maximum(self.max_episode_dd, current_dd)
+        
+        # Usar el Máximo DD sufrido para el juicio final
+        episode_pnl_pct = (new_equity - INITIAL_BALANCE) / INITIAL_BALANCE
+        episode_utility = episode_pnl_pct * np.power(np.maximum(1.0 - self.max_episode_dd, 0.001), 1.5)
+        
+        # Bonus/Penalty escalado para impacto terminal
+        utility_shaping = np.where(done, episode_utility * 5.0, 0.0)
+        reward += utility_shaping
+        
+        # Hard limits. Nada puede escapar.
+        reward = np.clip(reward, -20.0, 20.0)
         
         infos = []
         for i in range(self.num_envs):

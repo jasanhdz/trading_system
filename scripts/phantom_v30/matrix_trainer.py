@@ -15,6 +15,7 @@ import sys
 import time
 import shutil
 import subprocess
+import gc
 from pathlib import Path
 from stable_baselines3 import PPO
 from stable_baselines3.common.buffers import BaseBuffer
@@ -38,10 +39,10 @@ CHALLENGER_B_PATH = "models/phantom_v30_challenger_b.zip"
 SAFE_CHECKPOINT_PATH = "models/phantom_v31_safe_checkpoint.zip"  # Best survivor vault
 
 # Training Config
-NUM_ENVS = 512  # 512 envs × 128 steps = 65,536 buffer (4x more context)
-TOTAL_TIMESTEPS = 8_000_000  # V35: Fast validation mode (was 16M, scale back up after confirming mutations work)
+NUM_ENVS = 896
+TOTAL_TIMESTEPS = 4_000_000  # V39: Bajado a 4M para evaluar y GUARDAR PROGRESO 4 veces más rápido contra reinicios inesperados
 MIN_VIABLE_SCORE = 25.0  # V10: $25 minimum ($5 ROI from $20)
-MAX_DD_THRESHOLD = 0.96  # V13.1: Kamikaze filter — 96% DD allowed (let them surf the wicks)
+MAX_DD_THRESHOLD = 0.90  # V13.1: Kamikaze filter — 90% DD allowed (let them surf the wicks)
 
 
 def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
@@ -122,7 +123,7 @@ def evaluate_model(model_path: str, eval_env, n_episodes: int = 1, seed: int = 4
     return p25_balance, p95_dd, total_action_counts
 
 
-def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32) -> subprocess.Popen:
+def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32, champ_pnl: float = 0.0, mirror: int = 0) -> subprocess.Popen:
     """Launch a challenger training in a completely isolated subprocess."""
     script = Path(__file__).parent / "train_single_challenger.py"
     env = os.environ.copy()
@@ -137,6 +138,8 @@ def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32)
         "--num-envs", str(NUM_ENVS),
         "--timesteps", str(TOTAL_TIMESTEPS),
         "--d-model", str(d_model),
+        "--champ-pnl", str(champ_pnl),
+        "--mirror", str(mirror),
     ]
 
     print(f"  🚀 Launching Challenger on GPU {gpu_id} (PID isolation)...")
@@ -160,10 +163,12 @@ def continuous_train():
     print(f"   Timesteps per iteration: {TOTAL_TIMESTEPS:,}")
 
     iteration = 0
+    current_champ_score = 0.0  # Tracks champion score for smart entropy
     while True:
         iteration += 1
+        mirror_mode = int(iteration % 2 == 0)  # Par=1(Espejo), Impar=0(Real)
         print(f"\n{'='*60}")
-        print(f"🔄 Training Iteration {iteration}")
+        print(f"🔄 Training Iteration {iteration} | Mirror: {'ON' if mirror_mode else 'OFF'}")
         print(f"{'='*60}")
         
         # === DYNAMIC DATA COLLECTION ===
@@ -179,11 +184,11 @@ def continuous_train():
 
         # === DUAL-GPU TRAINING (subprocess isolation) ===
         if n_gpus >= 2:
-            print(f"\n⚔️ Dual-GPU V10 Mode: 32D × 2 (different seeds)...")
+            print(f"\n⚔️ Dual-GPU V11 Mode: 48D × 2 (different seeds)...")
 
             start = time.time()
-            proc_a = launch_challenger(0, CHALLENGER_A_PATH, seed_a, d_model=32)
-            proc_b = launch_challenger(1, CHALLENGER_B_PATH, seed_b, d_model=32)
+            proc_a = launch_challenger(0, CHALLENGER_A_PATH, seed_a, d_model=48, champ_pnl=current_champ_score, mirror=mirror_mode)
+            proc_b = launch_challenger(1, CHALLENGER_B_PATH, seed_b, d_model=48, champ_pnl=current_champ_score, mirror=mirror_mode)
 
             # Wait for both with HEARTBEAT (touch log every 10s so Watchdog knows we're alive)
             while proc_a.poll() is None or proc_b.poll() is None:
@@ -210,13 +215,18 @@ def continuous_train():
             else:
                 print(f"  ⚠️ Challenger B failed (exit code {rc_b})")
 
+            # Force cleanup of subprocess references and GPU residue
+            del proc_a
+            del proc_b
+            gc.collect()
+
             if not challengers:
                 print("  ❌ Both challengers failed! Retrying in 30s...")
                 time.sleep(30)
                 continue
         else:
             print(f"\n🏋️ Single-GPU Mode: Training 1 challenger...")
-            proc = launch_challenger(0, CHALLENGER_A_PATH, seed_a)
+            proc = launch_challenger(0, CHALLENGER_A_PATH, seed_a, champ_pnl=current_champ_score, mirror=mirror_mode)
             rc = proc.wait()
             if rc != 0:
                 print(f"  ❌ Challenger failed (exit code {rc}). Retrying in 30s...")
@@ -242,6 +252,10 @@ def continuous_train():
             # Evaluate Champion (multi-seed robust)
             print(f"\n  📊 Evaluating Champion (5 seeds)...")
             champ_score, champ_dd, _ = evaluate_model(CHAMPION_PATH, eval_env)
+            
+            # Update the tracked champion score for the next iteration's Smart Entropy
+            if champ_score != -np.inf:
+                current_champ_score = champ_score
 
             # Evaluate all challengers
             best_chall_score = -np.inf
@@ -265,32 +279,56 @@ def continuous_train():
             print(f"⚔️  Best Challenger: ${best_chall_score:.2f} (P95 DD: {best_chall_dd*100:.1f}%) [{best_chall_name}]")
             print(f"📏 Survival Filter: Max DD allowed = {MAX_DD_THRESHOLD*100:.0f}%")
 
-            # === SURVIVAL FILTER: Block kamikazes ===
+            champ_survives = champ_dd <= MAX_DD_THRESHOLD
             challenger_survives = best_chall_dd <= MAX_DD_THRESHOLD
-            if not challenger_survives and best_chall_score > champ_score:
-                print(f"💀 BLOCKED! {best_chall_name} earned ${best_chall_score:.2f} but P95 DD {best_chall_dd*100:.1f}% exceeds {MAX_DD_THRESHOLD*100:.0f}% limit.")
-                print(f"🛡️ Champion survives by survival filter.")
-            elif champ_score == -np.inf and best_chall_score > -np.inf and best_chall_path:
-                if best_chall_score >= 15.0:  # Any surviving V31 seed becomes the new baseline
-                    print(f"🆕 Retiring V30 Champion. Auto-promoting {best_chall_name} to start V31 lineage.")
-                    shutil.copy2(best_chall_path, CHAMPION_PATH)
-                    print(f"✅ Nuevo Campeón V31 semilla coronado para acumular aprendizaje.")
-                else:
-                    reason = f"DD {best_chall_dd*100:.1f}% > {MAX_DD_THRESHOLD*100:.0f}%" if not challenger_survives else f"PnL ${best_chall_score:.2f} < ${MIN_VIABLE_SCORE:.0f}"
-                    print(f"⚠️ No Champion & Challenger rejected ({reason}). Skipping.")
-            elif best_chall_score > champ_score and best_chall_score >= MIN_VIABLE_SCORE and challenger_survives and best_chall_path:
-                print(f"🚀 PROMOTION! {best_chall_name} defeats Champion!")
-                print(f"   PnL: ${best_chall_score:.2f} > ${champ_score:.2f} ✅")
-                print(f"   DD:  {best_chall_dd*100:.1f}% ≤ {MAX_DD_THRESHOLD*100:.0f}% ✅")
+            
+            # === RISK-ADJUSTED SCORING (Sortino-Proxy) ===
+            # Utility = PnL * (1 - DD)^1.5. Premia la eficiencia sobre el volumen bruto.
+            def get_utility(pnl, dd):
+                return pnl * np.power(np.maximum(1.0 - dd, 0.001), 1.5)
+            
+            champ_utility = get_utility(champ_score, champ_dd)
+            chall_utility = get_utility(best_chall_score, best_chall_dd)
+            
+            print(f"📊 Risk-Adjusted Utility: Champ={champ_utility:.2f} | Best Challenger={chall_utility:.2f}")
+
+            # === REGLA 0: DETHRONE INCONDICIONAL ===
+            if not champ_survives and challenger_survives and best_chall_path:
+                print(f"💀 CHAMPION DETHRONED! Legacy kamikaze DD {champ_dd*100:.1f}% > {MAX_DD_THRESHOLD*100:.0f}% limit.")
+                print(f"👑 CROWNING {best_chall_name} as new CLEAN baseline!")
+                backup_path = f"{CHAMPION_PATH}.kamikaze_banned_{int(time.time())}"
+                if os.path.exists(CHAMPION_PATH):
+                    os.rename(CHAMPION_PATH, backup_path)
+                shutil.copy2(best_chall_path, CHAMPION_PATH)
+                print(f"✅ New clean Champion crowned! Kamikaze lineage terminated.")
+            
+            # === REGLA 1: PROMOTION POR UTILIDAD (EFICIENCIA) ===
+            elif challenger_survives and chall_utility > champ_utility and best_chall_path:
+                print(f"🚀 PROMOTION! {best_chall_name} defeats Champion on RISK-ADJUSTED basis!")
+                print(f"   Utility: {chall_utility:.2f} > {champ_utility:.2f} ✅")
+                print(f"   PnL:     ${best_chall_score:.2f} vs ${champ_score:.2f}")
+                print(f"   DD:      {best_chall_dd*100:.1f}% vs {champ_dd*100:.1f}%")
+                
                 backup_path = f"{CHAMPION_PATH}.backup_{int(time.time())}"
                 if os.path.exists(CHAMPION_PATH):
                     os.rename(CHAMPION_PATH, backup_path)
                 shutil.copy2(best_chall_path, CHAMPION_PATH)
-                print(f"✅ New Champion crowned! (Old backed up)")
-            elif best_chall_score > champ_score and best_chall_score < MIN_VIABLE_SCORE:
-                print(f"🛡️ Challenger better (${best_chall_score:.2f}) but below ${MIN_VIABLE_SCORE:.0f} threshold. No promotion.")
+                print(f"✅ New Efficiency Champion crowned! (Old backed up)")
+                
+            # === REGLA 2: Bloqueo de Kamikazes retadores ===
+            elif not challenger_survives and best_chall_score > champ_score:
+                print(f"💀 BLOCKED! {best_chall_name} earned ${best_chall_score:.2f} but P95 DD {best_chall_dd*100:.1f}% exceeds {MAX_DD_THRESHOLD*100:.0f}% limit.")
+                print(f"🛡️ Champion survives by survival filter.")
+            
+            # === REGLA 3: Baseline inicial si no hay campeón ===
+            elif champ_score == -np.inf and best_chall_score > -np.inf and best_chall_path:
+                if challenger_survives and best_chall_score >= 10.0:
+                    print(f"🆕 No champion. Auto-promoting {best_chall_name} as founding baseline.")
+                    shutil.copy2(best_chall_path, CHAMPION_PATH)
+                else:
+                    print(f"⚠️ No valid baseline found.")
             else:
-                print(f"🛡️ DEFENSE! Champion retains title.")
+                print(f"🛡️ DEFENSE! Champion retains title by efficiency.")
 
             # --- ONGOING LEARNING: 3-Tier Survivor Vault ---
             if best_chall_path and os.path.exists(best_chall_path):
@@ -312,6 +350,21 @@ def continuous_train():
             for _, path in challengers:
                 if os.path.exists(path):
                     os.remove(path)
+
+            # === CLEANUP: The Great RAM Clearance ===
+            # This prevents the system from crashing after many iterations by 
+            # explicitly deleting heavy tensors and triggering Python's GC.
+            print("\n🧹 Cleaning up Coliseum memory...")
+            try:
+                del eval_data
+                del features_np
+                del close_np
+                del eval_env
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except NameError:
+                pass # Already deleted or not created
 
         except Exception as e:
             print(f"\n❌ COLISEUM ERROR: {e}")

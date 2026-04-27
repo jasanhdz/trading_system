@@ -156,6 +156,42 @@ def get_signal(df: pd.DataFrame):
     df['ema_1h_slope'] = ((ema_12.diff() / (ema_12.shift(1) + 1e-8)).clip(-10/1000, 10/1000) * 1000).fillna(0).astype(np.float32)
     df['ema_4h_slope'] = ((ema_48.diff() / (ema_48.shift(1) + 1e-8)).clip(-10/1000, 10/1000) * 1000).fillna(0).astype(np.float32)
     
+    df['ema_1h_accel'] = (df['ema_1h_slope'].diff() * 2000).fillna(0).clip(-30, 30).astype(np.float32)
+    df['ema_4h_accel'] = (df['ema_4h_slope'].diff() * 2000).fillna(0).clip(-30, 30).astype(np.float32)
+    df['cvd_accel'] = (df['cvd_roc'].diff() * 2).fillna(0).clip(-4, 4).astype(np.float32)
+    
+    # 11. ADX(14) Normalized
+    def _calc_adx_live(h, l, c, period=14):
+        h_s, l_s, c_s = pd.Series(h), pd.Series(l), pd.Series(c)
+        plus_dm = h_s.diff().clip(lower=0)
+        minus_dm = (-l_s.diff()).clip(lower=0)
+        tr1 = h_s - l_s
+        tr2 = (h_s - c_s.shift(1)).abs()
+        tr3 = (l_s - c_s.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.ewm(alpha=1/period, min_periods=period).mean()
+        plus_di = 100 * plus_dm.ewm(alpha=1/period, min_periods=period).mean() / (atr + 1e-10)
+        minus_di = 100 * minus_dm.ewm(alpha=1/period, min_periods=period).mean() / (atr + 1e-10)
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
+        adx = dx.ewm(alpha=1/period, min_periods=period).mean()
+        return adx.fillna(0).values
+    
+    adx_raw = _calc_adx_live(df['high'].values, df['low'].values, df['close'].values)
+    df['adx_norm'] = np.clip((adx_raw / 50.0) - 1.0, -1.0, 1.0).astype(np.float32)
+    
+    # 12. Trend Efficiency
+    df['trend_efficiency'] = np.clip(
+        np.abs(df['close'] - df['open']) / np.maximum(df['high'] - df['low'], 1e-10),
+        0, 1
+    ).astype(np.float32)
+    
+    # 13. Volatility Regime (ATR14 / close)
+    tr1_vr = df['high'] - df['low']
+    tr2_vr = (df['high'] - df['close'].shift(1)).abs()
+    tr3_vr = (df['low'] - df['close'].shift(1)).abs()
+    tr_vr = pd.concat([tr1_vr, tr2_vr, tr3_vr], axis=1).max(axis=1)
+    atr14_vr = tr_vr.ewm(alpha=1/14, min_periods=14).mean().fillna(tr_vr)
+    df['vol_regime'] = np.clip((atr14_vr / df['close'] - 0.01) / 0.02, -1, 1).astype(np.float32)
     # 9. Volume Z-Score (Climax Detection)
     vol_s = df['volume']
     vol_ma20 = vol_s.rolling(window=20).mean()
@@ -173,10 +209,27 @@ def get_signal(df: pd.DataFrame):
     # Auto-detect model's expected feature count (backward compat)
     try:
         model_n_features = model.observation_space['market'].shape[-1]
+        # DEBUG: print(f"--- Inference: Detected Model Features = {model_n_features} ---")
     except Exception:
         model_n_features = 10
     
-    if model_n_features >= 15:
+    if model_n_features >= 21:
+        market_features = [
+            'log_ret', 'high_norm', 'low_norm', 'vol_norm', 'rsi_norm', 
+            'ema_9_norm', 'ema_21_norm', 'ema_200_norm', 'cvd_z', 'cvd_roc', 'candle_progress',
+            'ema_1h_slope', 'ema_4h_slope', 'vol_z', 'cvd_div',
+            'ema_1h_accel', 'ema_4h_accel', 'cvd_accel',
+            'adx_norm', 'trend_efficiency', 'vol_regime'
+        ]
+    elif model_n_features >= 18:
+        # fallback para modelos antiguos
+        market_features = [
+            'log_ret', 'high_norm', 'low_norm', 'vol_norm', 'rsi_norm', 
+            'ema_9_norm', 'ema_21_norm', 'ema_200_norm', 'cvd_z', 'cvd_roc', 'candle_progress',
+            'ema_1h_slope', 'ema_4h_slope', 'vol_z', 'cvd_div',
+            'ema_1h_accel', 'ema_4h_accel', 'cvd_accel'
+        ]
+    elif model_n_features >= 15:
         market_features = [
             'log_ret', 'high_norm', 'low_norm', 'vol_norm', 'rsi_norm', 
             'ema_9_norm', 'ema_21_norm', 'ema_200_norm', 'cvd_z', 'cvd_roc', 'candle_progress',
@@ -255,8 +308,9 @@ async def predict(req: PredictRequest):
     try:
         import ccxt
         exchange = ccxt.binanceusdm({'enableRateLimit': True})
-        # Note: req.symbol is already native "ETHUSDT" coming from TS
-        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 1000})
+        # Normalize symbol: remove '/' and ensure uppercase for Binance Futures API
+        clean_symbol = req.symbol.replace('/', '').upper()
+        raw_klines = exchange.fapiPublicGetKlines({'symbol': clean_symbol, 'interval': '5m', 'limit': 1000})
         
         ohlcv = []
         for k in raw_klines:
@@ -311,8 +365,10 @@ async def get_exit_signal(req: ExitRequest):
         import ccxt
         exchange = ccxt.binanceusdm({'enableRateLimit': True})
         
-        # Fetch 100 limit to ensure EWMA for CVD has enough warmup
-        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 1000})
+        # Normalize symbol for safe API call
+        clean_symbol = req.symbol.replace('/', '').upper()
+        # Fetch 1000 limit to ensure EWMA for CVD has enough warmup
+        raw_klines = exchange.fapiPublicGetKlines({'symbol': clean_symbol, 'interval': '5m', 'limit': 1000})
         
         ohlcv = []
         for k in raw_klines:

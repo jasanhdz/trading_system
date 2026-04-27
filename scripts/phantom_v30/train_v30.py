@@ -22,7 +22,7 @@ class TransformerExtractor(BaseFeaturesExtractor):
     Feature Extractor that uses a Transformer Encoder to process market data.
     V31: + Positional Encoding + Attention Pooling
     """
-    def __init__(self, observation_space: gym.spaces.Dict, d_model=64, nhead=4, num_layers=2, dropout=0.0):
+    def __init__(self, observation_space: gym.spaces.Dict, d_model=48, nhead=2, num_layers=2, dropout=0.0):
         # Market: (Window, Features) -> Transformer -> Attention Pool -> (d_model,)
         # Account: (4,) -> Linear -> (d_model,)
         # Concat -> (2 * d_model,)

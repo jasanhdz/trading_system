@@ -15,7 +15,7 @@ from data.storage.database_manager import DatabaseManager
 from config.settings import settings
 
 
-def load_tensor_data(device: str = "cuda:0", days: int | None = None, split: str = "train") -> dict:
+def load_tensor_data(device: str = "cuda:0", days: int | None = None, split: str = "train", mirror: int = 0) -> dict:
     """
     Load OHLCV from DB, compute features, return GPU tensors.
     
@@ -151,13 +151,110 @@ def load_tensor_data(device: str = "cuda:0", days: int | None = None, split: str
     cvd_accel[1:] = cvd_roc[1:] - cvd_roc[:-1]
     cvd_accel = np.clip(cvd_accel * 2, -4, 4).astype(np.float32)
 
-    # Stack features: (N, 18) — V35: +3 acceleration features
+    # ====================== RÉGIMEN FEATURES V44 (Camino 1) ======================
+    # 11. ADX(14) — Fuerza de tendencia. 0-100. >25 = tendencia, <20 = rango.
+    def _calc_adx(h, l, c, period=14):
+        h_s, l_s, c_s = pd.Series(h), pd.Series(l), pd.Series(c)
+        plus_dm = h_s.diff().clip(lower=0)
+        minus_dm = (-l_s.diff()).clip(lower=0)
+        tr1 = h_s - l_s
+        tr2 = (h_s - c_s.shift(1)).abs()
+        tr3 = (l_s - c_s.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.ewm(alpha=1/period, min_periods=period).mean()
+        plus_di = 100 * plus_dm.ewm(alpha=1/period, min_periods=period).mean() / (atr + 1e-10)
+        minus_di = 100 * minus_dm.ewm(alpha=1/period, min_periods=period).mean() / (atr + 1e-10)
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
+        adx = dx.ewm(alpha=1/period, min_periods=period).mean()
+        return adx.fillna(0).values.astype(np.float32)
+    
+    adx_raw = _calc_adx(high, low, close, period=14)
+    adx_norm = np.clip((adx_raw / 50.0) - 1.0, -1.0, 1.0).astype(np.float32)  # 25→-0.5, 50→0, 75→0.5
+    
+    # 12. Trend Efficiency — cuánto del rango se movió en dirección de la vela
+    df_open = df['open'].values
+    trend_efficiency = np.abs(close - df_open) / np.maximum(high - low, 1e-10)
+    trend_efficiency = np.clip(trend_efficiency, 0.0, 1.0).astype(np.float32)
+    
+    # 13. Volatility Regime — ATR(14) relativo al precio
+    tr1_vr = high - low
+    tr2_vr = np.abs(high - np.roll(close, 1))
+    tr3_vr = np.abs(low - np.roll(close, 1))
+    tr_vr = np.maximum(tr1_vr, np.maximum(tr2_vr, tr3_vr))
+    tr_vr[0] = tr1_vr[0]
+    atr14 = pd.Series(tr_vr).ewm(alpha=1/14, min_periods=14).mean().fillna(pd.Series(tr_vr)).values
+    vol_regime = (atr14 / close - 0.01) / 0.02  # 1% ATR → 0, 3% ATR → 1
+    vol_regime = np.clip(vol_regime, -1.0, 1.0).astype(np.float32)
+
+    # 14. Defensa en Profundidad: Limpieza Final de todas las Features Avanzadas
+    for arr in [cvd_z, cvd_roc, ema_1h_slope, ema_4h_slope, vol_z_arr, cvd_div,
+                ema_1h_accel, ema_4h_accel, cvd_accel, adx_norm, trend_efficiency, vol_regime]:
+        arr[~np.isfinite(arr)] = 0.0
+
+    # ====================== MUTACIÓN ANTI-REGIME: SYMMETRIC DATA AUGMENTATION ======================
+    # Aplicamos mirror (inversión de mercado) determinísticamente por iteración para forzar aprendizaje bidireccional
+    # Solo se aplica al dataset de entrenamiento, la validación siempre debe ser sobre el mercado real histórico
+    do_mirror = (mirror == 1) and (split == "train")
+    
+    if do_mirror:
+        print("🔄 [Symmetric Augmentation] Aplicando mirror (inversión de mercado) en este batch...")
+        
+        # 1. Invertimos precios reales matemáticamente para que el PnL en matrix_env funcione a la inversa
+        # Usamos P0^2 / Pt lo que asegura que un retorno logarítmico del 10% se convierta en -10% exactamente.
+        base_price = close[0]
+        close_m = (base_price ** 2) / close
+        
+        # 2. Invertimos todas las features que dependen de dirección
+        log_ret_m = -log_ret.copy()
+        
+        # Features de precio
+        high_norm_m = -low_norm.copy()   # Lo que antes era la distancia al low, ahora es la distancia al high
+        low_norm_m = -high_norm.copy()
+        
+        # RSI se invierte (sobrecompra <-> sobreventa)
+        rsi_norm_m = -rsi_norm.copy()
+        
+        # EMAs y slopes se invierten (tendencia alcista <-> bajista)
+        ema_9_norm_m = -ema_9_norm.copy()
+        ema_21_norm_m = -ema_21_norm.copy()
+        ema_200_norm_m = -ema_200_norm.copy()
+        ema_1h_slope_m = -ema_1h_slope.copy()
+        ema_4h_slope_m = -ema_4h_slope.copy()
+        
+        # CVD, divergencias y aceleraciones se invierten
+        cvd_z_m = -cvd_z.copy()
+        cvd_roc_m = -cvd_roc.copy()
+        cvd_div_m = -cvd_div.copy()
+        ema_1h_accel_m = -ema_1h_accel.copy()
+        ema_4h_accel_m = -ema_4h_accel.copy()
+        cvd_accel_m = -cvd_accel.copy()
+        
+        # Reemplazamos todo en memoria
+        close = close_m.astype(np.float32)
+        log_ret = log_ret_m
+        high_norm = high_norm_m
+        low_norm = low_norm_m
+        rsi_norm = rsi_norm_m
+        ema_9_norm = ema_9_norm_m
+        ema_21_norm = ema_21_norm_m
+        ema_200_norm = ema_200_norm_m
+        ema_1h_slope = ema_1h_slope_m
+        ema_4h_slope = ema_4h_slope_m
+        cvd_z = cvd_z_m
+        cvd_roc = cvd_roc_m
+        cvd_div = cvd_div_m
+        ema_1h_accel = ema_1h_accel_m
+        ema_4h_accel = ema_4h_accel_m
+        cvd_accel = cvd_accel_m
+
+    # Stack features: (N, 21) — V44: +3 régimen features
     features = np.stack([
         log_ret, high_norm, low_norm, vol_norm, rsi_norm, 
         ema_9_norm, ema_21_norm, ema_200_norm, 
         cvd_z, cvd_roc, candle_progress,
         ema_1h_slope, ema_4h_slope, vol_z_arr, cvd_div,
-        ema_1h_accel, ema_4h_accel, cvd_accel
+        ema_1h_accel, ema_4h_accel, cvd_accel,
+        adx_norm, trend_efficiency, vol_regime
     ], axis=1)    
     # Skip first 24 rows (NaN from rolling window)
     features = features[24:]
@@ -197,7 +294,7 @@ def load_tensor_data(device: str = "cuda:0", days: int | None = None, split: str
     n_candles = features_tensor.shape[0]
     mem_mb = (features_tensor.nelement() + close_tensor.nelement()) * 4 / 1e6
     
-    print(f"✅ Loaded {n_candles:,} candles for {split_name}")
+    print(f"✅ Loaded {n_candles:,} candles for {split_name} | Symmetric Mirror: {'ON' if do_mirror else 'OFF'}")
     print(f"   VRAM usage: {mem_mb:.1f} MB on {device}")
     
     return {
