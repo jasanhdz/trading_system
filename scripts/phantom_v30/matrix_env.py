@@ -263,6 +263,7 @@ class PhantomMatrixEnv(VecEnv):
         # Previous state
         prev_equity = self._get_equity(current_prices)
         prev_positions = self.positions.copy()
+        prev_entry_prices = self.entry_prices.copy()  # FIX: snapshot ANTES de cerrar posiciones
         
         trade_fees = np.zeros(self.num_envs, dtype=np.float32)
         open_trade_fee = np.zeros(self.num_envs, dtype=np.float32)
@@ -271,6 +272,20 @@ class PhantomMatrixEnv(VecEnv):
         
         # ═══════════════ ACTION 3: CLOSE ═══════════════
         close_mask = (actions == 3) & (self.positions != 0)
+        
+        # FIX: Pre-close PnL% calculado ANTES de que self.positions sea 0
+        # price_diff_pct calculado abajo usa self.positions, que será 0 post-cierre.
+        # Este snapshot es la única forma correcta de recompensar cierres.
+        safe_prev_entry = np.maximum(prev_entry_prices, 1e-10)
+        pre_close_pnl_pct = np.where(
+            prev_positions > 0,
+            (current_prices - safe_prev_entry) / safe_prev_entry,
+            np.where(
+                prev_positions < 0,
+                (safe_prev_entry - current_prices) / safe_prev_entry,
+                0.0
+            )
+        )
         
         # ═══════════════ BRACKET OVERRIDE (Live Bot Parity) ═══════════════
         # Live Bot Settings: 20x Leverage, -40% ROE SL, +40% ROE TP
@@ -465,19 +480,19 @@ class PhantomMatrixEnv(VecEnv):
         # 1. Base asymmetric log return (V41: Hyper-Ambition 2.0x bias)
         reward = np.where(log_return > 0, log_return * 15.0, log_return * 12.0)
         
-        # 1.1 Winner Hold Bonus (V42: Encourage catching full trends)
-        # Only rewards holding if position is in at least 0.5% profit (ROE > 10% @ 20x)
-        same_direction = ((prev_positions > 0) & (self.positions > 0)) | ((prev_positions < 0) & (self.positions < 0))
-        hold_bonus = np.where(same_direction & (price_diff_pct > 0.005), 0.02 + 0.1 * (price_diff_pct - 0.005), 0.0)
-        reward += hold_bonus
+        # 1.1 Winner Hold Bonus — ELIMINADO (V43: Anti-Hold Syndrome Fix)
+        # Causaba "Lottery Ticket Bias": el agente esperaba el jackpot power-law
+        # ignorando el expected value negativo. El asymmetric log_return ya
+        # incentiva mantener ganancias sin crear el sesgo de espera infinita.
         
-        # 2. Power-Law (Softened Hammer) - the only strong compounding signal
+        # 2. Power-Law (V43: exponente 3.2→2.5, factor 14→10 — reduce jackpot effect)
+        # El exponente alto creaba una "opción de lotería" que dominaba el expected value.
+        # Con 2.5 sigue recompensando ganancias grandes pero no cataliza el hold infinito.
         closed_profit = just_closed_trade & (closed_trade_pnl > 0)
         profit_pct = np.clip(closed_trade_pnl / safe_prev, 0.0, 1.0)
-        power_law = np.power(1.0 + profit_pct, 3.2) * 14.0
-        compounding_bonus = power_law * (0.8 + 4.0 * profit_pct)
+        power_law = np.power(1.0 + profit_pct, 2.5) * 10.0
+        compounding_bonus = power_law * (0.8 + 3.0 * profit_pct)
         execution_bonus = np.where(closed_profit, compounding_bonus, 0.0)
-        # Clean: Removed pending_fee_recovery subtracted logic
         reward += execution_bonus
         
         # === MUTACIÓN V38: EQUITY MILESTONE CURRICULUM (8M-friendly) ===
@@ -499,10 +514,20 @@ class PhantomMatrixEnv(VecEnv):
         
         reward += milestone_bonus
         
-        # 3. Organic Sniper (take money and run)
+        # 3. Smart Close Rewards (V43: reemplaza Organic Sniper roto)
+        # El bug: organic_sniper usaba price_diff_pct DESPUÉS del cierre (positions==0),
+        # por lo que nunca se activaba (close_mask era True pero price_diff_pct==0).
+        # FIX: Usamos pre_close_pnl_pct (snapshot previo al cierre).
         just_opened = open_trade_fee > 0
-        organic_sniper = close_mask & (price_diff_pct > 0.005)
-        reward = np.where(organic_sniper, reward * 1.5, reward)
+        
+        # Cerrar en profit: bonus por "take the money and run"
+        close_profit = close_mask & (pre_close_pnl_pct > 0.003)  # >0.3% precio = >6% ROE@20x
+        reward = np.where(close_profit, reward + 0.6, reward)
+        
+        # Cerrar en loss profunda: pequeño bonus por "cortar la hemorragia"
+        # Neutraliza el miedo al flip_penalty cuando el trade va muy mal
+        close_deep_loss = close_mask & (pre_close_pnl_pct < -0.015)  # <-1.5% precio = <-30% ROE@20x
+        reward = np.where(close_deep_loss, reward + 0.2, reward)
         
         # 4.1 Momentum Bonus
         market_momentum = self.features[new_idx][:, 0]  # log_ret de la vela actual
@@ -526,7 +551,7 @@ class PhantomMatrixEnv(VecEnv):
         
         # Bonus: A los 5 steps, +0.5% a favor es suficiente (10% ROE @ 20x)
         # Alcanzable en ~25-30% de entradas buenas
-        is_mature = (entry_age == 5) & (self.positions != 0)
+        is_mature = (entry_age >= 5) & (entry_age <= 6) & (self.positions != 0)  # FIX: ventana 2 steps, no 1
         eqs_bonus = np.where(
             is_mature & (favor_pct >= 0.005),
             0.5 * np.exp(favor_pct * 20.0),
@@ -567,17 +592,44 @@ class PhantomMatrixEnv(VecEnv):
         )
         reward += dd_duration_penalty
         
-        # --- MEJORADO: Bleeding Penalty ---
+        # --- MEJORADO: Bleeding Penalty (V43: -0.08→-0.22, threshold -0.005→-0.003) ---
+        # Aumentado para que sangrar sea MUY doloroso. Hace que el expected value
+        # de esperar sea negativo más rápido, rompiendo el lottery-ticket bias.
+        # Threshold bajado a -0.003 para detectar pérdidas más temprano.
         bleeding_penalty = np.where(
-            (prev_positions != 0) & (self.positions != 0) & (price_diff_pct < -0.005), 
-            -0.08 * np.abs(price_diff_pct) * 10.0,
+            (prev_positions != 0) & (self.positions != 0) & (price_diff_pct < -0.003), 
+            -0.22 * np.abs(price_diff_pct) * 10.0,
             0.0
         )
         reward += bleeding_penalty
         
-        # 6. Anti-Overtrading (simplified, fixed values — no adaptive scaling)
+        # --- NUEVO: Early Warning Penalty (V44: Cierre Temprano) ---
+        # Activa a -5% ROE (antes que bleeding a -6% ROE) con escalado progresivo.
+        # Rompe el equilibrio evolutivo forzando cierres antes de que el DD escale.
+        roe_pct = price_diff_pct * LEVERAGE  # ROE real (e.g., -0.0025 price × 20 = -5% ROE)
+        early_warning = np.where(
+            (prev_positions != 0) & (self.positions != 0) & (roe_pct < -0.05),
+            -0.08 * np.power(np.abs(roe_pct + 0.05) * 20.0, 1.5),
+            0.0
+        )
+        reward += early_warning
+        
+        # --- NUEVO: STOP LOSS MECÁNICO (V43-Emergency) ---
+        # Si el trade está perdiendo más del 1.0% del precio (=-20% ROE @ 20x),
+        # cada step adicional cuesta progresivamente más. Insostenible.
+        deep_dd_threshold = -0.010  # -1.0% precio = -20% ROE
+        deep_dd_penalty = np.where(
+            (prev_positions != 0) & (self.positions != 0) & (price_diff_pct < deep_dd_threshold),
+            -0.40 * np.power(np.abs(price_diff_pct - deep_dd_threshold) * 50.0, 1.8),
+            0.0
+        )
+        reward += deep_dd_penalty
+        
+        # 6. Anti-Overtrading (V43: flip penalty -0.75→-0.30)
+        # Reducido para que cerrar+reentrar no sea prohibitivo cuando el trade va mal.
+        # El bleeding penalty ya penaliza quedarse. El flip penalty NO debe bloquear la salida.
         flipped = flip_long | flip_short
-        reward = np.where(flipped, reward - 0.75, reward)
+        reward = np.where(flipped, reward - 0.30, reward)
         
         idle_penalty = np.where(
             self.flat_steps > 150, -0.35,
@@ -604,10 +656,15 @@ class PhantomMatrixEnv(VecEnv):
         # ═══════════════ DONE / RESET ═══════════════
         done = ruined | mission_accomplished | (self.current_steps >= self.n_candles - 2)
         
-        # --- PHASE B: Continuous Risk Penalty (Real-time DD Pain) ---
-        # El dolor se siente a cada paso, no solo al morir. Alineado con (1-DD)^1.5 del Coliseo.
+        # --- PHASE B: Continuous Risk Penalty (V43: escalado, -0.06→-0.12/-0.20) ---
+        # Escalonado: DD leve duele moderado, DD profundo duele extremo.
+        # Esto hace que el milestone de $60 sea ECONÓMICAMENTE INVIABLE si el DD es alto.
         current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
-        risk_penalty = -0.06 * np.power(current_dd, 1.5) 
+        risk_penalty = np.where(
+            current_dd > 0.40,
+            -0.20 * np.power(current_dd, 1.5),  # DD profundo: dolor extremo
+            -0.08 * np.power(current_dd, 1.5)   # DD leve: dolor moderado
+        )
         reward += risk_penalty
         
         # --- PHASE B: Trend Capture Bonus (Regime Awareness) ---
@@ -635,7 +692,7 @@ class PhantomMatrixEnv(VecEnv):
         
         # Usar el Máximo DD sufrido para el juicio final
         episode_pnl_pct = (new_equity - INITIAL_BALANCE) / INITIAL_BALANCE
-        episode_utility = episode_pnl_pct * np.power(np.maximum(1.0 - self.max_episode_dd, 0.001), 1.5)
+        episode_utility = episode_pnl_pct * np.power(np.maximum(1.0 - self.max_episode_dd, 0.001), 2.0)  # V44: 1.5→2.0 aligned with Coliseo
         
         # Bonus/Penalty escalado para impacto terminal
         utility_shaping = np.where(done, episode_utility * 5.0, 0.0)

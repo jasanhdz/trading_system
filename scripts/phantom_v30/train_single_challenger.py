@@ -97,18 +97,27 @@ def cosine_lr_schedule(progress_remaining: float) -> float:
     decay_progress = (progress - warmup_pct) / (1.0 - warmup_pct)
     return 5e-5 + 0.5 * (5e-4 - 5e-5) * (1 + np.cos(np.pi * decay_progress))
 
-# === MUTATION 2: Smart Entropy Schedule ===
+# === MUTATION 2: Smart Entropy Schedule v2 ===
 class RiskSeekingCallback(BaseCallback):
-    """Smart exploration based on Champion quality."""
+    """Smart exploration based on Champion quality (V43: tiered + slower decay)."""
     def __init__(self, champ_pnl: float):
         super().__init__()
         self.champ_pnl = champ_pnl
-        self.starting_ent = 0.08 if champ_pnl >= 25.0 else 0.15
+        # V43: Tiered entropy — cuánto más débil el champion, más exploración necesitamos
+        if champ_pnl < 8.0:
+            self.starting_ent = 0.30   # Desesperación total: explorar todo
+        elif champ_pnl < 15.0:
+            self.starting_ent = 0.22   # Necesita encontrar estrategia
+        elif champ_pnl < 25.0:
+            self.starting_ent = 0.15   # Búsqueda moderada
+        else:
+            self.starting_ent = 0.08   # Champion sólido: explotar
 
     def _on_step(self):
         progress = self.num_timesteps / self.model._total_timesteps
-        # Entropy decays from starting_ent to 0.01 to keep model from stalling
-        self.model.ent_coef = max(self.starting_ent * (1 - progress ** 1.5), 0.01)
+        # V43: Decay más lento (^2.5 vs ^1.5) y floor 0.02 (vs 0.01)
+        # Mantiene exploración activa por más tiempo para escapar mínimos locales
+        self.model.ent_coef = max(self.starting_ent * (1 - progress ** 2.5), 0.02)
         return True
 
 def adaptive_clip_schedule(progress_remaining: float) -> float:
@@ -196,7 +205,15 @@ def main():
     model = None
     if base_path:
         try:
-            starting_ent = 0.08 if args.champ_pnl >= 25.0 else 0.15
+            # V43: Smart Entropy tiered
+            if args.champ_pnl < 8.0:
+                starting_ent = 0.30
+            elif args.champ_pnl < 15.0:
+                starting_ent = 0.22
+            elif args.champ_pnl < 25.0:
+                starting_ent = 0.15
+            else:
+                starting_ent = 0.08
             model = PPO.load(
                 base_path,
                 env=env,
@@ -220,7 +237,15 @@ def main():
 
     if model is None:
         print(f"   🆕 Creating new model from scratch with V31 architecture...")
-        starting_ent = 0.08 if args.champ_pnl >= 25.0 else 0.15
+        # V43: Smart Entropy tiered
+        if args.champ_pnl < 8.0:
+            starting_ent = 0.30
+        elif args.champ_pnl < 15.0:
+            starting_ent = 0.22
+        elif args.champ_pnl < 25.0:
+            starting_ent = 0.15
+        else:
+            starting_ent = 0.08
         model = PPO(
             "MultiInputPolicy",
             env,

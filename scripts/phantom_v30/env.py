@@ -7,7 +7,7 @@ from typing import Tuple, Dict
 # Constants
 COMMISSION_RATE = 0.0002 # 0.02% (Sniper Mode: Quality > Quantity)
 SLIPPAGE = 0.0001 # 0.01% (Realistic friction)
-INITIAL_BALANCE = 1000.0
+INITIAL_BALANCE = 20.0
 LEVERAGE = 1.0 # Base leverage, can be scaled by action if needed, but keeping simple
 
 class PhantomEnv(gym.Env):

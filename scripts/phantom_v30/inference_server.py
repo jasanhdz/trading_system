@@ -308,9 +308,8 @@ async def predict(req: PredictRequest):
     try:
         import ccxt
         exchange = ccxt.binanceusdm({'enableRateLimit': True})
-        # Normalize symbol: remove '/' and ensure uppercase for Binance Futures API
-        clean_symbol = req.symbol.replace('/', '').upper()
-        raw_klines = exchange.fapiPublicGetKlines({'symbol': clean_symbol, 'interval': '5m', 'limit': 1000})
+        # Note: req.symbol is already native "ETHUSDT" coming from TS
+        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 1000})
         
         ohlcv = []
         for k in raw_klines:
@@ -365,10 +364,8 @@ async def get_exit_signal(req: ExitRequest):
         import ccxt
         exchange = ccxt.binanceusdm({'enableRateLimit': True})
         
-        # Normalize symbol for safe API call
-        clean_symbol = req.symbol.replace('/', '').upper()
-        # Fetch 1000 limit to ensure EWMA for CVD has enough warmup
-        raw_klines = exchange.fapiPublicGetKlines({'symbol': clean_symbol, 'interval': '5m', 'limit': 1000})
+        # Fetch 100 limit to ensure EWMA for CVD has enough warmup
+        raw_klines = exchange.fapiPublicGetKlines({'symbol': req.symbol, 'interval': '5m', 'limit': 1000})
         
         ohlcv = []
         for k in raw_klines:

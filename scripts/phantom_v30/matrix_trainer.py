@@ -15,8 +15,14 @@ import sys
 import time
 import shutil
 import subprocess
-import gc
+import requests
+import traceback
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load TELEGRAM credentials from .env
+load_dotenv(Path(__file__).parent.parent.parent / "binance-futures-bot-ts" / ".env")
+
 from stable_baselines3 import PPO
 from stable_baselines3.common.buffers import BaseBuffer
 
@@ -39,11 +45,38 @@ CHALLENGER_B_PATH = "models/phantom_v30_challenger_b.zip"
 SAFE_CHECKPOINT_PATH = "models/phantom_v31_safe_checkpoint.zip"  # Best survivor vault
 
 # Training Config
-NUM_ENVS = 896
+ENVS_PER_GPU = 890   # Ajustado agresivamente para 8GB (48D)
 TOTAL_TIMESTEPS = 4_000_000  # V39: Bajado a 4M para evaluar y GUARDAR PROGRESO 4 veces más rápido contra reinicios inesperados
+
+# === IRON SHIELD MEMORY MANAGEMENT ===
+os.environ["PYTORCH_HIP_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["ROC_ENABLE_PRE_VEGA"] = "1" 
+
 MIN_VIABLE_SCORE = 25.0  # V10: $25 minimum ($5 ROI from $20)
 MAX_DD_THRESHOLD = 0.90  # V13.1: Kamikaze filter — 90% DD allowed (let them surf the wicks)
 
+
+def send_telegram_message(message: str):
+    import datetime
+    log_path = Path(__file__).parent.parent.parent / "logs" / "telegram_reports.log"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}]\n{message}\n{'-'*60}\n")
+    except Exception as e:
+        print(f"Error saving telegram log locally: {e}")
+
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not bot_token or not chat_id:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}")
 
 def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
     """Single-seed evaluation. Returns (balance, p95_drawdown, action_counts)."""
@@ -90,9 +123,9 @@ def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
 
 
 def evaluate_model(model_path: str, eval_env, n_episodes: int = 1, seed: int = 42):
-    """Multi-seed robust evaluation. Runs 5 seeds, reports P75 balance and P95 DD.
+    """Multi-seed robust evaluation. Runs 7 seeds, reports P75 balance and P95 DD.
     Prevents overfitting to any single starting configuration."""
-    EVAL_SEEDS = [42, 137, 256, 1337, 7777]
+    EVAL_SEEDS = [42, 137, 256, 1337, 7777, 9999, 12345]
     
     balances = []
     drawdowns = []
@@ -114,11 +147,12 @@ def evaluate_model(model_path: str, eval_env, n_episodes: int = 1, seed: int = 4
     
     total_actions = sum(total_action_counts.values())
     tr = (total_action_counts.get(1, 0) + total_action_counts.get(2, 0)) / max(total_actions, 1) * 100
+    close_rate = total_action_counts.get(3, 0) / max(total_actions, 1)
     
     print(f"  Balances across seeds: [{', '.join(f'${b:.2f}' for b in balances)}]")
     print(f"  P25 Balance: ${p25_balance:.2f} | P95 DD: {p95_dd*100:.1f}%")
     print(f"  Actions: Idle={total_action_counts[0]}, Long={total_action_counts[1]}, Short={total_action_counts[2]}, Close={total_action_counts[3]}")
-    print(f"  Trading Rate: {tr:.1f}%")
+    print(f"  Trading Rate: {tr:.1f}% | Close Rate: {close_rate:.1%}")
 
     return p25_balance, p95_dd, total_action_counts
 
@@ -135,7 +169,7 @@ def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32,
         str(script),
         "--save-path", save_path,
         "--seed", str(seed),
-        "--num-envs", str(NUM_ENVS),
+        "--num-envs", str(ENVS_PER_GPU),
         "--timesteps", str(TOTAL_TIMESTEPS),
         "--d-model", str(d_model),
         "--champ-pnl", str(champ_pnl),
@@ -158,8 +192,8 @@ def continuous_train():
     n_gpus = torch.cuda.device_count()
     print(f"🚀 Phantom V30 Matrix Trainer (Subprocess Mode)")
     print(f"   GPUs: {n_gpus}")
-    print(f"   Envs per GPU: {NUM_ENVS}")
-    print(f"   Total parallel agents: {NUM_ENVS * min(n_gpus, 2)}")
+    print(f"   Envs per GPU: {ENVS_PER_GPU}")
+    print(f"   Total parallel agents: {ENVS_PER_GPU * min(n_gpus, 2)}")
     print(f"   Timesteps per iteration: {TOTAL_TIMESTEPS:,}")
 
     iteration = 0
@@ -215,13 +249,10 @@ def continuous_train():
             else:
                 print(f"  ⚠️ Challenger B failed (exit code {rc_b})")
 
-            # Force cleanup of subprocess references and GPU residue
-            del proc_a
-            del proc_b
-            gc.collect()
-
             if not challengers:
-                print("  ❌ Both challengers failed! Retrying in 30s...")
+                msg_err = "  ❌ Both challengers failed! Retrying in 30s..."
+                print(msg_err)
+                send_telegram_message(msg_err)
                 time.sleep(30)
                 continue
         else:
@@ -229,7 +260,9 @@ def continuous_train():
             proc = launch_challenger(0, CHALLENGER_A_PATH, seed_a, champ_pnl=current_champ_score, mirror=mirror_mode)
             rc = proc.wait()
             if rc != 0:
-                print(f"  ❌ Challenger failed (exit code {rc}). Retrying in 30s...")
+                msg_err = f"  ❌ Challenger failed (exit code {rc}). Retrying in 30s..."
+                print(msg_err)
+                send_telegram_message(msg_err)
                 time.sleep(30)
                 continue
             challengers = [("Challenger A", CHALLENGER_A_PATH)]
@@ -246,12 +279,12 @@ def continuous_train():
             eval_env = PhantomMatrixEnv(
                 features=features_np,
                 close_prices=close_np,
-                num_envs=32,  # V10: 32 envs for 4x more stable evaluation
+                num_envs=64,  # V43: 64 envs for even more stable evaluation
             )
 
             # Evaluate Champion (multi-seed robust)
-            print(f"\n  📊 Evaluating Champion (5 seeds)...")
-            champ_score, champ_dd, _ = evaluate_model(CHAMPION_PATH, eval_env)
+            print(f"\n  📊 Evaluating Champion (7 seeds)...")
+            champ_score, champ_dd, champ_actions = evaluate_model(CHAMPION_PATH, eval_env)
             
             # Update the tracked champion score for the next iteration's Smart Entropy
             if champ_score != -np.inf:
@@ -262,17 +295,33 @@ def continuous_train():
             best_chall_path = None
             best_chall_name = None
             best_chall_dd = 0.0
+            best_chall_actions = {}
+            
+            all_challenger_reports = ""
 
             for name, path in challengers:
                 print(f"\n  📊 Evaluating {name} (5 seeds)...")
-                score, dd, _ = evaluate_model(path, eval_env)
+                score, dd, chall_actions = evaluate_model(path, eval_env)
+                
+                all_challenger_reports += f"⚔️ *{name}*\n"
+                all_challenger_reports += f"PnL: ${score:.2f} | P95 DD: {dd*100:.1f}%\n"
+                all_challenger_reports += f"Idle: {chall_actions.get(0,0)} | Long: {chall_actions.get(1,0)} | Short: {chall_actions.get(2,0)} | Close: {chall_actions.get(3,0)}\n\n"
+
                 if score > best_chall_score:
                     best_chall_score = score
                     best_chall_path = path
                     best_chall_name = name
                     best_chall_dd = dd
+                    best_chall_actions = chall_actions
 
             eval_env.close()
+            
+            msg = f"🔄 *Iteration {iteration} Complete*\n\n"
+            msg += f"🏆 *Champion*\n"
+            msg += f"PnL: ${champ_score:.2f} | P95 DD: {champ_dd*100:.1f}%\n"
+            msg += f"Idle: {champ_actions.get(0,0)} | Long: {champ_actions.get(1,0)} | Short: {champ_actions.get(2,0)} | Close: {champ_actions.get(3,0)}\n\n"
+            msg += all_challenger_reports
+            msg += "📝 *Result:*\n"
 
             # === PROMOTION DECISION ===
             print(f"\n🏆 Champion:       ${champ_score:.2f} (P95 DD: {champ_dd*100:.1f}%)")
@@ -283,9 +332,12 @@ def continuous_train():
             challenger_survives = best_chall_dd <= MAX_DD_THRESHOLD
             
             # === RISK-ADJUSTED SCORING (Sortino-Proxy) ===
-            # Utility = PnL * (1 - DD)^1.5. Premia la eficiencia sobre el volumen bruto.
+            # V44: Utility = PnL * (1 - DD)^2.0. Exponente subido de 1.5→2.0
+            # para castigar DD más agresivamente y romper el equilibrio evolutivo.
+            # Champion actual ($12.52, DD 82.9%): Utility baja de ~0.93 a ~0.51
+            # Challenger eficiente ($12.50, DD 75%): Utility sube a ~0.78 → PROMOVIBLE
             def get_utility(pnl, dd):
-                return pnl * np.power(np.maximum(1.0 - dd, 0.001), 1.5)
+                return pnl * np.power(np.maximum(1.0 - dd, 0.001), 2.0)
             
             champ_utility = get_utility(champ_score, champ_dd)
             chall_utility = get_utility(best_chall_score, best_chall_dd)
@@ -301,6 +353,7 @@ def continuous_train():
                     os.rename(CHAMPION_PATH, backup_path)
                 shutil.copy2(best_chall_path, CHAMPION_PATH)
                 print(f"✅ New clean Champion crowned! Kamikaze lineage terminated.")
+                msg += f"💀 Champion Dethroned (DD > {MAX_DD_THRESHOLD*100:.0f}% limit)\n👑 Crowning {best_chall_name}!"
             
             # === REGLA 1: PROMOTION POR UTILIDAD (EFICIENCIA) ===
             elif challenger_survives and chall_utility > champ_utility and best_chall_path:
@@ -314,21 +367,28 @@ def continuous_train():
                     os.rename(CHAMPION_PATH, backup_path)
                 shutil.copy2(best_chall_path, CHAMPION_PATH)
                 print(f"✅ New Efficiency Champion crowned! (Old backed up)")
+                msg += f"🚀 PROMOTION! {best_chall_name} defeats Champion!\nUtil: {chall_utility:.2f} > {champ_utility:.2f}"
                 
             # === REGLA 2: Bloqueo de Kamikazes retadores ===
             elif not challenger_survives and best_chall_score > champ_score:
                 print(f"💀 BLOCKED! {best_chall_name} earned ${best_chall_score:.2f} but P95 DD {best_chall_dd*100:.1f}% exceeds {MAX_DD_THRESHOLD*100:.0f}% limit.")
                 print(f"🛡️ Champion survives by survival filter.")
+                msg += f"💀 BLOCKED! {best_chall_name} DD {best_chall_dd*100:.1f}% > limit. Champion survives."
             
             # === REGLA 3: Baseline inicial si no hay campeón ===
             elif champ_score == -np.inf and best_chall_score > -np.inf and best_chall_path:
                 if challenger_survives and best_chall_score >= 10.0:
                     print(f"🆕 No champion. Auto-promoting {best_chall_name} as founding baseline.")
                     shutil.copy2(best_chall_path, CHAMPION_PATH)
+                    msg += f"🆕 No champion. Auto-promoting {best_chall_name} as baseline."
                 else:
                     print(f"⚠️ No valid baseline found.")
+                    msg += "⚠️ No valid baseline found."
             else:
                 print(f"🛡️ DEFENSE! Champion retains title by efficiency.")
+                msg += "🛡️ DEFENSE! Champion retains title by efficiency."
+
+            send_telegram_message(msg)
 
             # --- ONGOING LEARNING: 3-Tier Survivor Vault ---
             if best_chall_path and os.path.exists(best_chall_path):
@@ -351,26 +411,12 @@ def continuous_train():
                 if os.path.exists(path):
                     os.remove(path)
 
-            # === CLEANUP: The Great RAM Clearance ===
-            # This prevents the system from crashing after many iterations by 
-            # explicitly deleting heavy tensors and triggering Python's GC.
-            print("\n🧹 Cleaning up Coliseum memory...")
-            try:
-                del eval_data
-                del features_np
-                del close_np
-                del eval_env
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except NameError:
-                pass # Already deleted or not created
-
         except Exception as e:
             print(f"\n❌ COLISEUM ERROR: {e}")
             import traceback
             traceback.print_exc()
             print("⚠️ Skipping evaluation, continuing to next iteration...")
+            send_telegram_message(f"❌ *Trainer Error on Iteration {iteration}*\n```\n{e}\n```")
 
         sys.stdout.flush()
 
@@ -385,4 +431,5 @@ def continuous_train():
 
 
 if __name__ == "__main__":
+    send_telegram_message("🟢 *Matrix Trainer [03-V30-Trainer] Iniciado / Reiniciado* 🚀\nIniciando entrenamiento continuo en las GPUs...")
     continuous_train()
