@@ -193,8 +193,7 @@ def load_tensor_data(device: str = "cuda:0", days: int | None = None, split: str
 
     # ====================== MUTACIÓN ANTI-REGIME: SYMMETRIC DATA AUGMENTATION ======================
     # Aplicamos mirror (inversión de mercado) determinísticamente por iteración para forzar aprendizaje bidireccional
-    # Solo se aplica al dataset de entrenamiento, la validación siempre debe ser sobre el mercado real histórico
-    do_mirror = (mirror == 1) and (split == "train")
+    do_mirror = (mirror == 1)
     
     if do_mirror:
         print("🔄 [Symmetric Augmentation] Aplicando mirror (inversión de mercado) en este batch...")

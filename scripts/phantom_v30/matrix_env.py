@@ -62,7 +62,7 @@ class PhantomMatrixEnv(VecEnv):
             'market': spaces.Box(low=-10, high=10, 
                                  shape=(WINDOW_SIZE, N_FEATURES), dtype=np.float32),
             'account': spaces.Box(low=-np.inf, high=np.inf, 
-                                  shape=(4,), dtype=np.float32),
+                                  shape=(6,), dtype=np.float32),
         })
         action_space = spaces.Discrete(4)
         
@@ -235,8 +235,10 @@ class PhantomMatrixEnv(VecEnv):
         )
         
         in_trade = (self.positions != 0).astype(np.float32)
+        time_in_trade = np.where(in_trade > 0, (self.current_steps - self.entry_step) / 288.0, 0.0).astype(np.float32)
+        current_roe = pnl_pct
         
-        account_obs = np.stack([balance_norm, leverage_used, pnl_pct, in_trade], axis=1)
+        account_obs = np.stack([balance_norm, leverage_used, pnl_pct, in_trade, time_in_trade, current_roe], axis=1)
         
         return {
             'market': market_obs,
@@ -290,7 +292,7 @@ class PhantomMatrixEnv(VecEnv):
         # ═══════════════ BRACKET OVERRIDE (Live Bot Parity) ═══════════════
         # Live Bot Settings: 20x Leverage, -40% ROE SL, +40% ROE TP
         HARD_STOP = -0.020   # -2.0% price = -40% ROE @ 20x
-        TAKE_PROFIT = 0.020  # 2.0% price = +40% ROE @ 20x
+        TAKE_PROFIT = 999.0  # V45 Surgical: Descativado. El agente aprende a cerrar.
         
         # Calculate raw price variation % from entry
         safe_entry_bracket = np.maximum(self.entry_prices, 1e-10)
@@ -521,8 +523,8 @@ class PhantomMatrixEnv(VecEnv):
         just_opened = open_trade_fee > 0
         
         # Cerrar en profit: bonus por "take the money and run"
-        close_profit = close_mask & (pre_close_pnl_pct > 0.003)  # >0.3% precio = >6% ROE@20x
-        reward = np.where(close_profit, reward + 0.6, reward)
+        close_profit = close_mask & (pre_close_pnl_pct > 0.002)  # >0.2% precio = >4% ROE@20x
+        reward = np.where(close_profit, reward + 1.2, reward)
         
         # Cerrar en loss profunda: pequeño bonus por "cortar la hemorragia"
         # Neutraliza el miedo al flip_penalty cuando el trade va muy mal
@@ -757,7 +759,7 @@ if __name__ == "__main__":
     
     obs = env.reset()
     print(f"✅ Obs market shape: {obs['market'].shape}")   # (16, 64, 4)
-    print(f"✅ Obs account shape: {obs['account'].shape}")  # (16, 4)
+    print(f"✅ Obs account shape: {obs['account'].shape}")  # (16, 6)
     
     import time
     t0 = time.time()

@@ -100,18 +100,20 @@ def cosine_lr_schedule(progress_remaining: float) -> float:
 # === MUTATION 2: Smart Entropy Schedule v2 ===
 class RiskSeekingCallback(BaseCallback):
     """Smart exploration based on Champion quality (V43: tiered + slower decay)."""
-    def __init__(self, champ_pnl: float):
+    def __init__(self, champ_pnl: float, starting_ent_override: float = None):
         super().__init__()
         self.champ_pnl = champ_pnl
-        # V43: Tiered entropy — cuánto más débil el champion, más exploración necesitamos
-        if champ_pnl < 8.0:
-            self.starting_ent = 0.30   # Desesperación total: explorar todo
-        elif champ_pnl < 15.0:
-            self.starting_ent = 0.22   # Necesita encontrar estrategia
-        elif champ_pnl < 25.0:
-            self.starting_ent = 0.15   # Búsqueda moderada
+        if starting_ent_override is not None:
+            self.starting_ent = starting_ent_override
         else:
-            self.starting_ent = 0.08   # Champion sólido: explotar
+            if champ_pnl < 8.0:
+                self.starting_ent = 0.30
+            elif champ_pnl < 15.0:
+                self.starting_ent = 0.22
+            elif champ_pnl < 25.0:
+                self.starting_ent = 0.15
+            else:
+                self.starting_ent = 0.08
 
     def _on_step(self):
         progress = self.num_timesteps / self.model._total_timesteps
@@ -137,9 +139,10 @@ def main():
     parser.add_argument("--mirror", type=int, default=0)
     args = parser.parse_args()
     
-    # V31: Evidence-based architecture (32D is too small for 15 features, up to 48D)
-    n_heads = 2 if args.d_model <= 48 else 4 # Keep 2 heads for stability
-    n_layers = 1 if args.d_model <= 32 else 2
+    # V45-FAST: Light viable architecture for 21 features + 6 account dims
+    args.d_model = 32
+    n_heads = 2
+    n_layers = 1
     
     POLICY_KWARGS = dict(
         features_extractor_class=TransformerExtractor,
@@ -203,6 +206,9 @@ def main():
         base_path = None
         
     model = None
+    custom_lr = cosine_lr_schedule
+    starting_ent_override = None
+
     if base_path:
         try:
             # V43: Smart Entropy tiered
@@ -214,15 +220,22 @@ def main():
                 starting_ent = 0.15
             else:
                 starting_ent = 0.08
+
+            if base_path == champion_path:
+                starting_ent = 0.25
+                starting_ent_override = 0.25
+                custom_lr = lambda p: 1e-3
+                print("   🔥 AGGRESSIVE MUTATION: High entropy (0.25) + high LR (1e-3) for policy thaw!")
+
             model = PPO.load(
                 base_path,
                 env=env,
                 device=device,
                 custom_objects={
-                    "learning_rate": cosine_lr_schedule,
+                    "learning_rate": custom_lr,
                     "n_steps": 256,       # V40: 512 envs × 256 = 131,072 buffer (expert recommendation)
-                    "batch_size": 2048,   # V40: 64 mini-batches to match larger buffer
-                    "n_epochs": 6,        
+                    "batch_size": 2048,   # Revertido por OOM VRAM en 8GB
+                    "n_epochs": 4,        
                     "gamma": 0.95,
                     "gae_lambda": 0.95,   
                     "ent_coef": starting_ent, 
@@ -253,8 +266,8 @@ def main():
             verbose=1,
             learning_rate=cosine_lr_schedule,
             n_steps=256,         # V40: 512 envs × 256 = 131,072 buffer
-            batch_size=2048,     # V40: 64 mini-batches
-            n_epochs=6,          
+            batch_size=2048,     # Revertido por OOM
+            n_epochs=4,          
             gamma=0.95,
             clip_range=adaptive_clip_schedule,     
             gae_lambda=0.95,     
@@ -278,9 +291,9 @@ def main():
     # V40: Ensure LR scheduler fully resets for cyclic SGDR behavior
     model.num_timesteps = 0
     model._current_progress_remaining = 1.0
-    model.lr_schedule = cosine_lr_schedule
+    model.lr_schedule = custom_lr if 'custom_lr' in locals() else cosine_lr_schedule
 
-    risk_cb = RiskSeekingCallback(champ_pnl=args.champ_pnl)
+    risk_cb = RiskSeekingCallback(champ_pnl=args.champ_pnl, starting_ent_override=starting_ent_override if 'starting_ent_override' in locals() else None)
     early_cb = ColiseoEarlyStop(kl_threshold=0.0007, ev_threshold=0.88, patience=10)
     model.learn(total_timesteps=args.timesteps, callback=[checkpoint_cb, risk_cb, early_cb], reset_num_timesteps=True)
 

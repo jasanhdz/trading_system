@@ -49,7 +49,7 @@ class TransformerExtractor(BaseFeaturesExtractor):
         self.attention_pool = nn.Linear(d_model, 1)
         
         # Account Encoder
-        self.account_embedding = nn.Linear(4, d_model)
+        self.account_embedding = nn.Linear(6, d_model)
         
         # Dropout for regularization
         self.dropout = nn.Dropout(dropout)

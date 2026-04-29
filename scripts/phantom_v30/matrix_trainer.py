@@ -45,7 +45,7 @@ CHALLENGER_B_PATH = "models/phantom_v30_challenger_b.zip"
 SAFE_CHECKPOINT_PATH = "models/phantom_v31_safe_checkpoint.zip"  # Best survivor vault
 
 # Training Config
-ENVS_PER_GPU = 890   # Ajustado agresivamente para 8GB (48D)
+ENVS_PER_GPU = 1024  # V45-Rápido: Incrementado (la red 32D es más ligera)
 TOTAL_TIMESTEPS = 4_000_000  # V39: Bajado a 4M para evaluar y GUARDAR PROGRESO 4 veces más rápido contra reinicios inesperados
 
 # === IRON SHIELD MEMORY MANAGEMENT ===
@@ -92,7 +92,7 @@ def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
     np.random.seed(seed)
 
     action_counts = {0: 0, 1: 0, 2: 0, 3: 0}
-    MAX_STEPS = 8000
+    MAX_STEPS = 4032  # V45-FAST: 14 días exactos de 5m (evaluación más rápida)
     
     obs = eval_env.reset()
     peak_equities = np.full(eval_env.num_envs, float(eval_env.balances[0]))
@@ -102,7 +102,7 @@ def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
     steps = 0
 
     while not done_all.all() and steps < MAX_STEPS:
-        action, _ = model.predict(obs, deterministic=True)
+        action, _ = model.predict(obs, deterministic=False) # V45-Fast: Ligeramente más rápido, explora mejor
         for a in action:
             action_counts[int(a)] = action_counts.get(int(a), 0) + 1
         obs, reward, done, infos = eval_env.step(action)
@@ -122,39 +122,43 @@ def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
     return final_balance, p95_drawdown, action_counts
 
 
-def evaluate_model(model_path: str, eval_env, n_episodes: int = 1, seed: int = 42):
-    """Multi-seed robust evaluation. Runs 7 seeds, reports P75 balance and P95 DD.
-    Prevents overfitting to any single starting configuration."""
-    EVAL_SEEDS = [42, 137, 256, 1337, 7777, 9999, 12345]
-    
+def evaluate_model(model_path: str, windows: list, n_episodes: int = 1, seed: int = 42):
+    """Walk-Forward Multiverse Evaluation. Evaluates over multiple random historical windows."""
     balances = []
     drawdowns = []
     total_action_counts = {0: 0, 1: 0, 2: 0, 3: 0}
     
-    for s in EVAL_SEEDS:
-        bal, dd, ac = evaluate_model_single(model_path, eval_env, seed=s)
+    for i, window in enumerate(windows):
+        eval_env = PhantomMatrixEnv(
+            features=window['features'],
+            close_prices=window['close'],
+            num_envs=64,
+        )
+        bal, dd, ac = evaluate_model_single(model_path, eval_env, seed=seed + i)
+        eval_env.close()
+        
         if bal == -np.inf:
             return -np.inf, 0.0, {}
+            
         balances.append(bal)
         drawdowns.append(dd)
         for k, v in ac.items():
             total_action_counts[k] = total_action_counts.get(k, 0) + v
-    
-    # P25 balance: conservative estimate (bottom quartile — premia consistencia)
-    p25_balance = float(np.percentile(balances, 25))
-    # P95 DD: worst-case risk across all seeds
-    p95_dd = float(np.max(drawdowns))  # Worst DD across all seeds
+            
+    # Score final: media de metrícas para premiar consistencia en el "multiverso"
+    avg_balance = float(np.mean(balances))
+    avg_dd = float(np.mean(drawdowns))
     
     total_actions = sum(total_action_counts.values())
     tr = (total_action_counts.get(1, 0) + total_action_counts.get(2, 0)) / max(total_actions, 1) * 100
     close_rate = total_action_counts.get(3, 0) / max(total_actions, 1)
     
-    print(f"  Balances across seeds: [{', '.join(f'${b:.2f}' for b in balances)}]")
-    print(f"  P25 Balance: ${p25_balance:.2f} | P95 DD: {p95_dd*100:.1f}%")
+    print(f"  Balances in Multiverse: [{', '.join(f'${b:.2f}' for b in balances)}]")
+    print(f"  Avg Balance: ${avg_balance:.2f} | Avg DD: {avg_dd*100:.1f}%")
     print(f"  Actions: Idle={total_action_counts[0]}, Long={total_action_counts[1]}, Short={total_action_counts[2]}, Close={total_action_counts[3]}")
     print(f"  Trading Rate: {tr:.1f}% | Close Rate: {close_rate:.1%}")
 
-    return p25_balance, p95_dd, total_action_counts
+    return avg_balance, avg_dd, total_action_counts
 
 
 def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32, champ_pnl: float = 0.0, mirror: int = 0) -> subprocess.Popen:
@@ -198,6 +202,8 @@ def continuous_train():
 
     iteration = 0
     current_champ_score = 0.0  # Tracks champion score for smart entropy
+    forced_retirement_counter = 0
+
     while True:
         iteration += 1
         mirror_mode = int(iteration % 2 == 0)  # Par=1(Espejo), Impar=0(Real)
@@ -272,19 +278,24 @@ def continuous_train():
             print(f"\n🏟️ COLISEUM: Evaluating all fighters on CPU...")
             sys.stdout.flush()
 
-            eval_data = load_tensor_data("cpu", split="val")
-            features_np = eval_data['features'].numpy()
-            close_np = eval_data['close'].numpy()
+            # === MULTIVERSE EVALUATION (V45) ===
+            all_data = load_tensor_data("cpu", split="all")
+            n_candles = all_data['features'].shape[0]
+            window_size = 14 * 288
+            max_start = n_candles - window_size - 500
             
-            eval_env = PhantomMatrixEnv(
-                features=features_np,
-                close_prices=close_np,
-                num_envs=64,  # V43: 64 envs for even more stable evaluation
-            )
+            windows = []
+            for _ in range(7):
+                start_idx = np.random.randint(264, max_start)
+                end_idx = start_idx + window_size
+                windows.append({
+                    'features': all_data['features'][start_idx:end_idx].numpy(),
+                    'close': all_data['close'][start_idx:end_idx].numpy()
+                })
 
-            # Evaluate Champion (multi-seed robust)
-            print(f"\n  📊 Evaluating Champion (7 seeds)...")
-            champ_score, champ_dd, champ_actions = evaluate_model(CHAMPION_PATH, eval_env)
+            # Evaluate Champion (Walk-Forward robust)
+            print(f"\n  📊 Evaluating Champion (7 Multiverse Windows)...")
+            champ_score, champ_dd, champ_actions = evaluate_model(CHAMPION_PATH, windows)
             
             # Update the tracked champion score for the next iteration's Smart Entropy
             if champ_score != -np.inf:
@@ -296,25 +307,37 @@ def continuous_train():
             best_chall_name = None
             best_chall_dd = 0.0
             best_chall_actions = {}
+            # === RISK-ADJUSTED SCORING (Sortino-Proxy) ===
+            def get_utility(pnl, dd):
+                return pnl * np.power(np.maximum(1.0 - dd, 0.001), 2.0)
+
+            # Evaluate all challengers
+            best_chall_score = -np.inf
+            best_chall_utility = -np.inf
+            best_chall_path = None
+            best_chall_name = None
+            best_chall_dd = 0.0
+            best_chall_actions = {}
             
             all_challenger_reports = ""
 
             for name, path in challengers:
-                print(f"\n  📊 Evaluating {name} (5 seeds)...")
-                score, dd, chall_actions = evaluate_model(path, eval_env)
+                print(f"\n  📊 Evaluating {name} (7 Multiverse Windows)...")
+                score, dd, chall_actions = evaluate_model(path, windows)
+                
+                util = get_utility(score, dd)
                 
                 all_challenger_reports += f"⚔️ *{name}*\n"
                 all_challenger_reports += f"PnL: ${score:.2f} | P95 DD: {dd*100:.1f}%\n"
                 all_challenger_reports += f"Idle: {chall_actions.get(0,0)} | Long: {chall_actions.get(1,0)} | Short: {chall_actions.get(2,0)} | Close: {chall_actions.get(3,0)}\n\n"
 
-                if score > best_chall_score:
+                if util > best_chall_utility:
+                    best_chall_utility = util
                     best_chall_score = score
                     best_chall_path = path
                     best_chall_name = name
                     best_chall_dd = dd
                     best_chall_actions = chall_actions
-
-            eval_env.close()
             
             msg = f"🔄 *Iteration {iteration} Complete*\n\n"
             msg += f"🏆 *Champion*\n"
@@ -331,21 +354,31 @@ def continuous_train():
             champ_survives = champ_dd <= MAX_DD_THRESHOLD
             challenger_survives = best_chall_dd <= MAX_DD_THRESHOLD
             
-            # === RISK-ADJUSTED SCORING (Sortino-Proxy) ===
-            # V44: Utility = PnL * (1 - DD)^2.0. Exponente subido de 1.5→2.0
-            # para castigar DD más agresivamente y romper el equilibrio evolutivo.
-            # Champion actual ($12.52, DD 82.9%): Utility baja de ~0.93 a ~0.51
-            # Challenger eficiente ($12.50, DD 75%): Utility sube a ~0.78 → PROMOVIBLE
-            def get_utility(pnl, dd):
-                return pnl * np.power(np.maximum(1.0 - dd, 0.001), 2.0)
-            
             champ_utility = get_utility(champ_score, champ_dd)
-            chall_utility = get_utility(best_chall_score, best_chall_dd)
+            chall_utility = best_chall_utility
             
             print(f"📊 Risk-Adjusted Utility: Champ={champ_utility:.2f} | Best Challenger={chall_utility:.2f}")
 
+            # Tracking champion DD for Forced Retirement
+            if champ_dd > 0.80:
+                forced_retirement_counter += 1
+            else:
+                forced_retirement_counter = 0
+
+            # === REGLA ESPECIAL: CHAMPION FORCED RETIREMENT ===
+            if forced_retirement_counter >= 5 and best_chall_score > 10.0 and challenger_survives and best_chall_path:
+                print(f"👴 CHAMPION FORCED RETIREMENT! DD > 80% for 5+ iterations.")
+                print(f"👑 CROWNING {best_chall_name} as new CLEAN baseline!")
+                backup_path = f"{CHAMPION_PATH}.forced_retirement_{int(time.time())}"
+                if os.path.exists(CHAMPION_PATH):
+                    os.rename(CHAMPION_PATH, backup_path)
+                shutil.copy2(best_chall_path, CHAMPION_PATH)
+                print(f"✅ Frozen legacy terminated. Evolution restored.")
+                msg += f"👴 Champion Forced Retirement (DD > 80% 5x)\n👑 Crowning {best_chall_name}!"
+                forced_retirement_counter = 0  # reset for next champion
+            
             # === REGLA 0: DETHRONE INCONDICIONAL ===
-            if not champ_survives and challenger_survives and best_chall_path:
+            elif not champ_survives and challenger_survives and best_chall_path:
                 print(f"💀 CHAMPION DETHRONED! Legacy kamikaze DD {champ_dd*100:.1f}% > {MAX_DD_THRESHOLD*100:.0f}% limit.")
                 print(f"👑 CROWNING {best_chall_name} as new CLEAN baseline!")
                 backup_path = f"{CHAMPION_PATH}.kamikaze_banned_{int(time.time())}"
