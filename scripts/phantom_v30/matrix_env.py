@@ -117,6 +117,7 @@ class PhantomMatrixEnv(VecEnv):
         self.best_price[:] = 0.0
         self.entry_quality[:] = 0.0
         self.max_episode_dd[:] = 0.0
+        self.milestone_hits[:] = False
         self.last_actions[:] = -1
         self.action_streaks[:] = 0
         self.n_flips[:] = 0
@@ -323,9 +324,11 @@ class PhantomMatrixEnv(VecEnv):
         trailing_hit = (self.positions != 0) & (self.peak_diff_pct >= TRAILING_ACTIVATION) & (self.peak_diff_pct - price_diff_pct >= TRAILING_CALLBACK)
         # ----------------------------
 
+        hard_stop_hit = (self.positions != 0) & (price_diff_pct <= HARD_STOP)
+
         # A position hits the brackets if the price drops below Stop Loss or rises above Take Profit
         with np.errstate(divide='ignore', invalid='ignore'):
-            bracket_hit = (self.positions != 0) & ((price_diff_pct <= HARD_STOP) | (price_diff_pct >= TAKE_PROFIT) | trailing_hit)
+            bracket_hit = (self.positions != 0) & (hard_stop_hit | (price_diff_pct >= TAKE_PROFIT) | trailing_hit)
         
         # Combine manual AI closures OR mathematical Bracket hits
         active_close = close_mask | bracket_hit
@@ -467,6 +470,7 @@ class PhantomMatrixEnv(VecEnv):
         self.positions = np.where(liquidated, 0.0, self.positions)
         self.entry_prices = np.where(liquidated, 0.0, self.entry_prices)
         new_equity = np.where(liquidated, 0.0, new_equity)
+        current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
         
         # ═══════════════ REWARD V13: Asymmetric Greed & Variance Compression ═══════════════
         
@@ -487,13 +491,11 @@ class PhantomMatrixEnv(VecEnv):
         # ignorando el expected value negativo. El asymmetric log_return ya
         # incentiva mantener ganancias sin crear el sesgo de espera infinita.
         
-        # 2. Power-Law (V43: exponente 3.2→2.5, factor 14→10 — reduce jackpot effect)
-        # El exponente alto creaba una "opción de lotería" que dominaba el expected value.
-        # Con 2.5 sigue recompensando ganancias grandes pero no cataliza el hold infinito.
+        # 2. Power-Law (V46.1: reduce jackpot effect while preserving profitable closes)
         closed_profit = just_closed_trade & (closed_trade_pnl > 0)
         profit_pct = np.clip(closed_trade_pnl / safe_prev, 0.0, 1.0)
-        power_law = np.power(1.0 + profit_pct, 2.5) * 10.0
-        compounding_bonus = power_law * (0.8 + 3.0 * profit_pct)
+        power_law = np.power(1.0 + profit_pct, 1.4) * 3.0
+        compounding_bonus = power_law * (0.5 + 1.5 * profit_pct)
         execution_bonus = np.where(closed_profit, compounding_bonus, 0.0)
         reward += execution_bonus
         
@@ -504,17 +506,20 @@ class PhantomMatrixEnv(VecEnv):
         equity_ratio = new_equity / INITIAL_BALANCE                  # (num_envs,)
         
         milestone_bonus = np.zeros(self.num_envs, dtype=np.float32)
+        milestone_penalty = np.zeros(self.num_envs, dtype=np.float32)
         steps_to_milestone = np.maximum(self.episode_lengths, 1)  # Avoid div by zero
         velocity_factor = np.clip(100.0 / steps_to_milestone, 0.5, 2.0)
+        dd_safe = current_dd < 0.35
         
         for i in range(5):
             hit = equity_ratio >= milestones[i]
             new_hit = hit & ~self.milestone_hits[:, i]
             velocity_adjusted_reward = milestone_rewards[i] * velocity_factor
-            milestone_bonus += np.where(new_hit, velocity_adjusted_reward, 0.0)
+            milestone_bonus += np.where(new_hit & dd_safe, velocity_adjusted_reward, 0.0)
+            milestone_penalty += np.where(new_hit & ~dd_safe, -1.0, 0.0)
             self.milestone_hits[:, i] = self.milestone_hits[:, i] | new_hit
         
-        reward += milestone_bonus
+        reward += milestone_bonus + milestone_penalty
         
         # 3. Smart Close Rewards (V43: reemplaza Organic Sniper roto)
         # El bug: organic_sniper usaba price_diff_pct DESPUÉS del cierre (positions==0),
@@ -530,6 +535,14 @@ class PhantomMatrixEnv(VecEnv):
         # Neutraliza el miedo al flip_penalty cuando el trade va muy mal
         close_deep_loss = close_mask & (pre_close_pnl_pct < -0.015)  # <-1.5% precio = <-30% ROE@20x
         reward = np.where(close_deep_loss, reward + 0.2, reward)
+
+        bracket_penalty = np.where(hard_stop_hit, -1.5, 0.0)
+        manual_loss_cut_bonus = np.where(
+            close_mask & (pre_close_pnl_pct < 0.0) & (pre_close_pnl_pct > -0.012),
+            0.30,
+            0.0
+        )
+        reward += bracket_penalty + manual_loss_cut_bonus
         
         # 4.1 Momentum Bonus
         market_momentum = self.features[new_idx][:, 0]  # log_ret de la vela actual
@@ -584,12 +597,13 @@ class PhantomMatrixEnv(VecEnv):
         exhausted_short = just_opened & (actions == 2) & (rsi_norm < -0.6)
         reward = np.where(exhausted_long | exhausted_short, reward - 0.3, reward)
         
-        # --- NUEVO: Drawdown Duration Penalty ---
-        in_drawdown = (prev_positions != 0) & (self.positions != 0) & (price_diff_pct < 0)
+        # V46.1: Drawdown Duration Penalty. Staying underwater must hurt even if flat.
+        in_drawdown = current_dd > 0.25
         self.dd_duration = np.where(in_drawdown, self.dd_duration + 1, 0)
+        dd_duration_excess = np.maximum(self.dd_duration - 24, 0)
         dd_duration_penalty = np.where(
-            in_drawdown,
-            -0.01 * np.power(self.dd_duration / 10.0, 1.5),
+            self.dd_duration > 24,
+            -0.02 * np.log1p(dd_duration_excess),
             0.0
         )
         reward += dd_duration_penalty
@@ -633,15 +647,19 @@ class PhantomMatrixEnv(VecEnv):
         flipped = flip_long | flip_short
         reward = np.where(flipped, reward - 0.30, reward)
         
-        idle_penalty = np.where(
-            self.flat_steps > 150, -0.35,
-            np.where(self.flat_steps > 60, -0.12, 0.0)
+        flat = self.positions == 0
+        idle_action = actions == 0
+        idle_patience_bonus = np.where(flat & idle_action, 0.002, 0.0)
+        stale_flat_excess = np.maximum(self.flat_steps - 288, 0) / 288.0
+        stale_flat_penalty = np.where(
+            self.flat_steps > 288,
+            -0.03 * np.log1p(stale_flat_excess),
+            0.0
         )
-        reward += idle_penalty
+        reward += idle_patience_bonus + stale_flat_penalty
         
         # 7. Death Penalty
         ruined = liquidated | (new_equity < INITIAL_BALANCE * 0.1)
-        current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
         over_dd = current_dd > 0.80
         ruined = ruined | over_dd
         reward = np.where(ruined, -10.0, reward)
@@ -658,16 +676,23 @@ class PhantomMatrixEnv(VecEnv):
         # ═══════════════ DONE / RESET ═══════════════
         done = ruined | mission_accomplished | (self.current_steps >= self.n_candles - 2)
         
-        # --- PHASE B: Continuous Risk Penalty (V43: escalado, -0.06→-0.12/-0.20) ---
-        # Escalonado: DD leve duele moderado, DD profundo duele extremo.
-        # Esto hace que el milestone de $60 sea ECONÓMICAMENTE INVIABLE si el DD es alto.
-        current_dd = (self.peak_equity - new_equity) / np.maximum(self.peak_equity, 1e-10)
-        risk_penalty = np.where(
-            current_dd > 0.40,
-            -0.20 * np.power(current_dd, 1.5),  # DD profundo: dolor extremo
-            -0.08 * np.power(current_dd, 1.5)   # DD leve: dolor moderado
+        # V46.1: Anti-Kamikaze Drawdown Penalty. Profit is not valid if it
+        # travelled through Survivor-filter drawdown.
+        dd_soft = 0.35
+        dd_hard = 0.65
+        dd_soft_excess = np.maximum(current_dd - dd_soft, 0.0)
+        dd_hard_excess = np.maximum(current_dd - dd_hard, 0.0)
+        dd_penalty = np.where(
+            current_dd > dd_soft,
+            -0.50 * np.power(dd_soft_excess, 1.2),
+            0.0
         )
-        reward += risk_penalty
+        dd_penalty += np.where(
+            current_dd > dd_hard,
+            -3.00 * np.power(dd_hard_excess, 1.1),
+            0.0
+        )
+        reward += dd_penalty
         
         # --- PHASE B: Trend Capture Bonus (Regime Awareness) ---
         # Premiamos capturar movimientos cuando ADX es fuerte y la tendencia es limpia.

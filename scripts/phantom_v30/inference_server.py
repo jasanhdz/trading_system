@@ -88,7 +88,7 @@ def get_signal(df: pd.DataFrame):
     """
     global model
     if model is None:
-        return 0, 0.5, 1, 0.0, 0.0, [0.5, 0.25, 0.25, 0.0]  # Default: IDLE
+        return 0, 0.0, 0, 0.0, 0.0, [1.0, 0.0, 0.0, 0.0]  # Default: IDLE
     
     # Feature Engineering (must match env.py)
     df = df.copy()
@@ -242,14 +242,21 @@ def get_signal(df: pd.DataFrame):
     
     # Build observation window
     if len(df) < WINDOW_SIZE:
-        return 0, 0.5, 1, 0.0, 0.0, [0.5, 0.25, 0.25, 0.0]  # Not enough data
+        return 0, 0.0, 0, 0.0, 0.0, [1.0, 0.0, 0.0, 0.0]  # Not enough data
     
     window = df[market_features].iloc[-WINDOW_SIZE:].values.astype(np.float32)
     
     # Account state (flat position for inference)
     # Must match matrix_env.py exactly when flat:
-    # [balance_norm=1.0, leverage_used=0.0, pnl_pct=0.0, in_trade=0.0]
-    account = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    # [balance_norm, leverage_used, pnl_pct, in_trade, time_in_trade, current_roe]
+    account = np.array([
+        1.0,  # balance_norm
+        0.0,  # leverage_used
+        0.0,  # pnl_pct
+        0.0,  # in_trade
+        0.0,  # time_in_trade
+        0.0,  # current_roe
+    ], dtype=np.float32)
     
     obs = {
         'market': window,
@@ -266,11 +273,28 @@ def get_signal(df: pd.DataFrame):
         dist = model.policy.get_distribution(obs_tensor)
         probs = dist.distribution.probs.detach().cpu().numpy().flatten()
         # probs[0]=IDLE, probs[1]=LONG, probs[2]=SHORT, probs[3]=CLOSE
+        top_action = int(np.argmax(probs))
+        top_prob = float(probs[top_action])
+        long_short_gap = abs(float(probs[1]) - float(probs[2]))
+
+        final_action = top_action
+
+        if top_prob < 0.65:
+            final_action = 0
+
+        if final_action in [1, 2] and long_short_gap < 0.15:
+            final_action = 0
+
+        if final_action == 3:
+            final_action = 0
+
+        action = final_action
         confidence = float(probs[action])
         all_probs = [float(p) for p in probs]
     except:
-        confidence = 0.5
-        all_probs = [0.5, 0.25, 0.25, 0.0]  # fallback
+        action = 0
+        confidence = 0.0
+        all_probs = [1.0, 0.0, 0.0, 0.0]  # fallback
     
     # Return CVD values for the API response
     cvd_z_last = float(df['cvd_z'].iloc[-1]) if 'cvd_z' in df.columns else 0.0

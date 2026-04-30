@@ -276,8 +276,12 @@ def main():
             device=device,
         )
 
+    checkpoint_every_timesteps = int(os.environ.get("PHANTOM_CHECKPOINT_EVERY_TIMESTEPS", "1000000"))
     checkpoint_cb = CheckpointCallback(
-        save_freq=max(500_000 // (args.num_envs * 256), 1),
+        # CheckpointCallback counts VecEnv steps, not PPO rollout iterations.
+        # With 1024 envs, dividing by n_steps saved on every callback call and
+        # produced thousands of checkpoints on the HDD.
+        save_freq=max(checkpoint_every_timesteps // args.num_envs, 1),
         save_path=checkpoint_dir,
         name_prefix="ckpt",
         save_replay_buffer=False,

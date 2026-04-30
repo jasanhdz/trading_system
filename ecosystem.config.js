@@ -65,12 +65,19 @@ module.exports = {
             cwd: "/home/jasan/Develop/trading_system",
             instances: 1,
             autorestart: true,
+            restart_delay: 10000,
+            max_restarts: 10,
             watch: false,
             // Load environment variables from .env file
             // Note: This requires PM2 to support 'env_file' or requires manual sourcing.
             // If this fails, we might need to use python-dotenv.
             env: {
-                "PYTHONUNBUFFERED": "1"
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONPATH": "/home/jasan/Develop/trading_system",
+                "WATCHDOG_CHECK_INTERVAL": "60",
+                "IO_FULL_AVG10_STOP_THRESHOLD": "50",
+                "IO_SOME_AVG10_STOP_THRESHOLD": "65",
+                "IO_PRESSURE_CONSECUTIVE_LIMIT": "3"
             },
             env_file: "binance-futures-bot-ts/.env"
         }

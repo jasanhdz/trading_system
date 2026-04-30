@@ -43,9 +43,11 @@ CHAMPION_PATH = "models/phantom_v30_champion.zip"
 CHALLENGER_A_PATH = "models/phantom_v30_challenger_a.zip"
 CHALLENGER_B_PATH = "models/phantom_v30_challenger_b.zip"
 SAFE_CHECKPOINT_PATH = "models/phantom_v31_safe_checkpoint.zip"  # Best survivor vault
+HEARTBEAT_PATH = Path("/home/jasan/Develop/trading_system/logs/training.log")
 
 # Training Config
-ENVS_PER_GPU = 1024  # V45-Rápido: Incrementado (la red 32D es más ligera)
+ENVS_PER_GPU = 1024  # Fast path when VRAM is clean.
+FALLBACK_ENVS_PER_GPU = 512  # Retry guardrail after HIP OOM/GPU hang.
 TOTAL_TIMESTEPS = 4_000_000  # V39: Bajado a 4M para evaluar y GUARDAR PROGRESO 4 veces más rápido contra reinicios inesperados
 
 # === IRON SHIELD MEMORY MANAGEMENT ===
@@ -53,7 +55,17 @@ os.environ["PYTORCH_HIP_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["ROC_ENABLE_PRE_VEGA"] = "1" 
 
 MIN_VIABLE_SCORE = 25.0  # V10: $25 minimum ($5 ROI from $20)
-MAX_DD_THRESHOLD = 0.90  # V13.1: Kamikaze filter — 90% DD allowed (let them surf the wicks)
+MAX_DD_THRESHOLD = 0.65  # V46.0: Survivor filter — discard kamikaze drawdowns.
+MIN_FINAL_BALANCE = 21.0  # V46.0: At least +$1 from the $20 baseline.
+PROMOTION_MARGIN = 1.10  # V46.0: Require a material utility improvement.
+
+
+def heartbeat():
+    try:
+        HEARTBEAT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        HEARTBEAT_PATH.touch()
+    except Exception as e:
+        print(f"⚠️ Failed to touch heartbeat file: {e}")
 
 
 def send_telegram_message(message: str):
@@ -102,7 +114,7 @@ def evaluate_model_single(model_path: str, eval_env, seed: int = 42):
     steps = 0
 
     while not done_all.all() and steps < MAX_STEPS:
-        action, _ = model.predict(obs, deterministic=False) # V45-Fast: Ligeramente más rápido, explora mejor
+        action, _ = model.predict(obs, deterministic=True)
         for a in action:
             action_counts[int(a)] = action_counts.get(int(a), 0) + 1
         obs, reward, done, infos = eval_env.step(action)
@@ -129,6 +141,7 @@ def evaluate_model(model_path: str, windows: list, n_episodes: int = 1, seed: in
     total_action_counts = {0: 0, 1: 0, 2: 0, 3: 0}
     
     for i, window in enumerate(windows):
+        heartbeat()
         eval_env = PhantomMatrixEnv(
             features=window['features'],
             close_prices=window['close'],
@@ -161,7 +174,7 @@ def evaluate_model(model_path: str, windows: list, n_episodes: int = 1, seed: in
     return avg_balance, avg_dd, total_action_counts
 
 
-def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32, champ_pnl: float = 0.0, mirror: int = 0) -> subprocess.Popen:
+def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32, champ_pnl: float = 0.0, mirror: int = 0, num_envs: int = ENVS_PER_GPU) -> subprocess.Popen:
     """Launch a challenger training in a completely isolated subprocess."""
     script = Path(__file__).parent / "train_single_challenger.py"
     env = os.environ.copy()
@@ -173,14 +186,14 @@ def launch_challenger(gpu_id: int, save_path: str, seed: int, d_model: int = 32,
         str(script),
         "--save-path", save_path,
         "--seed", str(seed),
-        "--num-envs", str(ENVS_PER_GPU),
+        "--num-envs", str(num_envs),
         "--timesteps", str(TOTAL_TIMESTEPS),
         "--d-model", str(d_model),
         "--champ-pnl", str(champ_pnl),
         "--mirror", str(mirror),
     ]
 
-    print(f"  🚀 Launching Challenger on GPU {gpu_id} (PID isolation)...")
+    print(f"  🚀 Launching Challenger on GPU {gpu_id} (PID isolation, envs={num_envs})...")
     proc = subprocess.Popen(
         cmd,
         stdout=sys.stdout,
@@ -197,6 +210,7 @@ def continuous_train():
     print(f"🚀 Phantom V30 Matrix Trainer (Subprocess Mode)")
     print(f"   GPUs: {n_gpus}")
     print(f"   Envs per GPU: {ENVS_PER_GPU}")
+    print(f"   Fallback envs per GPU: {FALLBACK_ENVS_PER_GPU}")
     print(f"   Total parallel agents: {ENVS_PER_GPU * min(n_gpus, 2)}")
     print(f"   Timesteps per iteration: {TOTAL_TIMESTEPS:,}")
 
@@ -205,6 +219,7 @@ def continuous_train():
     forced_retirement_counter = 0
 
     while True:
+        heartbeat()
         iteration += 1
         mirror_mode = int(iteration % 2 == 0)  # Par=1(Espejo), Impar=0(Real)
         print(f"\n{'='*60}")
@@ -214,6 +229,7 @@ def continuous_train():
         # === DYNAMIC DATA COLLECTION ===
         print("\n📡 Fetching freshest market data (update_ml_candles.py)...")
         try:
+            heartbeat()
             subprocess.run([sys.executable, "scripts/update_ml_candles.py"], check=True)
             print("✅ Data synchronization complete.")
         except subprocess.CalledProcessError as e:
@@ -232,10 +248,7 @@ def continuous_train():
 
             # Wait for both with HEARTBEAT (touch log every 10s so Watchdog knows we're alive)
             while proc_a.poll() is None or proc_b.poll() is None:
-                try:
-                    Path("/home/jasan/Develop/trading_system/logs/training.log").touch()
-                except Exception:
-                    pass
+                heartbeat()
                 time.sleep(10)
 
             rc_a = proc_a.returncode
@@ -255,8 +268,32 @@ def continuous_train():
             else:
                 print(f"  ⚠️ Challenger B failed (exit code {rc_b})")
 
+            if not challengers and FALLBACK_ENVS_PER_GPU < ENVS_PER_GPU:
+                print(f"  ⚠️ Both challengers failed at {ENVS_PER_GPU} envs. Retrying once at {FALLBACK_ENVS_PER_GPU} envs...")
+                send_telegram_message(f"⚠️ Both challengers failed at {ENVS_PER_GPU} envs. Retrying at {FALLBACK_ENVS_PER_GPU} envs to avoid a full trainer restart.")
+
+                proc_a = launch_challenger(0, CHALLENGER_A_PATH, seed_a + 101, d_model=48, champ_pnl=current_champ_score, mirror=mirror_mode, num_envs=FALLBACK_ENVS_PER_GPU)
+                proc_b = launch_challenger(1, CHALLENGER_B_PATH, seed_b + 101, d_model=48, champ_pnl=current_champ_score, mirror=mirror_mode, num_envs=FALLBACK_ENVS_PER_GPU)
+                while proc_a.poll() is None or proc_b.poll() is None:
+                    heartbeat()
+                    time.sleep(10)
+
+                rc_a = proc_a.returncode
+                rc_b = proc_b.returncode
+                print(f"\n⏱️ Fallback GPUs finished (rc: {rc_a}, {rc_b})")
+                sys.stdout.flush()
+
+                if rc_a == 0:
+                    challengers.append(("Challenger A (GPU:0 fallback)", CHALLENGER_A_PATH))
+                else:
+                    print(f"  ⚠️ Fallback Challenger A failed (exit code {rc_a})")
+                if rc_b == 0:
+                    challengers.append(("Challenger B (GPU:1 fallback)", CHALLENGER_B_PATH))
+                else:
+                    print(f"  ⚠️ Fallback Challenger B failed (exit code {rc_b})")
+
             if not challengers:
-                msg_err = "  ❌ Both challengers failed! Retrying in 30s..."
+                msg_err = "  ❌ Both challengers failed after fallback! Retrying in 30s..."
                 print(msg_err)
                 send_telegram_message(msg_err)
                 time.sleep(30)
@@ -265,6 +302,10 @@ def continuous_train():
             print(f"\n🏋️ Single-GPU Mode: Training 1 challenger...")
             proc = launch_challenger(0, CHALLENGER_A_PATH, seed_a, champ_pnl=current_champ_score, mirror=mirror_mode)
             rc = proc.wait()
+            if rc != 0 and FALLBACK_ENVS_PER_GPU < ENVS_PER_GPU:
+                print(f"  ⚠️ Challenger failed at {ENVS_PER_GPU} envs. Retrying once at {FALLBACK_ENVS_PER_GPU} envs...")
+                proc = launch_challenger(0, CHALLENGER_A_PATH, seed_a + 101, champ_pnl=current_champ_score, mirror=mirror_mode, num_envs=FALLBACK_ENVS_PER_GPU)
+                rc = proc.wait()
             if rc != 0:
                 msg_err = f"  ❌ Challenger failed (exit code {rc}). Retrying in 30s..."
                 print(msg_err)
@@ -277,9 +318,11 @@ def continuous_train():
         try:
             print(f"\n🏟️ COLISEUM: Evaluating all fighters on CPU...")
             sys.stdout.flush()
+            heartbeat()
 
             # === MULTIVERSE EVALUATION (V45) ===
             all_data = load_tensor_data("cpu", split="all")
+            heartbeat()
             n_candles = all_data['features'].shape[0]
             window_size = 14 * 288
             max_start = n_candles - window_size - 500
@@ -295,11 +338,12 @@ def continuous_train():
 
             # Evaluate Champion (Walk-Forward robust)
             print(f"\n  📊 Evaluating Champion (7 Multiverse Windows)...")
+            heartbeat()
             champ_score, champ_dd, champ_actions = evaluate_model(CHAMPION_PATH, windows)
             
             # Update the tracked champion score for the next iteration's Smart Entropy
             if champ_score != -np.inf:
-                current_champ_score = champ_score
+                current_champ_score = champ_score - 20.0
 
             # Evaluate all challengers
             best_chall_score = -np.inf
@@ -307,9 +351,23 @@ def continuous_train():
             best_chall_name = None
             best_chall_dd = 0.0
             best_chall_actions = {}
-            # === RISK-ADJUSTED SCORING (Sortino-Proxy) ===
-            def get_utility(pnl, dd):
-                return pnl * np.power(np.maximum(1.0 - dd, 0.001), 2.0)
+            # === SURVIVOR UTILITY (V46.0) ===
+            def get_utility(final_balance, max_dd):
+                initial_balance = 20.0
+                net_profit = final_balance - initial_balance
+
+                if final_balance < MIN_FINAL_BALANCE:
+                    return -10.0 * np.log1p(max(0.1, initial_balance - final_balance))
+
+                utility = net_profit * np.power(max(1.0 - max_dd, 0.001), 3.0)
+
+                if max_dd > 0.45:
+                    utility *= np.exp(-8.0 * (max_dd - 0.45))
+
+                if max_dd > MAX_DD_THRESHOLD:
+                    utility = -abs(utility)
+
+                return utility
 
             # Evaluate all challengers
             best_chall_score = -np.inf
@@ -323,12 +381,14 @@ def continuous_train():
 
             for name, path in challengers:
                 print(f"\n  📊 Evaluating {name} (7 Multiverse Windows)...")
+                heartbeat()
                 score, dd, chall_actions = evaluate_model(path, windows)
                 
                 util = get_utility(score, dd)
+                net_profit = score - 20.0
                 
                 all_challenger_reports += f"⚔️ *{name}*\n"
-                all_challenger_reports += f"PnL: ${score:.2f} | P95 DD: {dd*100:.1f}%\n"
+                all_challenger_reports += f"Balance: ${score:.2f} | Net: ${net_profit:+.2f} | P95 DD: {dd*100:.1f}%\n"
                 all_challenger_reports += f"Idle: {chall_actions.get(0,0)} | Long: {chall_actions.get(1,0)} | Short: {chall_actions.get(2,0)} | Close: {chall_actions.get(3,0)}\n\n"
 
                 if util > best_chall_utility:
@@ -341,7 +401,8 @@ def continuous_train():
             
             msg = f"🔄 *Iteration {iteration} Complete*\n\n"
             msg += f"🏆 *Champion*\n"
-            msg += f"PnL: ${champ_score:.2f} | P95 DD: {champ_dd*100:.1f}%\n"
+            champ_net = champ_score - 20.0
+            msg += f"Balance: ${champ_score:.2f} | Net: ${champ_net:+.2f} | P95 DD: {champ_dd*100:.1f}%\n"
             msg += f"Idle: {champ_actions.get(0,0)} | Long: {champ_actions.get(1,0)} | Short: {champ_actions.get(2,0)} | Close: {champ_actions.get(3,0)}\n\n"
             msg += all_challenger_reports
             msg += "📝 *Result:*\n"
@@ -351,11 +412,24 @@ def continuous_train():
             print(f"⚔️  Best Challenger: ${best_chall_score:.2f} (P95 DD: {best_chall_dd*100:.1f}%) [{best_chall_name}]")
             print(f"📏 Survival Filter: Max DD allowed = {MAX_DD_THRESHOLD*100:.0f}%")
 
-            champ_survives = champ_dd <= MAX_DD_THRESHOLD
-            challenger_survives = best_chall_dd <= MAX_DD_THRESHOLD
+            champ_survives = (
+                champ_dd <= MAX_DD_THRESHOLD and
+                champ_score >= MIN_FINAL_BALANCE
+            )
+            challenger_survives = (
+                best_chall_dd <= MAX_DD_THRESHOLD and
+                best_chall_score >= MIN_FINAL_BALANCE
+            )
             
             champ_utility = get_utility(champ_score, champ_dd)
             chall_utility = best_chall_utility
+            promote = (
+                challenger_survives and
+                chall_utility > max(
+                    champ_utility * PROMOTION_MARGIN,
+                    champ_utility + 0.05,
+                )
+            )
             
             print(f"📊 Risk-Adjusted Utility: Champ={champ_utility:.2f} | Best Challenger={chall_utility:.2f}")
 
@@ -366,7 +440,7 @@ def continuous_train():
                 forced_retirement_counter = 0
 
             # === REGLA ESPECIAL: CHAMPION FORCED RETIREMENT ===
-            if forced_retirement_counter >= 5 and best_chall_score > 10.0 and challenger_survives and best_chall_path:
+            if forced_retirement_counter >= 5 and challenger_survives and best_chall_path:
                 print(f"👴 CHAMPION FORCED RETIREMENT! DD > 80% for 5+ iterations.")
                 print(f"👑 CROWNING {best_chall_name} as new CLEAN baseline!")
                 backup_path = f"{CHAMPION_PATH}.forced_retirement_{int(time.time())}"
@@ -379,20 +453,20 @@ def continuous_train():
             
             # === REGLA 0: DETHRONE INCONDICIONAL ===
             elif not champ_survives and challenger_survives and best_chall_path:
-                print(f"💀 CHAMPION DETHRONED! Legacy kamikaze DD {champ_dd*100:.1f}% > {MAX_DD_THRESHOLD*100:.0f}% limit.")
+                print(f"💀 CHAMPION DETHRONED! Legacy baseline failed Survivor filter: ${champ_score:.2f}, DD {champ_dd*100:.1f}%.")
                 print(f"👑 CROWNING {best_chall_name} as new CLEAN baseline!")
                 backup_path = f"{CHAMPION_PATH}.kamikaze_banned_{int(time.time())}"
                 if os.path.exists(CHAMPION_PATH):
                     os.rename(CHAMPION_PATH, backup_path)
                 shutil.copy2(best_chall_path, CHAMPION_PATH)
                 print(f"✅ New clean Champion crowned! Kamikaze lineage terminated.")
-                msg += f"💀 Champion Dethroned (DD > {MAX_DD_THRESHOLD*100:.0f}% limit)\n👑 Crowning {best_chall_name}!"
+                msg += f"💀 Champion Dethroned (failed Survivor filter)\n👑 Crowning {best_chall_name}!"
             
             # === REGLA 1: PROMOTION POR UTILIDAD (EFICIENCIA) ===
-            elif challenger_survives and chall_utility > champ_utility and best_chall_path:
-                print(f"🚀 PROMOTION! {best_chall_name} defeats Champion on RISK-ADJUSTED basis!")
+            elif promote and best_chall_path:
+                print(f"🚀 PROMOTION! {best_chall_name} defeats Champion on SURVIVOR utility!")
                 print(f"   Utility: {chall_utility:.2f} > {champ_utility:.2f} ✅")
-                print(f"   PnL:     ${best_chall_score:.2f} vs ${champ_score:.2f}")
+                print(f"   Balance: ${best_chall_score:.2f} vs ${champ_score:.2f}")
                 print(f"   DD:      {best_chall_dd*100:.1f}% vs {champ_dd*100:.1f}%")
                 
                 backup_path = f"{CHAMPION_PATH}.backup_{int(time.time())}"
@@ -404,13 +478,13 @@ def continuous_train():
                 
             # === REGLA 2: Bloqueo de Kamikazes retadores ===
             elif not challenger_survives and best_chall_score > champ_score:
-                print(f"💀 BLOCKED! {best_chall_name} earned ${best_chall_score:.2f} but P95 DD {best_chall_dd*100:.1f}% exceeds {MAX_DD_THRESHOLD*100:.0f}% limit.")
+                print(f"💀 BLOCKED! {best_chall_name} earned ${best_chall_score:.2f} with P95 DD {best_chall_dd*100:.1f}%, failing Survivor filter.")
                 print(f"🛡️ Champion survives by survival filter.")
-                msg += f"💀 BLOCKED! {best_chall_name} DD {best_chall_dd*100:.1f}% > limit. Champion survives."
+                msg += f"💀 BLOCKED! {best_chall_name} failed Survivor filter. Champion survives."
             
             # === REGLA 3: Baseline inicial si no hay campeón ===
             elif champ_score == -np.inf and best_chall_score > -np.inf and best_chall_path:
-                if challenger_survives and best_chall_score >= 10.0:
+                if challenger_survives:
                     print(f"🆕 No champion. Auto-promoting {best_chall_name} as founding baseline.")
                     shutil.copy2(best_chall_path, CHAMPION_PATH)
                     msg += f"🆕 No champion. Auto-promoting {best_chall_name} as baseline."
@@ -422,10 +496,11 @@ def continuous_train():
                 msg += "🛡️ DEFENSE! Champion retains title by efficiency."
 
             send_telegram_message(msg)
+            heartbeat()
 
             # --- ONGOING LEARNING: 3-Tier Survivor Vault ---
             if best_chall_path and os.path.exists(best_chall_path):
-                if best_chall_dd < 0.90:
+                if best_chall_dd <= MAX_DD_THRESHOLD and best_chall_score >= MIN_FINAL_BALANCE:
                     # ✅ SAFE: Save as ongoing baseline AND update the safe checkpoint vault
                     shutil.copy2(best_chall_path, "models/phantom_v31_latest_challenger.zip")
                     shutil.copy2(best_chall_path, SAFE_CHECKPOINT_PATH)
@@ -454,10 +529,7 @@ def continuous_train():
         sys.stdout.flush()
 
         # HEARTBEAT: Touch the log file so Watchdog knows we are alive
-        try:
-            Path("logs/training.log").touch()
-        except Exception as e:
-            print(f"⚠️ Failed to touch heartbeat file: {e}")
+        heartbeat()
 
         print(f"\n⏸️  Sleeping 10s before next iteration...")
         time.sleep(10)
