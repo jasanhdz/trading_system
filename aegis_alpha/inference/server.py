@@ -32,7 +32,7 @@ def _neutral_features() -> np.ndarray:
 
 
 def _account_flat() -> np.ndarray:
-    return np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    return np.array([1.0, 0.0, 0.0, 0.0, 0.0, cfg.risk.min_flat_steps / 288.0], dtype=np.float32)
 
 
 def _build_response(symbol: str) -> AegisPredictResponse:

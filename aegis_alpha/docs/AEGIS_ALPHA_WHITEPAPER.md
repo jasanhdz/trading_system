@@ -328,13 +328,49 @@ metrics completas de episode
 
 ### Bloque 2: BC Prudente
 
-Pendiente:
+Estado: implementado en v0.2.0 como primera base entrenable.
+
+Completado:
 
 ```text
-generador de dataset Aegis
-entrenamiento aegis_bc_prudent.zip
-evaluación BC en AegisEnv/Coliseo
+tools/build_bc_dataset.py
+bc/labeler.py prudente
+bc/train_bc.py supervisado
+bc/evaluate_bc.py
+models/bc/aegis_bc_prudent.zip
 ```
+
+Artefactos actuales:
+
+```text
+aegis_alpha/data/processed/bc_prudent_dataset.npz
+aegis_alpha/models/bc/aegis_bc_prudent.zip
+```
+
+Distribución del dataset v0.2.0:
+
+```text
+Samples: 231,444
+IDLE: 84.0%
+LONG: 4.1%
+SHORT: 3.9%
+CLOSE: 8.0%
+```
+
+Resultado de evaluación inicial del BC en ventana de 4,032 pasos:
+
+```text
+Balance: $20.65
+Net: +$0.65
+P95 DD: 6.95%
+Max DD: 9.95%
+Opens: 190
+Direction dominance: 73.7%
+Invalid actions: 70
+Fees: $5.14
+```
+
+Lectura: el BC v0.2.0 ya sirve como semilla prudente para PPO porque controla DD, evita dominancia extrema y no nace de random. No es señal productiva todavía: fees, calibración SignalQ y gap long/short siguen pendientes.
 
 ### Bloque 3: PPO Sobre BC
 
@@ -411,3 +447,90 @@ Behavior Cloning prudente
 ```
 
 El sistema actual ya es seguro para runtime porque responde `IDLE` sin champion. La próxima prioridad es construir el primer BC prudente real y evaluarlo antes de cualquier entrenamiento PPO.
+
+## 9. Changelog Vivo
+
+### v0.2.0 - Behavior Cloning Prudente
+
+Fecha: 2026-05-02.
+
+Cambios:
+
+```text
+Se implementó el pipeline BC completo:
+- tools/build_bc_dataset.py
+- bc/labeler.py
+- bc/train_bc.py
+- bc/evaluate_bc.py
+```
+
+`tools/build_bc_dataset.py` genera el dataset supervisado desde candles ETHUSDT 5m, construye features 21D, calcula régimen, simula estado básico de cuenta/posición, etiqueta acciones prudentes y guarda metadata de evaluación futura:
+
+```text
+market: (N, 64, 21)
+account: (N, 6)
+actions: IDLE/LONG/SHORT/CLOSE
+timestamp
+price
+regime
+future_return_3/6/12
+mfe_12
+mae_12
+```
+
+El builder aplica downsampling controlado de IDLE para conservar labels válidos por cooldown sin dejar que el entrenamiento colapse a IDLE puro. El target actual es `target_idle_pct=0.84`.
+
+`bc/labeler.py` define el maestro heurístico prudente. Reglas principales:
+
+```text
+si no hay cooldown suficiente -> IDLE
+si está flat -> LONG/SHORT solo con tendencia, eficiencia, ADX y CVD no contradictorio
+si está en posición -> CLOSE por stop controlado, invalidación, take-profit debilitado o max hold
+si hay duda -> IDLE
+```
+
+`bc/train_bc.py` entrena una política supervisada compatible con `AegisTransformerExtractor` y guarda el modelo SB3 PPO inicializado por BC. El mejor resultado actual se entrenó sin oversampling (`sampler_power=0.0`) usando pesos de clase suaves.
+
+`bc/evaluate_bc.py` ejecuta el modelo en `AegisEnv` y reporta:
+
+```text
+balance
+net
+p95_dd
+max_dd
+opens
+long_opens
+short_opens
+manual_closes
+invalid_actions
+fees
+avg_hold_steps
+avg_flat_steps
+direction_dominance
+top_prob_avg
+signals_gt_65_pct
+long_short_gap_avg
+last_regime
+```
+
+Cambio de arquitectura importante: el vector `account (6,)` ahora es explícito para cooldown y dirección:
+
+```text
+0 equity_ratio
+1 signed_exposure
+2 roe
+3 position_side
+4 hold_steps / 288
+5 flat_steps / 288
+```
+
+Razón: la versión anterior no exponía `flat_steps`; el BC no podía aprender cuándo una entrada era inválida por cooldown. Este cambio redujo fuertemente acciones inválidas durante evaluación.
+
+Estado de producción:
+
+```text
+No hay champion Aegis activo.
+La API sigue respondiendo IDLE defensivo.
+El bot TypeScript no fue modificado.
+El modelo BC queda como semilla para PPO, no como señal productiva.
+```

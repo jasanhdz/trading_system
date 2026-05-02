@@ -27,8 +27,13 @@ class AegisEnv:
         self.flat_steps = self.risk.min_flat_steps
         self.total_fees = 0.0
         self.opens = 0
+        self.long_opens = 0
+        self.short_opens = 0
         self.closes = 0
         self.invalid_actions = 0
+        self.hold_sum = 0.0
+        self.flat_sum = 0.0
+        self.step_count = 0
         self.peak_equity = self.risk.initial_balance
         self.max_dd = 0.0
         return self._obs()
@@ -46,14 +51,19 @@ class AegisEnv:
         start = self.step_idx - self.window_size
         market = self.features[start:self.step_idx]
         roe = current_roe(self.position, float(self.close_prices[self.step_idx]), self.risk)
+        signed_exposure = (
+            self.position.side * abs(self.position.size) * self.close_prices[self.step_idx] / max(self.equity(), 1e-10)
+            if self.position.side != 0
+            else 0.0
+        )
         account = np.array(
             [
                 self.equity() / self.risk.initial_balance,
-                abs(self.position.size) * self.close_prices[self.step_idx] / max(self.equity(), 1e-10),
+                signed_exposure,
                 roe,
-                1.0 if self.position.side != 0 else 0.0,
+                float(self.position.side),
                 self.hold_steps / 288.0,
-                roe,
+                self.flat_steps / 288.0,
             ],
             dtype=np.float32,
         )
@@ -70,6 +80,8 @@ class AegisEnv:
             self.balance, self.position, fee = open_position(self.balance, side, price, self.step_idx, self.risk)
             opened = self.position.side != 0
             self.opens += int(opened)
+            self.long_opens += int(opened and side > 0)
+            self.short_opens += int(opened and side < 0)
             self.total_fees += fee
             self.hold_steps = 0
             self.flat_steps = 0
@@ -93,6 +105,9 @@ class AegisEnv:
         else:
             self.hold_steps += 1
             self.flat_steps = 0
+        self.hold_sum += float(self.hold_steps)
+        self.flat_sum += float(self.flat_steps)
+        self.step_count += 1
 
         new_equity = self.equity()
         self.peak_equity = max(self.peak_equity, new_equity)
@@ -104,8 +119,12 @@ class AegisEnv:
             "balance": self.balance,
             "fees": self.total_fees,
             "opens": self.opens,
+            "long_opens": self.long_opens,
+            "short_opens": self.short_opens,
             "closes": self.closes,
             "invalid_actions": self.invalid_actions,
             "max_dd": self.max_dd,
+            "avg_hold_steps": self.hold_sum / max(self.step_count, 1),
+            "avg_flat_steps": self.flat_sum / max(self.step_count, 1),
         }
         return self._obs(), reward, done, info
