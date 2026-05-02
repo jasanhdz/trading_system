@@ -50,8 +50,8 @@ if __name__ == "__main__":
             print(f"   ⚠️ Modelo no encontrado: {path}")
             continue
             
-        # evaluate_model_single corre 1 semilla y retorna (P75_bal, P95_dd, avg_actions)
-        bal, dd, ac = evaluate_model_single(path, eval_env, seed=42)
+        # evaluate_model_single corre 1 semilla y retorna balance, P95 DD, acciones y SignalQ
+        bal, dd, ac, _ = evaluate_model_single(path, eval_env, seed=42)
         
         idle = ac.get(0, 0)
         longs = ac.get(1, 0)

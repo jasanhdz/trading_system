@@ -97,29 +97,38 @@ def cosine_lr_schedule(progress_remaining: float) -> float:
     decay_progress = (progress - warmup_pct) / (1.0 - warmup_pct)
     return 5e-5 + 0.5 * (5e-4 - 5e-5) * (1 + np.cos(np.pi * decay_progress))
 
+def conservative_lr_schedule(progress_remaining: float) -> float:
+    """V46.4 conservative fine-tuning: 3e-4 -> 3e-5 with short warmup."""
+    warmup_pct = 0.05
+    progress = 1.0 - progress_remaining
+    if progress < warmup_pct:
+        return 3e-5 + (progress / warmup_pct) * (3e-4 - 3e-5)
+    decay_progress = (progress - warmup_pct) / (1.0 - warmup_pct)
+    return 3e-5 + 0.5 * (3e-4 - 3e-5) * (1 + np.cos(np.pi * decay_progress))
+
 # === MUTATION 2: Smart Entropy Schedule v2 ===
 class RiskSeekingCallback(BaseCallback):
     """Smart exploration based on Champion quality (V43: tiered + slower decay)."""
-    def __init__(self, champ_pnl: float, starting_ent_override: float = None):
+    def __init__(self, champ_pnl: float, starting_ent_override: float = None, ent_floor: float = None):
         super().__init__()
         self.champ_pnl = champ_pnl
+        self.ent_floor = float(os.environ.get("PHANTOM_ENTROPY_FLOOR", "0.01")) if ent_floor is None else ent_floor
         if starting_ent_override is not None:
             self.starting_ent = starting_ent_override
         else:
             if champ_pnl < 8.0:
-                self.starting_ent = 0.30
+                self.starting_ent = 0.18
             elif champ_pnl < 15.0:
-                self.starting_ent = 0.22
+                self.starting_ent = 0.14
             elif champ_pnl < 25.0:
-                self.starting_ent = 0.15
+                self.starting_ent = 0.10
             else:
                 self.starting_ent = 0.08
 
     def _on_step(self):
         progress = self.num_timesteps / self.model._total_timesteps
-        # V43: Decay más lento (^2.5 vs ^1.5) y floor 0.02 (vs 0.01)
-        # Mantiene exploración activa por más tiempo para escapar mínimos locales
-        self.model.ent_coef = max(self.starting_ent * (1 - progress ** 2.5), 0.02)
+        # V46.4: lower entropy floor so challengers stop churning once a policy emerges.
+        self.model.ent_coef = max(self.starting_ent * (1 - progress ** 2.5), self.ent_floor)
         return True
 
 def adaptive_clip_schedule(progress_remaining: float) -> float:
@@ -137,7 +146,19 @@ def main():
     parser.add_argument("--d-model", type=int, default=32)
     parser.add_argument("--champ-pnl", type=float, default=0.0)
     parser.add_argument("--mirror", type=int, default=0)
+    parser.add_argument(
+        "--base-source",
+        choices=["auto", "latest", "champion", "bc", "fresh"],
+        default=os.environ.get("PHANTOM_BASE_SOURCE", "auto"),
+        help="Model lineage source. Use bc/fresh to break contaminated champion lineage.",
+    )
     args = parser.parse_args()
+    champion_mutation_entropy = float(os.environ.get("PHANTOM_CHAMPION_MUTATION_ENTROPY", "0.10"))
+    champion_mutation_lr = float(os.environ.get("PHANTOM_CHAMPION_MUTATION_LR", "0.00025"))
+    latest_mutation_entropy = float(os.environ.get("PHANTOM_LATEST_MUTATION_ENTROPY", "0.10"))
+    bc_mutation_entropy = float(os.environ.get("PHANTOM_BC_MUTATION_ENTROPY", "0.12"))
+    fresh_mutation_entropy = float(os.environ.get("PHANTOM_FRESH_MUTATION_ENTROPY", "0.18"))
+    entropy_floor = float(os.environ.get("PHANTOM_ENTROPY_FLOOR", "0.01"))
     
     # V45-FAST: Light viable architecture for 21 features + 6 account dims
     args.d_model = 32
@@ -186,12 +207,37 @@ def main():
     # === PASO 3: Load Champion Model (Hill Climbing) ===
     # To compound our improvements, Challengers should now mutate from the reigning Champion
     # (e.g. the $65 model) instead of always starting from the bare V8 BC baseline.
+    leverage_label = f"{float(os.environ.get('PHANTOM_LEVERAGE', '5.0')):g}x".replace(".", "p")
     champion_path = "models/phantom_v30_champion.zip"
-    latest_path = "models/phantom_v31_latest_challenger.zip"
+    latest_path = f"models/phantom_v31_latest_challenger_{leverage_label}.zip"
     bc_model_path = "models/phantom_v30_bc_pretrained.zip"
     
+    if args.base_source == "fresh":
+        base_path = None
+        print("   🆕 Base source forced to FRESH. Creating challenger from scratch.")
+    elif args.base_source == "bc":
+        if os.path.exists(bc_model_path):
+            base_path = bc_model_path
+            print(f"   🧬 Base source forced to BC from {base_path}...")
+        else:
+            base_path = None
+            print("   ⚠️ BC base requested but not found. Falling back to fresh model.")
+    elif args.base_source == "champion":
+        if os.path.exists(champion_path):
+            base_path = champion_path
+            print(f"   🧠 Base source forced to Champion from {base_path}...")
+        else:
+            base_path = None
+            print("   ⚠️ Champion base requested but not found. Falling back to fresh model.")
+    elif args.base_source == "latest":
+        if os.path.exists(latest_path):
+            base_path = latest_path
+            print(f"   🧠 Base source forced to Latest from {base_path}...")
+        else:
+            base_path = None
+            print("   ⚠️ Latest base requested but not found. Falling back to fresh model.")
     # Priority 0: Latest Challenger (Accumulate learning even if not promoted)
-    if os.path.exists(latest_path):
+    elif os.path.exists(latest_path):
         base_path = latest_path
         print(f"   🧠 Loading Ongoing Challenger from {base_path} to accumulate learning...")
     # Priority 1: Reigning Champion
@@ -206,26 +252,29 @@ def main():
         base_path = None
         
     model = None
-    custom_lr = cosine_lr_schedule
+    custom_lr = conservative_lr_schedule
     starting_ent_override = None
 
     if base_path:
         try:
-            # V43: Smart Entropy tiered
-            if args.champ_pnl < 8.0:
-                starting_ent = 0.30
-            elif args.champ_pnl < 15.0:
-                starting_ent = 0.22
-            elif args.champ_pnl < 25.0:
-                starting_ent = 0.15
-            else:
-                starting_ent = 0.08
-
             if base_path == champion_path:
-                starting_ent = 0.25
-                starting_ent_override = 0.25
-                custom_lr = lambda p: 1e-3
-                print("   🔥 AGGRESSIVE MUTATION: High entropy (0.25) + high LR (1e-3) for policy thaw!")
+                starting_ent = champion_mutation_entropy
+                starting_ent_override = champion_mutation_entropy
+                custom_lr = lambda p: champion_mutation_lr
+                print(f"   🧊 V46.4 CONSERVATIVE MUTATION: entropy={starting_ent:.2f}, LR={champion_mutation_lr:g}")
+            elif base_path == latest_path:
+                starting_ent = latest_mutation_entropy
+                starting_ent_override = latest_mutation_entropy
+                custom_lr = conservative_lr_schedule
+                print(f"   🧊 V46.4 Latest fine-tune: entropy={starting_ent:.2f}, conservative LR schedule")
+            elif base_path == bc_model_path:
+                starting_ent = bc_mutation_entropy
+                starting_ent_override = bc_mutation_entropy
+                custom_lr = conservative_lr_schedule
+                print(f"   🧬 V46.4 BC fine-tune: entropy={starting_ent:.2f}, conservative LR schedule")
+            else:
+                starting_ent = latest_mutation_entropy
+                starting_ent_override = latest_mutation_entropy
 
             model = PPO.load(
                 base_path,
@@ -250,21 +299,15 @@ def main():
 
     if model is None:
         print(f"   🆕 Creating new model from scratch with V31 architecture...")
-        # V43: Smart Entropy tiered
-        if args.champ_pnl < 8.0:
-            starting_ent = 0.30
-        elif args.champ_pnl < 15.0:
-            starting_ent = 0.22
-        elif args.champ_pnl < 25.0:
-            starting_ent = 0.15
-        else:
-            starting_ent = 0.08
+        starting_ent = fresh_mutation_entropy
+        starting_ent_override = fresh_mutation_entropy
+        print(f"   🧊 V46.4 Fresh policy: entropy={starting_ent:.2f}, conservative LR schedule")
         model = PPO(
             "MultiInputPolicy",
             env,
             policy_kwargs=POLICY_KWARGS,
             verbose=1,
-            learning_rate=cosine_lr_schedule,
+            learning_rate=conservative_lr_schedule,
             n_steps=256,         # V40: 512 envs × 256 = 131,072 buffer
             batch_size=2048,     # Revertido por OOM
             n_epochs=4,          
@@ -295,9 +338,13 @@ def main():
     # V40: Ensure LR scheduler fully resets for cyclic SGDR behavior
     model.num_timesteps = 0
     model._current_progress_remaining = 1.0
-    model.lr_schedule = custom_lr if 'custom_lr' in locals() else cosine_lr_schedule
+    model.lr_schedule = custom_lr if 'custom_lr' in locals() else conservative_lr_schedule
 
-    risk_cb = RiskSeekingCallback(champ_pnl=args.champ_pnl, starting_ent_override=starting_ent_override if 'starting_ent_override' in locals() else None)
+    risk_cb = RiskSeekingCallback(
+        champ_pnl=args.champ_pnl,
+        starting_ent_override=starting_ent_override if 'starting_ent_override' in locals() else None,
+        ent_floor=entropy_floor,
+    )
     early_cb = ColiseoEarlyStop(kl_threshold=0.0007, ev_threshold=0.88, patience=10)
     model.learn(total_timesteps=args.timesteps, callback=[checkpoint_cb, risk_cb, early_cb], reset_num_timesteps=True)
 

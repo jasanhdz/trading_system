@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import sys
 import os
+import time
 from pathlib import Path
 from stable_baselines3 import PPO
 
@@ -33,6 +34,7 @@ model_mtime = 0  # Track file modification time for hot-reload
 
 exit_model = None
 exit_model_mtime = 0
+last_data_fetch_error_log = 0.0
 
 def load_model():
     """Load the champion model into memory. Auto-detects file changes."""
@@ -343,8 +345,11 @@ async def predict(req: PredictRequest):
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'buy_volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        global last_data_fetch_error_log
+        now = time.time()
+        if now - last_data_fetch_error_log >= 60:
+            print(f"⚠️ Data fetch failed for {req.symbol}: {e}", flush=True)
+            last_data_fetch_error_log = now
         raise HTTPException(status_code=500, detail=f"Data fetch failed: {e}")
     
     # Run Inference
@@ -537,4 +542,4 @@ def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8001, access_log=False, log_level="warning")

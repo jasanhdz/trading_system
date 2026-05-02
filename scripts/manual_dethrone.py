@@ -31,13 +31,13 @@ def manual_coliseum():
 
     # 2. Evaluar Campeón actual (Kamikaze)
     print(f"\n📊 Evaluating Current Champion: {CHAMPION_ABS}")
-    c_pnl, c_dd, _ = evaluate_model(CHAMPION_ABS, eval_env)
+    c_pnl, c_dd, _, _ = evaluate_model(CHAMPION_ABS, eval_env)
     c_util = get_utility(c_pnl, c_dd)
     print(f"   > PnL: ${c_pnl:.2f} | DD: {c_dd*100:.1f}% | Utility: {c_util:.3f}")
 
     # 3. Evaluar Safe Checkpoint (Candidato Limpio)
     print(f"\n📊 Evaluating Candidate: {SAFE_ABS}")
-    s_pnl, s_dd, _ = evaluate_model(SAFE_ABS, eval_env)
+    s_pnl, s_dd, _, _ = evaluate_model(SAFE_ABS, eval_env)
     s_util = get_utility(s_pnl, s_dd)
     print(f"   > PnL: ${s_pnl:.2f} | DD: {s_dd*100:.1f}% | Utility: {s_util:.3f}")
 

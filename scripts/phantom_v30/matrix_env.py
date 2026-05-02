@@ -15,6 +15,7 @@ This is 10-20x faster than SubprocVecEnv(8) because:
 """
 import numpy as np
 import gymnasium as gym
+import os
 from gymnasium import spaces
 from stable_baselines3.common.vec_env import VecEnv
 
@@ -23,7 +24,17 @@ COMMISSION_RATE = 0.0004  # 0.04% (Binance Futures taker fee)
 SLIPPAGE = 0.0001         # 0.01%
 TOTAL_FEE = COMMISSION_RATE + SLIPPAGE
 INITIAL_BALANCE = 20.0    # ⚔️ KAMIKAZE MODE: $20 to $500 ⚔️
-LEVERAGE = 20.0           # ⚔️ 20x Leverage ⚔️
+LEVERAGE = float(os.environ.get("PHANTOM_LEVERAGE", "5.0"))  # V46.2 Curriculum default: 5x
+POSITION_FRACTION = float(os.environ.get("PHANTOM_POSITION_FRACTION", "0.25"))  # V46.3 risk budget: effective exposure scaler
+HARD_STOP_ROE = float(os.environ.get("PHANTOM_HARD_STOP_ROE", "0.15"))  # V46.3 stop budget in ROE terms
+EARLY_CLOSE_HOLD_STEPS = int(os.environ.get("PHANTOM_EARLY_CLOSE_HOLD_STEPS", "3"))
+EARLY_CLOSE_PENALTY = float(os.environ.get("PHANTOM_EARLY_CLOSE_PENALTY", "0.08"))
+RAPID_TURNOVER_HOLD_STEPS = int(os.environ.get("PHANTOM_RAPID_TURNOVER_HOLD_STEPS", "6"))
+RAPID_TURNOVER_PENALTY = float(os.environ.get("PHANTOM_RAPID_TURNOVER_PENALTY", "0.04"))
+REENTRY_PENALTY = float(os.environ.get("PHANTOM_REENTRY_PENALTY", "0.08"))
+MIN_HOLD_STEPS = int(os.environ.get("PHANTOM_MIN_HOLD_STEPS", "6"))
+MIN_FLAT_STEPS = int(os.environ.get("PHANTOM_MIN_FLAT_STEPS", "6"))
+INVALID_ACTION_PENALTY = float(os.environ.get("PHANTOM_INVALID_ACTION_PENALTY", "-0.02"))
 MAINTENANCE_MARGIN_RATE = 0.004 # 0.4% MMR
 WINDOW_SIZE = 64
 N_FEATURES = 21  # V44: +3 régimen features (adx_norm, trend_efficiency, vol_regime)
@@ -257,7 +268,8 @@ class PhantomMatrixEnv(VecEnv):
     
     def step_wait(self):
         """Execute actions. All logic vectorized with np.where."""
-        actions = self._pending_actions
+        raw_actions = self._pending_actions
+        actions = raw_actions.copy()
         
         # Current prices
         idx = np.clip(self.current_steps, 0, self.n_candles - 1)
@@ -267,11 +279,27 @@ class PhantomMatrixEnv(VecEnv):
         prev_equity = self._get_equity(current_prices)
         prev_positions = self.positions.copy()
         prev_entry_prices = self.entry_prices.copy()  # FIX: snapshot ANTES de cerrar posiciones
+        prev_hold_steps = self.hold_steps.copy()
+        prev_flat_steps = self.flat_steps.copy()
         
         trade_fees = np.zeros(self.num_envs, dtype=np.float32)
         open_trade_fee = np.zeros(self.num_envs, dtype=np.float32)
         closed_trade_pnl = np.zeros(self.num_envs, dtype=np.float32)
         just_closed_trade = np.zeros(self.num_envs, dtype=bool)
+        opened_from_flat = np.zeros(self.num_envs, dtype=bool)
+
+        # V46.5: Mechanical cooldown / action mask by state.
+        # Invalid agent actions become IDLE; bracket exits remain independent below.
+        close_allowed = prev_hold_steps >= MIN_HOLD_STEPS
+        entry_allowed = prev_flat_steps >= MIN_FLAT_STEPS
+        invalid_close = (raw_actions == 3) & (prev_positions != 0) & ~close_allowed
+        invalid_entry = ((raw_actions == 1) | (raw_actions == 2)) & (prev_positions == 0) & ~entry_allowed
+        invalid_flip = (
+            ((raw_actions == 1) & (prev_positions < 0)) |
+            ((raw_actions == 2) & (prev_positions > 0))
+        )
+        invalid_action = invalid_close | invalid_entry | invalid_flip
+        actions = np.where(invalid_action, 0, actions)
         
         # ═══════════════ ACTION 3: CLOSE ═══════════════
         close_mask = (actions == 3) & (self.positions != 0)
@@ -291,8 +319,8 @@ class PhantomMatrixEnv(VecEnv):
         )
         
         # ═══════════════ BRACKET OVERRIDE (Live Bot Parity) ═══════════════
-        # Live Bot Settings: 20x Leverage, -40% ROE SL, +40% ROE TP
-        HARD_STOP = -0.020   # -2.0% price = -40% ROE @ 20x
+        # Live Bot parity in ROE terms, converted to raw price movement by leverage.
+        HARD_STOP = -HARD_STOP_ROE / LEVERAGE
         TAKE_PROFIT = 999.0  # V45 Surgical: Descativado. El agente aprende a cerrar.
         
         # Calculate raw price variation % from entry
@@ -315,11 +343,9 @@ class PhantomMatrixEnv(VecEnv):
         # Reset peak for new positions (handled during ACTION 1 & 2) or maintain peak
         self.peak_diff_pct = np.where(self.positions != 0, np.maximum(self.peak_diff_pct, price_diff_pct), 0.0)
         
-        # Live Bot Trailing defaults (from YAML Base Config):
-        # Activation at 20% ROE (which is 20% / 20x = 0.01 raw price move)
-        # Callback 10% ROE from peak (which is 0.005 raw price move)
-        TRAILING_ACTIVATION = 0.20 / LEVERAGE  # 0.01 raw
-        TRAILING_CALLBACK = 0.005              # 0.5% callback from peak (10% ROE)
+        # Live Bot trailing defaults in ROE terms, converted to raw price movement.
+        TRAILING_ACTIVATION = 0.20 / LEVERAGE
+        TRAILING_CALLBACK = 0.10 / LEVERAGE
         
         trailing_hit = (self.positions != 0) & (self.peak_diff_pct >= TRAILING_ACTIVATION) & (self.peak_diff_pct - price_diff_pct >= TRAILING_CALLBACK)
         # ----------------------------
@@ -355,9 +381,9 @@ class PhantomMatrixEnv(VecEnv):
             trade_fees = np.where(active_close, fee, trade_fees)
         
         # ═══════════════ ACTION 1: OPEN LONG (flat only) ═══════════════
-        long_mask = (actions == 1) & (self.positions == 0)
+        long_mask = (actions == 1) & (prev_positions == 0) & (self.positions == 0)
         if np.any(long_mask):
-            notional = self.balances * LEVERAGE
+            notional = self.balances * LEVERAGE * POSITION_FRACTION
             fee = notional * TOTAL_FEE
             # Only allow if fee doesn't wipe out balance immediately
             can_open = long_mask & (self.balances > fee * 1.5)
@@ -370,11 +396,12 @@ class PhantomMatrixEnv(VecEnv):
             self.entry_prices = np.where(can_open, current_prices, self.entry_prices)
             trade_fees = np.where(can_open, fee, trade_fees)
             open_trade_fee = np.where(can_open, fee, open_trade_fee)
+            opened_from_flat = opened_from_flat | can_open
         
         # ═══════════════ ACTION 2: OPEN SHORT (flat only) ═══════════════
-        short_mask = (actions == 2) & (self.positions == 0)
+        short_mask = (actions == 2) & (prev_positions == 0) & (self.positions == 0)
         if np.any(short_mask):
-            notional = self.balances * LEVERAGE
+            notional = self.balances * LEVERAGE * POSITION_FRACTION
             fee = notional * TOTAL_FEE
             can_open = short_mask & (self.balances > fee * 1.5)
             
@@ -385,6 +412,7 @@ class PhantomMatrixEnv(VecEnv):
             self.entry_prices = np.where(can_open, current_prices, self.entry_prices)
             trade_fees = np.where(can_open, fee, trade_fees)
             open_trade_fee = np.where(can_open, fee, open_trade_fee)
+            opened_from_flat = opened_from_flat | can_open
         
         # ═══════════════ FLIP SHORT→LONG ═══════════════
         flip_long = (actions == 1) & (prev_positions < 0)
@@ -398,7 +426,7 @@ class PhantomMatrixEnv(VecEnv):
             closed_trade_pnl = np.where(flip_long, pnl - fee_close, closed_trade_pnl)
             just_closed_trade = just_closed_trade | flip_long
             
-            notional_open = new_bal * LEVERAGE
+            notional_open = new_bal * LEVERAGE * POSITION_FRACTION
             fee_open = notional_open * TOTAL_FEE
             can_flip = flip_long & (new_bal > fee_open * 1.5)
             
@@ -423,7 +451,7 @@ class PhantomMatrixEnv(VecEnv):
             closed_trade_pnl = np.where(flip_short, pnl - fee_close, closed_trade_pnl)
             just_closed_trade = just_closed_trade | flip_short
             
-            notional_open = new_bal * LEVERAGE
+            notional_open = new_bal * LEVERAGE * POSITION_FRACTION
             fee_open = notional_open * TOTAL_FEE
             can_flip = flip_short & (new_bal > fee_open * 1.5)
             
@@ -526,6 +554,14 @@ class PhantomMatrixEnv(VecEnv):
         # por lo que nunca se activaba (close_mask era True pero price_diff_pct==0).
         # FIX: Usamos pre_close_pnl_pct (snapshot previo al cierre).
         just_opened = open_trade_fee > 0
+        entry_penalty = np.where(just_opened, -0.03, 0.0)
+        overtrade_penalty = np.where(
+            just_opened & (self.flat_steps < 3),
+            -REENTRY_PENALTY,
+            0.0
+        )
+        reward += entry_penalty + overtrade_penalty
+        reward += np.where(invalid_action, INVALID_ACTION_PENALTY, 0.0)
         
         # Cerrar en profit: bonus por "take the money and run"
         close_profit = close_mask & (pre_close_pnl_pct > 0.002)  # >0.2% precio = >4% ROE@20x
@@ -543,6 +579,21 @@ class PhantomMatrixEnv(VecEnv):
             0.0
         )
         reward += bracket_penalty + manual_loss_cut_bonus
+
+        # V46.4: explicit churn control. The goal is to block open/close/open
+        # noise without punishing legitimate hard-stop or trailing-stop exits.
+        voluntary_close = close_mask & ~hard_stop_hit & ~trailing_hit
+        early_manual_close_penalty = np.where(
+            voluntary_close & (prev_hold_steps < EARLY_CLOSE_HOLD_STEPS),
+            -EARLY_CLOSE_PENALTY,
+            0.0
+        )
+        rapid_turnover_penalty = np.where(
+            (voluntary_close | flipped_mask) & (prev_hold_steps < RAPID_TURNOVER_HOLD_STEPS),
+            -RAPID_TURNOVER_PENALTY,
+            0.0
+        )
+        reward += early_manual_close_penalty + rapid_turnover_penalty
         
         # 4.1 Momentum Bonus
         market_momentum = self.features[new_idx][:, 0]  # log_ret de la vela actual
@@ -649,7 +700,11 @@ class PhantomMatrixEnv(VecEnv):
         
         flat = self.positions == 0
         idle_action = actions == 0
-        idle_patience_bonus = np.where(flat & idle_action, 0.002, 0.0)
+        idle_patience_bonus = np.where(
+            flat & idle_action & (self.flat_steps < 48),
+            0.006,
+            0.0
+        )
         stale_flat_excess = np.maximum(self.flat_steps - 288, 0) / 288.0
         stale_flat_penalty = np.where(
             self.flat_steps > 288,
@@ -733,6 +788,17 @@ class PhantomMatrixEnv(VecEnv):
             info = {
                 'balance': float(self.balances[i]),
                 'equity': float(new_equity[i]),
+                'opened': bool(new_entry[i]),
+                'manual_closed': bool(close_mask[i]),
+                'hard_stop': bool(hard_stop_hit[i]),
+                'trailing_stop': bool(trailing_hit[i]),
+                'bracket_closed': bool(bracket_hit[i]),
+                'flipped': bool(flipped_mask[i]),
+                'liquidated': bool(liquidated[i]),
+                'invalid_action': bool(invalid_action[i]),
+                'fees': float(trade_fees[i]),
+                'closed_hold_steps': int(prev_hold_steps[i]) if just_closed_trade[i] else 0,
+                'opened_flat_steps': int(prev_flat_steps[i]) if opened_from_flat[i] else 0,
             }
             if done[i]:
                 info['episode'] = {

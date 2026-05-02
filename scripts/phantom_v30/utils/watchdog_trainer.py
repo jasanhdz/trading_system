@@ -18,6 +18,10 @@ PM2_PROCESS_NAME = "03-V30-Trainer"
 IO_FULL_AVG10_STOP_THRESHOLD = float(os.environ.get("IO_FULL_AVG10_STOP_THRESHOLD", "50"))
 IO_SOME_AVG10_STOP_THRESHOLD = float(os.environ.get("IO_SOME_AVG10_STOP_THRESHOLD", "65"))
 IO_PRESSURE_CONSECUTIVE_LIMIT = int(os.environ.get("IO_PRESSURE_CONSECUTIVE_LIMIT", "3"))
+IO_PRESSURE_STOP_ENABLED = os.environ.get("IO_PRESSURE_STOP_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+IO_PRESSURE_ALERT_COOLDOWN_SECONDS = int(os.environ.get("IO_PRESSURE_ALERT_COOLDOWN_SECONDS", "1800"))
+PM2_LOG_DIR = os.environ.get("PM2_LOG_DIR", "/home/jasan/.pm2/logs")
+CHECKPOINT_DIR = "/home/jasan/Develop/trading_system/models/checkpoints"
 
 # Telegram Config (Loaded from Environment)
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -87,13 +91,56 @@ def read_io_pressure():
         print(f"❌ Failed to read I/O pressure: {e}")
         return {}
 
+def directory_size(path):
+    total = 0
+    if not os.path.exists(path):
+        return 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+def format_bytes(num):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if num < 1024:
+            return f"{num:.1f}{unit}"
+        num /= 1024
+    return f"{num:.1f}PB"
+
+def collect_io_context():
+    lines = []
+
+    try:
+        log_files = []
+        now = time.time()
+        if os.path.isdir(PM2_LOG_DIR):
+            for entry in os.scandir(PM2_LOG_DIR):
+                if not entry.is_file():
+                    continue
+                stat = entry.stat()
+                age_minutes = max(0.0, (now - stat.st_mtime) / 60.0)
+                log_files.append((stat.st_size, age_minutes, entry.path))
+        for size, age_minutes, path in sorted(log_files, reverse=True)[:5]:
+            lines.append(f"• PM2 log: `{os.path.basename(path)}` {format_bytes(size)} (mtime {age_minutes:.0f}m)")
+    except Exception as e:
+        lines.append(f"• PM2 log scan failed: `{e}`")
+
+    checkpoint_bytes = directory_size(CHECKPOINT_DIR)
+    lines.append(f"• Checkpoints: {format_bytes(checkpoint_bytes)}")
+    return "\n".join(lines)
+
 def main():
     print("🛡️ Phantom Watchdog Started")
     print(f"   Monitoring: {LOG_FILE}")
     print(f"   Timeout: {TIMEOUT_SECONDS}s")
     print(f"   Check interval: {CHECK_INTERVAL}s")
     print(f"   I/O guard: full.avg10>={IO_FULL_AVG10_STOP_THRESHOLD} or some.avg10>={IO_SOME_AVG10_STOP_THRESHOLD} for {IO_PRESSURE_CONSECUTIVE_LIMIT} checks")
+    print(f"   I/O stop enabled: {IO_PRESSURE_STOP_ENABLED}")
     io_pressure_hits = 0
+    last_io_alert_at = 0.0
     
     while True:
         try:
@@ -106,18 +153,29 @@ def main():
                 io_pressure_hits = 0
 
             if io_pressure_hits >= IO_PRESSURE_CONSECUTIVE_LIMIT:
+                context = collect_io_context()
                 msg = (
                     f"🚨 **ALERTA DE I/O** 🚨\n"
                     f"Presión de disco sostenida: full.avg10={full_avg10:.1f}, some.avg10={some_avg10:.1f}.\n"
-                    f"⏸️ Deteniendo `{PM2_PROCESS_NAME}` para prevenir congelamiento del host."
+                    f"{context}\n"
                 )
                 print(msg)
-                send_telegram_alert(msg)
-                if stop_trainer():
-                    send_telegram_alert("✅ Trainer detenido. Revisa disco/checkpoints antes de reactivarlo.")
+                now = time.time()
+                if IO_PRESSURE_STOP_ENABLED:
+                    send_telegram_alert(msg + f"⏸️ Deteniendo `{PM2_PROCESS_NAME}` para prevenir congelamiento del host.")
+                    if stop_trainer():
+                        send_telegram_alert("✅ Trainer detenido. Revisa disco/checkpoints antes de reactivarlo.")
+                    io_pressure_hits = 0
+                    time.sleep(600)
+                    continue
+
+                if now - last_io_alert_at >= IO_PRESSURE_ALERT_COOLDOWN_SECONDS:
+                    send_telegram_alert(
+                        msg
+                        + f"ℹ️ No se detuvo `{PM2_PROCESS_NAME}` porque `IO_PRESSURE_STOP_ENABLED=false`."
+                    )
+                    last_io_alert_at = now
                 io_pressure_hits = 0
-                time.sleep(600)
-                continue
 
             age = get_file_age(LOG_FILE)
             

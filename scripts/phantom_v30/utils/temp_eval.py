@@ -58,7 +58,7 @@ def run():
     TransformerExtractor.__init__ = patch_init
     TransformerExtractor.forward = patch_forward
     
-    champ_score, champ_dd, _ = evaluate_model(CHAMPION_PATH, eval_env)
+    champ_score, champ_dd, _, _ = evaluate_model(CHAMPION_PATH, eval_env)
     
     print("\n--- RESULTADO REAL DEL CAMPEÓN V30 ---")
     print(f"🏆 PnL Verdadero: ${champ_score:.2f} (P95 DD: {champ_dd*100:.1f}%)")
