@@ -45,8 +45,13 @@ LEVERAGE_LABEL = f"{CURRENT_LEVERAGE:g}x".replace(".", "p")
 POSITION_FRACTION = float(os.environ.get("PHANTOM_POSITION_FRACTION", "0.25"))
 HARD_STOP_ROE = float(os.environ.get("PHANTOM_HARD_STOP_ROE", "0.15"))
 MIN_HOLD_STEPS = int(os.environ.get("PHANTOM_MIN_HOLD_STEPS", "6"))
-MIN_FLAT_STEPS = int(os.environ.get("PHANTOM_MIN_FLAT_STEPS", "6"))
+MIN_FLAT_STEPS = int(os.environ.get("PHANTOM_MIN_FLAT_STEPS", "12"))
 INVALID_ACTION_PENALTY = float(os.environ.get("PHANTOM_INVALID_ACTION_PENALTY", "-0.02"))
+ENTRY_PENALTY = float(os.environ.get("PHANTOM_ENTRY_PENALTY", "0.04"))
+IDLE_FLAT_BONUS = float(os.environ.get("PHANTOM_IDLE_FLAT_BONUS", "0.004"))
+DIRECTION_DOMINANCE_LIMIT = float(os.environ.get("PHANTOM_DIRECTION_DOMINANCE_LIMIT", "0.95"))
+DIRECTION_GATE_MIN_BALANCE = float(os.environ.get("PHANTOM_DIRECTION_GATE_MIN_BALANCE", "25.0"))
+DIRECTION_GATE_MIN_SIGNALQ = int(os.environ.get("PHANTOM_DIRECTION_GATE_MIN_SIGNALQ", "1"))
 CHALLENGER_A_SOURCE = os.environ.get("PHANTOM_CHALLENGER_A_SOURCE", "auto")
 CHALLENGER_B_SOURCE = os.environ.get("PHANTOM_CHALLENGER_B_SOURCE", "bc")
 CHAMPION_PATH = "models/phantom_v30_champion.zip"
@@ -121,6 +126,8 @@ def format_run_config(mirror_mode: int | None = None) -> str:
         f"• Leverage: *{LEVERAGE_LABEL}*{mirror_part}\n"
         f"• Position fraction: *{POSITION_FRACTION:.2f}* | Hard stop ROE: *{HARD_STOP_ROE*100:.0f}%*\n"
         f"• Cooldown: *hold ≥ {MIN_HOLD_STEPS}* | *flat ≥ {MIN_FLAT_STEPS}* | Invalid *{INVALID_ACTION_PENALTY:+.2f}*\n"
+        f"• Scarcity: Entry *-{ENTRY_PENALTY:.2f}* | Idle flat *+{IDLE_FLAT_BONUS:.3f}*\n"
+        f"• Direction gate: max side *≤ {DIRECTION_DOMINANCE_LIMIT*100:.0f}%* unless SignalQ + balance are strong\n"
         f"• Eval: *{EVAL_NUM_ENVS} envs x {EVAL_MAX_STEPS} steps*\n"
         f"• SignalQ: *cada {SIGNALQ_SAMPLE_EVERY} steps*\n"
         f"• Survivor: *DD ≤ {MAX_DD_THRESHOLD*100:.0f}%* + *Balance ≥ ${MIN_FINAL_BALANCE:.2f}*"
@@ -168,6 +175,8 @@ def empty_signal_quality() -> dict:
 def empty_trade_metrics() -> dict:
     return {
         "opens": 0,
+        "long_opens": 0,
+        "short_opens": 0,
         "manual_closes": 0,
         "hard_stops": 0,
         "trailing_stops": 0,
@@ -185,7 +194,7 @@ def empty_trade_metrics() -> dict:
 
 
 def merge_trade_metrics(total: dict, part: dict):
-    for key in ("opens", "manual_closes", "hard_stops", "trailing_stops", "bracket_closes",
+    for key in ("opens", "long_opens", "short_opens", "manual_closes", "hard_stops", "trailing_stops", "bracket_closes",
                 "closed_trades",
                 "flips", "liquidations", "invalid_actions", "closed_hold_steps_sum", "closed_hold_steps_count",
                 "opened_flat_steps_sum", "opened_flat_steps_count"):
@@ -200,6 +209,10 @@ def collect_step_trade_metrics(infos: list) -> dict:
             metrics["opens"] += 1
             metrics["opened_flat_steps_sum"] += int(info.get("opened_flat_steps", 0))
             metrics["opened_flat_steps_count"] += 1
+        if info.get("opened_long", False):
+            metrics["long_opens"] += 1
+        if info.get("opened_short", False):
+            metrics["short_opens"] += 1
         if info.get("manual_closed", False):
             metrics["manual_closes"] += 1
         if info.get("hard_stop", False):
@@ -233,8 +246,15 @@ def collect_step_trade_metrics(infos: list) -> dict:
 def finalize_trade_metrics(raw: dict) -> dict:
     hold_count = max(raw.get("closed_hold_steps_count", 0), 1)
     flat_count = max(raw.get("opened_flat_steps_count", 0), 1)
+    long_opens = raw.get("long_opens", 0)
+    short_opens = raw.get("short_opens", 0)
+    directional_opens = long_opens + short_opens
+    direction_dominance = max(long_opens, short_opens) / directional_opens if directional_opens else 0.0
     return {
         "opens": raw.get("opens", 0),
+        "long_opens": long_opens,
+        "short_opens": short_opens,
+        "direction_dominance": direction_dominance,
         "manual_closes": raw.get("manual_closes", 0),
         "hard_stops": raw.get("hard_stops", 0),
         "trailing_stops": raw.get("trailing_stops", 0),
@@ -315,6 +335,8 @@ def format_trade_metrics_compact(metrics: dict) -> str:
         return "🔁 Trade: n/a"
     return (
         f"🔁 Trade: O *{metrics.get('opens', 0):,}* | "
+        f"L/S *{metrics.get('long_opens', 0):,}/{metrics.get('short_opens', 0):,}* | "
+        f"Dom *{metrics.get('direction_dominance', 0.0)*100:.0f}%* | "
         f"MC *{metrics.get('manual_closes', 0):,}* | "
         f"HS *{metrics.get('hard_stops', 0):,}* | "
         f"FL *{metrics.get('flips', 0):,}* | "
@@ -485,6 +507,8 @@ def evaluate_model(model_path: str, windows: list, n_episodes: int = 1, seed: in
             total_action_counts[k] = total_action_counts.get(k, 0) + v
         merge_trade_metrics(total_trade_metrics, {
             "opens": tm["opens"],
+            "long_opens": tm["long_opens"],
+            "short_opens": tm["short_opens"],
             "manual_closes": tm["manual_closes"],
             "hard_stops": tm["hard_stops"],
             "trailing_stops": tm["trailing_stops"],
@@ -537,6 +561,8 @@ def evaluate_model(model_path: str, windows: list, n_episodes: int = 1, seed: in
     trade_metrics = finalize_trade_metrics(total_trade_metrics)
     print(
         f"  Trade: Opens={trade_metrics['opens']:,}, ManualCloses={trade_metrics['manual_closes']:,}, "
+        f"Long/Short={trade_metrics['long_opens']:,}/{trade_metrics['short_opens']:,}, "
+        f"Dominance={trade_metrics['direction_dominance']*100:.1f}%, "
         f"HardStops={trade_metrics['hard_stops']:,}, Flips={trade_metrics['flips']:,}, "
         f"Invalid={trade_metrics['invalid_actions']:,}, "
         f"AvgHold={trade_metrics['avg_hold_steps']:.1f}, AvgFlat={trade_metrics['avg_flat_steps']:.1f}, "
@@ -851,11 +877,22 @@ def continuous_train():
                 best_chall_dd <= MAX_DD_THRESHOLD and
                 best_chall_score >= MIN_FINAL_BALANCE
             )
+            challenger_directional = best_chall_trade_metrics.get("opens", 0) > 0
+            challenger_direction_dominance = best_chall_trade_metrics.get("direction_dominance", 0.0)
+            challenger_direction_gate = (
+                not challenger_directional or
+                challenger_direction_dominance <= DIRECTION_DOMINANCE_LIMIT or
+                (
+                    best_chall_score >= DIRECTION_GATE_MIN_BALANCE and
+                    best_chall_signal_quality.get("signals_gt_65_count", 0) >= DIRECTION_GATE_MIN_SIGNALQ
+                )
+            )
             
             champ_utility = get_utility(champ_score, champ_dd)
             chall_utility = best_chall_utility
             promote = (
                 challenger_survives and
+                challenger_direction_gate and
                 chall_utility > max(
                     champ_utility * PROMOTION_MARGIN,
                     champ_utility + 0.05,
@@ -863,6 +900,11 @@ def continuous_train():
             )
             
             print(f"📊 Risk-Adjusted Utility: Champ={champ_utility:.2f} | Best Challenger={chall_utility:.2f}")
+            if not challenger_direction_gate:
+                print(
+                    f"🧭 Direction gate blocked promotion: dominance={challenger_direction_dominance*100:.1f}% "
+                    f"> {DIRECTION_DOMINANCE_LIMIT*100:.0f}% without strong SignalQ/balance."
+                )
 
             # Tracking champion DD for Forced Retirement
             if champ_dd > 0.80:
@@ -872,7 +914,7 @@ def continuous_train():
             save_trainer_state(iteration, forced_retirement_counter, mirror_mode, current_champ_score)
 
             # === REGLA ESPECIAL: CHAMPION FORCED RETIREMENT ===
-            if forced_retirement_counter >= 5 and challenger_survives and best_chall_path:
+            if forced_retirement_counter >= 5 and challenger_survives and challenger_direction_gate and best_chall_path:
                 print(f"👴 CHAMPION FORCED RETIREMENT! DD > 80% for 5+ iterations.")
                 print(f"👑 CROWNING {best_chall_name} as new CLEAN baseline!")
                 backup_path = f"{CHAMPION_PATH}.forced_retirement_{int(time.time())}"
@@ -886,7 +928,7 @@ def continuous_train():
                 save_trainer_state(iteration, forced_retirement_counter, mirror_mode, current_champ_score)
             
             # === REGLA 0: DETHRONE INCONDICIONAL ===
-            elif not champ_survives and challenger_survives and best_chall_path:
+            elif not champ_survives and challenger_survives and challenger_direction_gate and best_chall_path:
                 print(f"💀 CHAMPION DETHRONED! Legacy baseline failed Survivor filter: ${champ_score:.2f}, DD {champ_dd*100:.1f}%.")
                 print(f"👑 CROWNING {best_chall_name} as new CLEAN baseline!")
                 backup_path = f"{CHAMPION_PATH}.kamikaze_banned_{int(time.time())}"
@@ -922,10 +964,19 @@ def continuous_train():
                 if best_chall_score < MIN_FINAL_BALANCE:
                     msg += f"Reason: Balance *${best_chall_score:.2f}* < *${MIN_FINAL_BALANCE:.2f}* required.\n"
                 msg += "🛡️ Champion remains as temporary baseline."
+
+            elif challenger_survives and not challenger_direction_gate and best_chall_score > champ_score:
+                print(f"🧭 BLOCKED! {best_chall_name} passed Survivor but is directionally degenerate.")
+                msg += f"🧭 *BLOCKED* — {best_chall_name} passed Survivor but failed direction gate.\n"
+                msg += (
+                    f"Reason: one side is *{challenger_direction_dominance*100:.1f}%* of executed entries "
+                    f"(limit *{DIRECTION_DOMINANCE_LIMIT*100:.0f}%*) without strong SignalQ/balance.\n"
+                )
+                msg += "🛡️ Champion remains as temporary baseline."
             
             # === REGLA 3: Baseline inicial si no hay campeón ===
             elif champ_score == -np.inf and best_chall_score > -np.inf and best_chall_path:
-                if challenger_survives:
+                if challenger_survives and challenger_direction_gate:
                     print(f"🆕 No champion. Auto-promoting {best_chall_name} as founding baseline.")
                     shutil.copy2(best_chall_path, CHAMPION_PATH)
                     msg += f"🆕 *FOUNDING BASELINE* — Auto-promoting {best_chall_name}."

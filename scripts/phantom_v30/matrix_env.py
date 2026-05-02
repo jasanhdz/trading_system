@@ -33,8 +33,10 @@ RAPID_TURNOVER_HOLD_STEPS = int(os.environ.get("PHANTOM_RAPID_TURNOVER_HOLD_STEP
 RAPID_TURNOVER_PENALTY = float(os.environ.get("PHANTOM_RAPID_TURNOVER_PENALTY", "0.04"))
 REENTRY_PENALTY = float(os.environ.get("PHANTOM_REENTRY_PENALTY", "0.08"))
 MIN_HOLD_STEPS = int(os.environ.get("PHANTOM_MIN_HOLD_STEPS", "6"))
-MIN_FLAT_STEPS = int(os.environ.get("PHANTOM_MIN_FLAT_STEPS", "6"))
+MIN_FLAT_STEPS = int(os.environ.get("PHANTOM_MIN_FLAT_STEPS", "12"))
 INVALID_ACTION_PENALTY = float(os.environ.get("PHANTOM_INVALID_ACTION_PENALTY", "-0.02"))
+ENTRY_PENALTY = float(os.environ.get("PHANTOM_ENTRY_PENALTY", "0.04"))
+IDLE_FLAT_BONUS = float(os.environ.get("PHANTOM_IDLE_FLAT_BONUS", "0.004"))
 MAINTENANCE_MARGIN_RATE = 0.004 # 0.4% MMR
 WINDOW_SIZE = 64
 N_FEATURES = 21  # V44: +3 régimen features (adx_norm, trend_efficiency, vol_regime)
@@ -287,6 +289,8 @@ class PhantomMatrixEnv(VecEnv):
         closed_trade_pnl = np.zeros(self.num_envs, dtype=np.float32)
         just_closed_trade = np.zeros(self.num_envs, dtype=bool)
         opened_from_flat = np.zeros(self.num_envs, dtype=bool)
+        opened_long = np.zeros(self.num_envs, dtype=bool)
+        opened_short = np.zeros(self.num_envs, dtype=bool)
 
         # V46.5: Mechanical cooldown / action mask by state.
         # Invalid agent actions become IDLE; bracket exits remain independent below.
@@ -397,6 +401,7 @@ class PhantomMatrixEnv(VecEnv):
             trade_fees = np.where(can_open, fee, trade_fees)
             open_trade_fee = np.where(can_open, fee, open_trade_fee)
             opened_from_flat = opened_from_flat | can_open
+            opened_long = opened_long | can_open
         
         # ═══════════════ ACTION 2: OPEN SHORT (flat only) ═══════════════
         short_mask = (actions == 2) & (prev_positions == 0) & (self.positions == 0)
@@ -413,6 +418,7 @@ class PhantomMatrixEnv(VecEnv):
             trade_fees = np.where(can_open, fee, trade_fees)
             open_trade_fee = np.where(can_open, fee, open_trade_fee)
             opened_from_flat = opened_from_flat | can_open
+            opened_short = opened_short | can_open
         
         # ═══════════════ FLIP SHORT→LONG ═══════════════
         flip_long = (actions == 1) & (prev_positions < 0)
@@ -438,6 +444,7 @@ class PhantomMatrixEnv(VecEnv):
             self.entry_prices = np.where(can_flip, current_prices, np.where(flip_long, 0.0, self.entry_prices))
             trade_fees = np.where(flip_long, fee_close + np.where(can_flip, fee_open, 0), trade_fees)
             open_trade_fee = np.where(can_flip, fee_open, open_trade_fee)
+            opened_long = opened_long | can_flip
         
         # ═══════════════ FLIP LONG→SHORT ═══════════════
         flip_short = (actions == 2) & (prev_positions > 0)
@@ -462,6 +469,7 @@ class PhantomMatrixEnv(VecEnv):
             self.entry_prices = np.where(can_flip, current_prices, np.where(flip_short, 0.0, self.entry_prices))
             trade_fees = np.where(flip_short, fee_close + np.where(can_flip, fee_open, 0), trade_fees)
             open_trade_fee = np.where(can_flip, fee_open, open_trade_fee)
+            opened_short = opened_short | can_flip
         flipped_mask = flip_long | flip_short
         if np.any(flipped_mask):
             self.peak_diff_pct = np.where(flipped_mask, 0.0, self.peak_diff_pct)
@@ -554,7 +562,7 @@ class PhantomMatrixEnv(VecEnv):
         # por lo que nunca se activaba (close_mask era True pero price_diff_pct==0).
         # FIX: Usamos pre_close_pnl_pct (snapshot previo al cierre).
         just_opened = open_trade_fee > 0
-        entry_penalty = np.where(just_opened, -0.03, 0.0)
+        entry_penalty = np.where(just_opened, -ENTRY_PENALTY, 0.0)
         overtrade_penalty = np.where(
             just_opened & (self.flat_steps < 3),
             -REENTRY_PENALTY,
@@ -701,8 +709,8 @@ class PhantomMatrixEnv(VecEnv):
         flat = self.positions == 0
         idle_action = actions == 0
         idle_patience_bonus = np.where(
-            flat & idle_action & (self.flat_steps < 48),
-            0.006,
+            flat & idle_action & (self.flat_steps <= 48),
+            IDLE_FLAT_BONUS,
             0.0
         )
         stale_flat_excess = np.maximum(self.flat_steps - 288, 0) / 288.0
@@ -789,6 +797,8 @@ class PhantomMatrixEnv(VecEnv):
                 'balance': float(self.balances[i]),
                 'equity': float(new_equity[i]),
                 'opened': bool(new_entry[i]),
+                'opened_long': bool(opened_long[i]),
+                'opened_short': bool(opened_short[i]),
                 'manual_closed': bool(close_mask[i]),
                 'hard_stop': bool(hard_stop_hit[i]),
                 'trailing_stop': bool(trailing_hit[i]),
