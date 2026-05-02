@@ -1,0 +1,17 @@
+dataset:
+  output_path: aegis_alpha/data/processed/bc_prudent_dataset.npz
+  max_samples: 160000
+  target_mix:
+    idle: 0.82
+    long: 0.07
+    short: 0.07
+    close: 0.04
+
+training:
+  output_path: aegis_alpha/models/bc/aegis_bc_prudent.zip
+  d_model: 32
+  n_heads: 2
+  n_layers: 1
+  batch_size: 1024
+  epochs: 10
+  learning_rate: 0.001

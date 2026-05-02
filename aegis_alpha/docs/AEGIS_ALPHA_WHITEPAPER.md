@@ -1,0 +1,413 @@
+# Aegis Alpha Whitepaper
+
+**Estado:** arquitectura inicial v0.1.0  
+**Propósito:** documento vivo de arquitectura, responsabilidades de carpetas y razón de ser de cada módulo.
+
+## 1. Tesis Del Proyecto
+
+Aegis Alpha reemplaza la línea experimental Phantom V30 como una plataforma ML de señales de trading. La filosofía cambia de “un agente RL descubre todo” a una arquitectura por capas:
+
+1. Datos y features limpios.
+2. Regímenes de mercado explícitos.
+3. Behavior Cloning prudente.
+4. Refinamiento con PPO/RL.
+5. Coliseo Survivor por riesgo, fees, regímenes y señal.
+6. SignalQ para medir calidad de señal.
+7. API de inferencia estable para el bot TypeScript.
+
+El principio central es:
+
+```text
+Primero proteger capital. Después buscar edge. Luego escalar.
+```
+
+En el estado actual, Aegis ya expone inferencia compatible con el bot TS, pero todavía no tiene champion entrenado. Por diseño, mientras no exista modelo productivo, responde `IDLE` defensivo.
+
+## 2. Estado Actual De Runtime
+
+PM2 apunta el servicio de inferencia a:
+
+```text
+02-Aegis-API -> aegis_alpha/inference/server.py
+```
+
+Endpoints vivos:
+
+```text
+GET  /health
+POST /predict
+POST /ml-v2/predict
+POST /ml-v2/exit_signal
+```
+
+Compatibilidad con el bot TypeScript:
+
+El bot sigue llamando `http://127.0.0.1:8001/ml-v2/predict`. Aegis mantiene ese contrato y devuelve los campos legacy:
+
+```text
+long_prob
+short_prob
+neutral_prob
+close_prob
+consensus_level
+meta_verdict
+smart_leverage
+features
+```
+
+Además incluye un bloque nuevo `aegis` con metadata completa:
+
+```text
+model_name
+model_version
+raw_action
+gated_action
+probs
+signal_quality
+risk_context
+regime
+metadata
+```
+
+## 3. Distribución De Carpetas
+
+```text
+aegis_alpha/
+├── bc/
+├── coliseum/
+├── configs/
+├── data/
+├── docs/
+├── env/
+├── features/
+├── inference/
+├── logs/
+├── models/
+├── rl/
+├── tests/
+└── tools/
+```
+
+### `bc/`
+
+Especialización: Behavior Cloning prudente.
+
+Esta capa debe crear la política base que evita que PPO nazca caótico. No busca el trader perfecto; busca hábitos sanos:
+
+```text
+mucho IDLE
+entradas simétricas LONG/SHORT
+no overtrade
+respetar cooldown
+cerrar cuando el setup se invalida
+```
+
+Archivos:
+
+- `labeler.py`: contiene reglas heurísticas para etiquetar acciones `IDLE/LONG/SHORT/CLOSE` a partir de features, estado de posición, hold steps y flat steps. Es la base del teacher prudente.
+- `train_bc.py`: entrypoint placeholder para entrenar el modelo BC prudente. Debe evolucionar hacia la creación de `models/bc/aegis_bc_prudent.zip`.
+- `evaluate_bc.py`: scaffold para evaluar el BC antes de dejar que PPO lo refine.
+- `policies/`: espacio reservado para políticas BC auxiliares o variantes.
+
+### `coliseum/`
+
+Especialización: evaluación profesional y promoción de modelos.
+
+El Coliseo no debe promover por PnL bruto. Debe medir supervivencia, riesgo, fees, direccionalidad, consistencia por régimen y SignalQ.
+
+Archivos:
+
+- `survivor_rules.py`: reglas duras iniciales de supervivencia: balance mínimo, DD, worst DD, fees y overtrade.
+- `promotion.py`: utility inicial para rankear candidatos con net profit, drawdown, consistencia de régimen, fees, dominance y signal bonus.
+- `signal_quality.py`: resumen básico de SignalQ: top probability promedio, porcentaje de señales >65 y gap long/short.
+- `evaluator.py`: scaffold del evaluador de modelos. Aquí debe vivir el runner multi-window por regímenes.
+- `reports.py`: formateo simple de reportes del Coliseo.
+
+### `configs/`
+
+Especialización: configuración declarativa.
+
+Archivos:
+
+- `base.yaml`: configuración base del sistema: símbolo, timeframe, DB, risk budget, gates y rutas de modelo.
+- `production.yaml`: configuración de inferencia productiva: puerto, host, logging y gates.
+- `curriculum_5x.yaml`: hiperparámetros iniciales de curriculum 5x para PPO.
+- `bc_prudent.yaml`: configuración objetivo del BC prudente: dataset, mezcla de acciones y entrenamiento.
+
+### `data/`
+
+Especialización: insumos y datasets de Aegis.
+
+Subcarpetas:
+
+- `raw/`: datos crudos exportados o snapshots.
+- `processed/`: datasets procesados listos para BC/RL.
+- `regimes/`: ventanas o etiquetas de régimen.
+
+Hoy solo contiene `.gitkeep`; no hay datasets Aegis versionados todavía.
+
+### `docs/`
+
+Especialización: documentación viva.
+
+Archivos:
+
+- `AEGIS_ALPHA_WHITEPAPER.md`: este documento. Debe actualizarse cada vez que cambie arquitectura, contratos, carpetas, endpoints, criterios de promoción o flujo de entrenamiento.
+
+### `env/`
+
+Especialización: MDP, reglas de riesgo y ejecución simulada.
+
+Archivos:
+
+- `aegis_env.py`: entorno determinista inicial. Implementa `reset`, `step`, equity, tracking de fees, opens, closes, invalid actions y max drawdown. Es una base simple para smoke tests, BC y futuro Coliseo.
+- `action_mask.py`: reglas de acciones válidas. Si está flat, permite LONG/SHORT solo con `flat_steps >= min_flat_steps`; si está en trade, permite CLOSE solo con `hold_steps >= min_hold_steps`; por ahora no permite flips.
+- `risk_engine.py`: funciones puras de riesgo y posición: abrir posición, cerrar posición, calcular ROE y notional.
+- `reward.py`: reward inicial limpio, basado en cambio de equity, penalización de entrada e invalid action. Es deliberadamente simple para evitar la complejidad tóxica acumulada en Phantom.
+
+### `features/`
+
+Especialización: construcción de features y división de datos.
+
+Archivos:
+
+- `feature_builder.py`: genera las 21 features base usadas por Aegis: returns, RSI, EMAs, CVD, slopes, accelerations, ADX, trend efficiency y volatility regime.
+- `regime_detector.py`: detector simple de régimen: `trend_up`, `trend_down`, `chop`, `high_vol`, `compression`, `mixed`.
+- `dataset_splits.py`: plan inicial de splits walk-forward: train, validation windows y holdout.
+
+### `inference/`
+
+Especialización: API productiva y contrato con TypeScript.
+
+Archivos:
+
+- `server.py`: FastAPI principal. Expone `/health`, `/predict`, `/ml-v2/predict` y `/ml-v2/exit_signal`.
+- `schemas.py`: modelos Pydantic para request/response. Define respuesta Aegis nueva y respuesta legacy compatible con el bot.
+- `model_loader.py`: wrapper de carga de modelo. Si no existe champion en `models/champion/aegis_champion.zip`, devuelve predicción defensiva `IDLE`.
+- `gates.py`: reglas de gating de señal: top probability mínima, gap long/short mínimo y thresholds más estrictos para `chop`.
+
+### `logs/`
+
+Especialización: estado y reportes runtime.
+
+Subcarpetas:
+
+- `coliseum/`: reportes futuros de evaluaciones.
+- `telegram/`: logs futuros de mensajes/alertas.
+
+### `models/`
+
+Especialización: artefactos ML.
+
+Subcarpetas:
+
+- `champion/`: modelo productivo promovido, esperado como `aegis_champion.zip`.
+- `challengers/`: modelos candidatos PPO.
+- `bc/`: modelos de Behavior Cloning, esperado como `aegis_bc_prudent.zip`.
+- `archive/`: backups históricos de champions y challengers.
+
+Actualmente no hay champion Aegis; por eso inferencia responde `IDLE`.
+
+### `rl/`
+
+Especialización: entrenamiento PPO/RL.
+
+Archivos:
+
+- `policy.py`: `AegisTransformerExtractor`, extractor ligero Transformer 32D/1 layer compatible con observaciones `market` y `account`.
+- `curriculum.py`: helper inicial para entropy por linaje (`champion`, `bc`, `fresh`).
+- `callbacks.py`: scaffold para callbacks RL.
+- `train_challenger.py`: scaffold del entrenamiento de un challenger.
+- `trainer.py`: scaffold del orquestador de entrenamiento.
+
+### `tests/`
+
+Especialización: smoke tests y regresiones mínimas.
+
+Archivos:
+
+- `test_action_mask.py`: pruebas de action masking: cooldown para entradas y hold mínimo para cierre.
+
+Nota: el entorno actual no tiene `pytest` instalado, por eso las pruebas se validaron ejecutando las funciones directamente.
+
+### `tools/`
+
+Especialización: herramientas operativas.
+
+Archivos:
+
+- `backtest_model.py`: scaffold para backtests.
+- `export_champion.py`: scaffold para exportar/promover champion.
+- `inspect_policy.py`: scaffold para inspección de política.
+- `cleanup_checkpoints.py`: scaffold para limpieza de checkpoints.
+
+## 4. Contrato De Inferencia
+
+### `/health`
+
+Respuesta esperada:
+
+```json
+{
+  "status": "healthy",
+  "service": "aegis_alpha",
+  "model_loaded": false,
+  "model_name": "aegis_alpha",
+  "model_version": "0.1.0"
+}
+```
+
+### `/ml-v2/predict`
+
+Respuesta legacy compatible:
+
+```json
+{
+  "symbol": "ETHUSDT",
+  "long_prob": 0.005,
+  "short_prob": 0.005,
+  "neutral_prob": 0.99,
+  "close_prob": 0.0,
+  "consensus_level": 0.99,
+  "meta_verdict": "AEGIS_ALPHA_IDLE",
+  "smart_leverage": 5.0,
+  "features": {
+    "cvd_z": 0.0,
+    "cvd_slope": 0.0,
+    "weakness": 0.0,
+    "volatility_z": 0.0
+  }
+}
+```
+
+Mientras no haya champion, la respuesta defensiva es correcta. El bot puede seguir vivo y el risk manager externo no recibe señales falsas.
+
+## 5. Filosofía De Seguridad
+
+Aegis nunca debe operar solo porque existe un modelo. Toda señal debe pasar por gates.
+
+Reglas iniciales:
+
+```text
+Si no hay champion cargado -> IDLE
+Si top_prob < 0.65 -> IDLE
+Si long_short_gap < 0.15 -> IDLE
+Si régimen es chop -> exigir top_prob >= 0.72 y gap >= 0.20
+Si datos incompletos -> IDLE
+```
+
+La inferencia debe preferir falsos negativos antes que falsos positivos. Una señal perdida es aceptable; una señal mala con dinero real no.
+
+## 6. Roadmap Técnico
+
+### Bloque 1: Core
+
+Estado: iniciado.
+
+Completado:
+
+```text
+estructura de carpetas
+config base
+feature builder inicial
+regime detector inicial
+env determinista inicial
+action mask
+risk engine
+API compatible
+PM2 apuntando a Aegis
+```
+
+Pendiente:
+
+```text
+tests formales con pytest instalado
+integración real DB -> feature window en inference
+metrics completas de episode
+```
+
+### Bloque 2: BC Prudente
+
+Pendiente:
+
+```text
+generador de dataset Aegis
+entrenamiento aegis_bc_prudent.zip
+evaluación BC en AegisEnv/Coliseo
+```
+
+### Bloque 3: PPO Sobre BC
+
+Pendiente:
+
+```text
+train_challenger.py funcional
+trainer.py funcional
+carga de BC como Challenger B
+linaje Champion vs BC
+```
+
+### Bloque 4: Coliseo Por Regímenes
+
+Pendiente:
+
+```text
+ventanas bull/bear/chop/high_vol
+worst-window metrics
+promotion rules finales
+reportes persistentes
+```
+
+### Bloque 5: Shadow Trading
+
+Pendiente:
+
+```text
+guardar señales Aegis
+medir MFE/MAE real
+calibrar SignalQ
+comparar señales con ejecución TS
+```
+
+## 7. Protocolo De Actualización Del Whitepaper
+
+Este archivo debe actualizarse cuando ocurra cualquiera de estos cambios:
+
+```text
+se crea, elimina o renombra una carpeta
+se crea, elimina o renombra un archivo importante
+cambia un endpoint de inferencia
+cambia el shape de respuesta consumido por TypeScript
+cambia el risk budget
+cambia action masking
+cambia reward
+cambia el set de features
+cambian reglas de BC labeler
+cambian reglas de Coliseo/Survivor
+cambia el flujo de PM2/ecosystem
+cambia la ruta esperada de modelos
+```
+
+Regla operativa:
+
+```text
+Todo PR o cambio funcional en Aegis debe incluir actualización de este whitepaper si altera arquitectura, contrato o comportamiento.
+```
+
+## 8. Decisión De Diseño Actual
+
+Phantom queda congelado como experimento histórico.
+
+Aegis Alpha queda como nueva línea:
+
+```text
+Aegis Alpha =
+Behavior Cloning prudente
++ PPO refinador
++ Coliseo Survivor
++ SignalQ
++ Inference API segura
++ TypeScript risk manager
+```
+
+El sistema actual ya es seguro para runtime porque responde `IDLE` sin champion. La próxima prioridad es construir el primer BC prudente real y evaluarlo antes de cualquier entrenamiento PPO.

@@ -1,0 +1,11 @@
+inference:
+  host: 0.0.0.0
+  port: 8001
+  access_log: false
+  log_level: warning
+
+gates:
+  min_top_prob: 0.65
+  min_long_short_gap: 0.15
+  chop_min_top_prob: 0.72
+  chop_min_gap: 0.20

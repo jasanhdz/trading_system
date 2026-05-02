@@ -15,19 +15,21 @@ module.exports = {
             }
         },
         {
-            name: "02-Phantom-API",
-            script: "scripts/phantom_v30/inference_server.py",
+            name: "02-Aegis-API",
+            script: "aegis_alpha/inference/server.py",
             interpreter: ".venv_rocm62/bin/python",
             cwd: "/home/jasan/Develop/trading_system",
             instances: 1,
             autorestart: true,
+            restart_delay: 10000,
+            max_restarts: 10,
             watch: false,
             env: {
+                "PYTHONPATH": "/home/jasan/Develop/trading_system",
+                "AEGIS_CONFIG": "aegis_alpha/configs/production.yaml",
+                "AEGIS_PORT": "8001",
                 "HSA_OVERRIDE_GFX_VERSION": "10.3.0",
                 "LD_LIBRARY_PATH": "/opt/rocm-6.2.0/lib:/opt/rocm-6.2.0/lib64",
-                "PHANTOM_LEVERAGE": "5",
-                "PHANTOM_POSITION_FRACTION": "0.25",
-                "PHANTOM_HARD_STOP_ROE": "0.15",
                 "HIP_VISIBLE_DEVICES": ""  // CPU-only inference, frees GPUs for training
             }
         },
