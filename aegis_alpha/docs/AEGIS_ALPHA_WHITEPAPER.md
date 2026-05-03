@@ -1482,6 +1482,150 @@ La señal LONG edge-gated necesita mejorar calidad predictiva, no solo controles
 No hay champion; no hay PPO; no hay inference.
 ```
 
+## Aegis Alpha v0.4.0 - Long Edge Meta-Filter
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/build_long_edge_candidate_dataset.py.
+Se agregó edge/train_meta_filter.py.
+Se agregó tools/evaluate_long_edge_meta_filter.py.
+Base usada:
+  LONG-only
+  expected_return_long top 3%
+  allowed_regimes: mixed, chop, high_vol
+  risk guard: loss7_pause48_pause2_48_maxday3_fee1x
+No toca inference.
+No promueve champion.
+```
+
+Artefactos generados:
+
+```text
+aegis_alpha/data/processed/long_edge_candidates_v040.npz
+aegis_alpha/models/edge/aegis_long_edge_meta_filter_v040.joblib
+aegis_alpha/logs/edge/long_edge_candidate_dataset_v040.json
+aegis_alpha/logs/edge/long_edge_meta_filter_train_v040.json
+aegis_alpha/logs/edge/long_edge_meta_filter_20260503T015840Z.json
+```
+
+Dataset de candidatos:
+
+```text
+candidates: 982
+candidate_win_rate: 71.28%
+candidate_avg_return: +0.2256%
+features:
+  expected_return_long
+  long_success_prob
+  expected_return_short
+  edge_gap
+  regime
+  volatility/trend/CVD compact features
+  simulated_trade_return
+  win/loss
+  mfe/mae
+```
+
+Entrenamiento meta-filter:
+
+```text
+model: sklearn.HistGradientBoostingClassifier
+target: candidate LONG profitable net
+chronological holdout:
+  roc_auc: 0.534
+  average_precision: 0.604
+  positive_rate: 54.47%
+```
+
+Benchmark v0.3.6:
+
+```text
+p25_pf: 0.8786
+worst_balance: $19.19
+worst_max_dd: 9.29%
+profitable_window_pct: 66.67%
+median_trades: 8.0
+```
+
+Resultado thresholds:
+
+```text
+threshold 0.50:
+  median_balance: $20.31
+  worst_balance: $17.82
+  worst_max_dd: 12.54%
+  p25_pf: 1.31
+  profitable_window_pct: 76.04%
+  median_trades: 7.0
+
+threshold 0.55:
+  median_balance: $20.33
+  worst_balance: $17.79
+  worst_max_dd: 11.88%
+  p25_pf: 1.37
+  profitable_window_pct: 77.08%
+  median_trades: 6.0
+
+threshold 0.60:
+  median_balance: $20.27
+  worst_balance: $17.78
+  worst_max_dd: 11.71%
+  p25_pf: 2.14
+  profitable_window_pct: 79.17%
+  median_trades: 5.5
+
+threshold 0.65:
+  median_balance: $20.29
+  worst_balance: $18.01
+  worst_max_dd: 10.44%
+  p25_pf: 2.22
+  profitable_window_pct: 79.17%
+  median_trades: 4.0
+
+threshold 0.70:
+  median_balance: $20.20
+  worst_balance: $17.88
+  worst_max_dd: 12.75%
+  p25_pf: 1.52
+  profitable_window_pct: 78.13%
+  median_trades: 4.0
+```
+
+Criterio v0.4.0:
+
+```text
+worst_balance >= $19.00
+worst_max_dd <= 10%
+median_balance >= $20.10
+profitable_window_pct >= 65%
+median_trades >= 5
+p25_pf >= 0.95, ideal >= 1.0
+```
+
+Resultado:
+
+```text
+passes_any: false
+hits_p25_pf_target_count: 5
+hits_p25_pf_ideal_count: 5
+best_by_rank: threshold 0.65
+```
+
+Lectura:
+
+```text
+El meta-filter consigue lo que v0.3.6 no conseguía: p25_pf supera 1.0 en todos los thresholds evaluados.
+También mejora profitable_window_pct frente al benchmark, pasando de 66.67% a 76-79%.
+Pero no cumple robustez total: worst_balance cae por debajo de $19.00 y worst_max_dd supera 10%.
+El threshold 0.60 es el mejor compromiso de frecuencia: p25_pf 2.14 con median_trades 5.5, pero worst_balance $17.78 y DD 11.71%.
+El threshold 0.65 es el mejor por ranking de calidad: p25_pf 2.22 y worst_balance $18.01, pero median_trades baja a 4.0 y DD queda en 10.44%.
+La señal del meta-filter separa calidad media, pero todavía no controla los eventos de cola.
+No hay champion; no hay PPO; no hay inference.
+```
+
 ## Aegis Alpha v0.3.6 - Risk Guard Fine Tuning + Fee Stress
 
 Fecha: 2026-05-03.
