@@ -704,3 +704,239 @@ Ultra queda descartado como candidato inmediato por dominance_median 100% y wors
 Edge mejora tamaño de dataset, pero sobreopera y pierde contra conservative en balance, drawdown y calidad de trade.
 Conservative queda como mejor baseline offline v0.2.2, no como señal productiva.
 ```
+
+### v0.3.0 - Edge Model Supervisado
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó pipeline offline de edge supervisado:
+- tools/build_edge_dataset.py
+- edge/train_edge_model.py
+- edge/evaluate_edge_deciles.py
+
+El modelo no participa en inference.
+No se promueve champion.
+No se ejecuta PPO.
+```
+
+Artefactos generados:
+
+```text
+aegis_alpha/data/processed/edge_dataset_v030.npz
+aegis_alpha/models/edge/aegis_edge_model_v030.joblib
+aegis_alpha/logs/edge/edge_train_report_v030.json
+aegis_alpha/logs/edge/edge_decile_report_v030.json
+aegis_alpha/logs/edge/edge_decile_report_v030_fine.json
+```
+
+Dataset:
+
+```text
+samples: 437,341
+features: 168 compact window features
+horizon: 12 velas
+eval_horizon: 24 velas
+profit_threshold: 0.30%
+risk_threshold: 0.30%
+round_trip_fee: commission + slippage por entrada/salida
+
+LONG good: 118,203 (27.03%)
+SHORT good: 115,324 (26.37%)
+NO TRADE: 203,814 (46.60%)
+avg long net return: -0.0978%
+avg short net return: -0.1022%
+```
+
+Modelo:
+
+```text
+sklearn HistGradientBoostingClassifier para LONG success
+sklearn HistGradientBoostingClassifier para SHORT success
+sklearn HistGradientBoostingRegressor para LONG net return
+sklearn HistGradientBoostingRegressor para SHORT net return
+split cronologico: 80% train / 20% holdout
+holdout: 87,469 muestras
+holdout start: 2025-07-03 01:40:00
+holdout end: 2026-05-02 18:40:00
+```
+
+Métricas holdout:
+
+```text
+LONG classifier:
+  roc_auc: 0.5806
+  average_precision: 0.3322
+  positive_rate: 28.27%
+
+SHORT classifier:
+  roc_auc: 0.5789
+  average_precision: 0.3249
+  positive_rate: 28.00%
+
+baseline holdout:
+  long_avg_return_after_fees: -0.0989%
+  long_win_rate: 40.89%
+  long_profit_factor: 0.65
+  short_avg_return_after_fees: -0.1011%
+  short_win_rate: 39.56%
+  short_profit_factor: 0.65
+```
+
+Evaluación por deciles:
+
+```text
+Por probabilidad de success:
+  LONG top 10%:
+    count: 8,747
+    avg_return_after_fees: -0.0900%
+    win_rate: 48.18%
+    profit_factor: 0.74
+
+  SHORT top 10%:
+    count: 8,747
+    avg_return_after_fees: -0.1243%
+    win_rate: 45.82%
+    profit_factor: 0.66
+
+Por retorno esperado LONG:
+  top 5%:
+    count: 4,374
+    avg_return_after_fees: -0.0632%
+    win_rate: 49.27%
+    profit_factor: 0.84
+
+  top 2%:
+    count: 1,750
+    avg_return_after_fees: +0.0528%
+    win_rate: 52.57%
+    profit_factor: 1.13
+
+  top 1%:
+    count: 875
+    avg_return_after_fees: +0.1133%
+    win_rate: 53.60%
+    profit_factor: 1.25
+
+  top 0.5%:
+    count: 438
+    avg_return_after_fees: +0.2061%
+    win_rate: 54.11%
+    profit_factor: 1.40
+
+Por retorno esperado SHORT:
+  top 10% a top 0.5% siguen negativos.
+```
+
+Lectura:
+
+```text
+El Edge Model v0.3.0 encuentra señal predictiva débil, no suficiente como política general.
+Los clasificadores de success no producen edge rentable en top decile.
+El regresor de retorno esperado LONG sí aísla una cola pequeña rentable entre top 0.5% y top 2%.
+SHORT no muestra edge aprovechable.
+El grid simple LONG/SHORT por probabilidad no pasa gate mínimo; las únicas slices viables son LONG por expected_return.
+Esto no habilita champion ni PPO todavía, pero sí justifica v0.3.1 orientado a LONG-only edge-gated BC o validación walk-forward específica de esa cola.
+```
+
+### v0.3.1 - Long Edge Gate Validation
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_long_edge_gate.py.
+Carga aegis_alpha/models/edge/aegis_edge_model_v030.joblib.
+Evalúa política secuencial LONG-only sobre ventanas walk-forward.
+No usa SHORT como entrada.
+Respeta RiskConfig Aegis:
+  leverage 5x
+  position_fraction 0.25
+  hard_stop_roe 15%
+  min_hold_steps 6
+  min_flat_steps 12
+No toca inference.
+No promueve champion.
+```
+
+Política evaluada:
+
+```text
+flat:
+  LONG si expected_return_long >= gate
+
+en posición:
+  CLOSE por hard_stop
+  CLOSE por take_profit simple
+  CLOSE por max_hold
+  CLOSE por deterioro de edge
+  si no, IDLE
+```
+
+Gates:
+
+```text
+top 2.0% expected_return_long threshold: 0.0007201
+top 1.0% expected_return_long threshold: 0.0010184
+top 0.5% expected_return_long threshold: 0.0014292
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/long_edge_gate_validation_20260503T002808Z.json
+```
+
+Resumen walk-forward por gate:
+
+```text
+top 2%:
+  median_balance: $20.15
+  p25_balance: $19.41
+  worst_balance: $17.90
+  median_pf: 1.71
+  p25_pf: 0.69
+  profitable_window_pct: 57.14%
+  median_trades: 11.0
+  worst_max_dd: 16.10%
+  median_avg_return_per_trade: +0.1001%
+  median_exposure_time: 2.62%
+
+top 1%:
+  median_balance: $20.08
+  p25_balance: $19.61
+  worst_balance: $17.70
+  median_pf: 1.51
+  p25_pf: 0.54
+  profitable_window_pct: 57.14%
+  median_trades: 4.0
+  worst_max_dd: 15.39%
+  median_avg_return_per_trade: +0.1060%
+  median_exposure_time: 1.10%
+
+top 0.5%:
+  median_balance: $20.00
+  p25_balance: $20.00
+  worst_balance: $18.55
+  median_pf: 0.00
+  p25_pf: 0.00
+  profitable_window_pct: 35.71%
+  median_trades: 1.0
+  worst_max_dd: 11.45%
+  median_avg_return_per_trade: 0.0000%
+  median_exposure_time: 0.21%
+```
+
+Lectura:
+
+```text
+El gate top 2% es el mejor candidato por rentabilidad y cantidad de trades.
+Top 1% reduce exposición y trades, pero no mejora robustez: peor worst_balance y p25_pf.
+Top 0.5% queda demasiado escaso; muchas ventanas no operan y la mediana PF colapsa a 0.
+La señal LONG edge-gated supera claramente al BC heurístico en mediana, fees y frecuencia.
+Todavía no pasa como champion: p25_pf < 1, profitable_window_pct solo 57.14% y existe una ventana con DD ~16%.
+Siguiente paso razonable: v0.3.2 con validación de estabilidad por régimen y calibración de salida, antes de BC/PPO.
+```
