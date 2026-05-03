@@ -1482,6 +1482,48 @@ La señal LONG edge-gated necesita mejorar calidad predictiva, no solo controles
 No hay champion; no hay PPO; no hay inference.
 ```
 
+## v0.4.7 - Edge Deterioration Guard
+
+Se probó un guard específico para cierres por deterioro del edge sobre el candidate congelado de v0.4.2, manteniendo:
+
+```text
+LONG-only
+expected_return_long top 3%
+allowed regimes: mixed, chop, high_vol
+risk guard: loss7_pause48_pause2_48_maxday3
+dynamic sizing: full 0.25, reduced 0.125, meta_high 0.60
+fee multipliers: 1.0x y 1.25x
+```
+
+Mejor variante:
+
+```text
+A_pause48_after_loss @ fee 1.0x
+median_balance: 20.1588
+p25_balance: 19.9928
+worst_balance: 18.3378
+median_pf: 1.8815
+p25_pf: 0.7638
+profitable_window_pct: 69.44%
+median_trades: 7.0
+trades_per_month: 15.22
+worst_max_dd: 8.32%
+edge_deterioration_closes: 1127
+losing_edge_deterioration_closes: 336
+skipped_after_deterioration: 1254
+full_size_trades: 602
+reduced_size_trades: 666
+```
+
+Conclusión:
+
+```text
+El guard de deterioro sí recorta entradas después de cierres malos, pero no arregla la cola OOS.
+La mejor variante sigue por debajo de worst_balance >= 19.00 y worst_max_dd <= 8%, y también falla profitable_window_pct >= 70%.
+Las variantes con pausas más largas empeoran peor-balance y drawdown; las reglas de close_ratio tampoco levantan p25_pf.
+La conclusión práctica es que el problema sigue siendo la señal de entrada y no solo la disciplina de salida.
+```
+
 ## v0.4.6 - Score Floor + Low-Vol Mixed Block
 
 Se añadió un filtro de score floor sobre el candidate congelado de v0.4.2 y se probó un bloqueo adicional de `mixed + low_vol`, con fee stress `1.0x` y `1.25x` sobre las mismas 144 ventanas OOS.
