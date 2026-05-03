@@ -1223,3 +1223,138 @@ La variante más conservadora por drawdown es allow_mixed_chop, con worst_max_dd
 Esto todavía no es champion: hay pocas operaciones por ventana y debe validarse con más ventanas/splits antes de producción.
 Pero v0.3.3 sí confirma que el edge LONG era regime-dependent, no inexistente.
 ```
+
+### v0.3.4 - Long Edge Robustness Expansion
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_long_edge_robustness.py.
+Usa la mejor variante v0.3.3:
+  LONG-only
+  allowed_regimes: mixed, chop, high_vol
+No usa SHORT.
+No toca inference.
+No promueve champion.
+```
+
+Expansión evaluada:
+
+```text
+ventanas: 96
+fuentes:
+  recientes
+  aleatorias
+  por régimen
+  consecutivas / no solapadas
+
+thresholds:
+  top 1.5%
+  top 2.0%
+  top 2.5%
+  top 3.0%
+
+fee model:
+  1.0x
+  1.5x
+  2.0x
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/long_edge_robustness_20260503T005306Z.json
+```
+
+Criterio de éxito:
+
+```text
+window_count >= 50
+profitable_window_pct >= 65%
+p25_pf >= 1.0
+worst_balance >= $19.0
+worst_max_dd <= 12%
+no colapsar con fee model 1.5x
+```
+
+Resultado:
+
+```text
+passes_any: false
+passes_fee_1_5x: false
+```
+
+Mejor configuración por ranking:
+
+```text
+config_id: top_3pct_fee1x
+window_count: 96
+median_balance: $20.30
+p25_balance: $19.98
+worst_balance: $15.72
+median_pf: 3.08
+p25_pf: 0.85
+profitable_window_pct: 70.83%
+median_trades: 9.5
+median_trades_per_month: 20.65
+worst_max_dd: 24.95%
+median_avg_return_per_trade: +0.2038%
+median_exposure_time: 2.26%
+```
+
+Mejor configuración con fee 1.5x:
+
+```text
+config_id: top_3pct_fee1.5x
+median_balance: $20.20
+p25_balance: $19.88
+worst_balance: $15.36
+median_pf: 2.50
+p25_pf: 0.64
+profitable_window_pct: 65.63%
+median_trades: 9.5
+median_trades_per_month: 20.65
+worst_max_dd: 26.16%
+median_avg_return_per_trade: +0.1537%
+median_exposure_time: 2.26%
+```
+
+Top 2% baseline-style bajo robustez:
+
+```text
+top_2pct_fee1x:
+  median_balance: $20.24
+  p25_balance: $20.00
+  worst_balance: $15.43
+  median_pf: 4.89
+  p25_pf: 0.81
+  profitable_window_pct: 70.83%
+  median_trades: 5.0
+  median_trades_per_month: 10.87
+  worst_max_dd: 24.42%
+
+top_2pct_fee1.5x:
+  median_balance: $20.18
+  p25_balance: $20.00
+  worst_balance: $15.17
+  median_pf: 3.84
+  p25_pf: 0.58
+  profitable_window_pct: 68.75%
+  median_trades: 5.0
+  median_trades_per_month: 10.87
+  worst_max_dd: 25.46%
+```
+
+Lectura:
+
+```text
+El resultado v0.3.4 no pasa robustez.
+La mediana sigue siendo positiva, pero la cola mala reaparece al ampliar a 96 ventanas.
+El p25_pf queda por debajo de 1 en todos los thresholds y costos.
+El worst_balance cae a $15-$16 y worst_max_dd sube a 21%-27%.
+El modelo tampoco cumple la condición de no colapsar con costos 1.5x.
+La señal v0.3.3 era real en el conjunto pequeño, pero no suficientemente robusta para avanzar a champion o PPO.
+Siguiente trabajo: ampliar validación temporal por splits purgados o rediseñar el Edge Model con mejores features/targets; no promover ni conectar a inference.
+```
