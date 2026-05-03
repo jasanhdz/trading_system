@@ -2021,3 +2021,152 @@ Fee 1.25x conserva una configuración que pasa el criterio principal, pero degra
 Fee 1.5x no conserva el criterio principal.
 No hay champion; no hay PPO; no hay inference.
 ```
+
+## Aegis Alpha v0.4.3 - Candidate Freeze
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/export_strategy_candidate.py.
+Se congeló la mejor configuración v0.4.2 como candidate offline.
+No toca inference.
+No promueve champion.
+```
+
+Candidate exportado:
+
+```text
+aegis_alpha/models/strategy_candidates/aegis_long_edge_dynamic_v042.json
+```
+
+Contenido congelado:
+
+```text
+edge model path: aegis_alpha/models/edge/aegis_edge_model_v030.joblib
+meta-filter path: aegis_alpha/models/edge/aegis_long_edge_meta_filter_v040.joblib
+entry gate: top 3%
+allowed regimes: mixed, chop, high_vol
+risk guard: loss7_pause48_pause2_48_maxday3
+dynamic sizing: full=0.25, reduced=0.125, meta_high=0.60, meta_low=null
+status: OFFLINE_CANDIDATE
+```
+
+Freeze basis:
+
+```text
+best_config_id: full25_reduced0p125_high0p60_lownone_fee1x
+median_balance: $20.27
+p25_balance: $20.02
+worst_balance: $19.18
+worst_max_dd: 6.55%
+profitable_window_pct: 76.04%
+median_trades: 8.5
+```
+
+Lectura:
+
+```text
+La mejor configuración v0.4.2 se congeló sin cambios funcionales.
+Este paso no hace inferencia ni promoción; solo deja un artefacto estable para validación OOS.
+No hay champion; no hay PPO; no hay inference.
+```
+
+## Aegis Alpha v0.4.4 - Candidate OOS Evaluation
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_strategy_candidate_oos.py.
+Se evaluó el candidate congelado con nuevas semillas, 144 ventanas y ventanas mensuales consecutivas cuando hubo datos.
+Fee multipliers evaluados: 1.0x y 1.25x.
+No toca inference.
+No promueve champion.
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/strategy_candidate_oos_20260503T090317Z.json
+```
+
+OOS selection:
+
+```text
+window_count: 144
+seeds: 6101, 7331
+sources: monthly + recent + non_overlap + random_seed:6101 + random_seed:7331
+```
+
+Benchmark v0.4.2 congelado:
+
+```text
+p25_pf: 0.8786
+worst_balance: $19.18
+worst_max_dd: 6.55%
+profitable_window_pct: 76.04%
+median_trades: 8.5
+```
+
+Resultado OOS:
+
+```text
+fee 1.0x:
+  median_balance: $20.16
+  p25_balance: $19.99
+  worst_balance: $18.34
+  median_pf: 1.88
+  p25_pf: 0.76
+  profitable_window_pct: 69.44%
+  median_trades: 7.0
+  worst_max_dd: 8.32%
+  median_avg_return_per_trade: +0.1251%
+  exposure_time: 1.43%
+  full_size_trades: 602
+  reduced_size_trades: 666
+
+fee 1.25x:
+  median_balance: $20.14
+  p25_balance: $19.99
+  worst_balance: $18.32
+  median_pf: 1.61
+  p25_pf: 0.69
+  profitable_window_pct: 68.75%
+  median_trades: 6.5
+  worst_max_dd: 8.39%
+  median_avg_return_per_trade: +0.1001%
+  exposure_time: 1.40%
+  full_size_trades: 597
+  reduced_size_trades: 667
+```
+
+Criterio OOS:
+
+```text
+worst_balance >= $19.00
+worst_max_dd <= 8%
+profitable_window_pct >= 70%
+median_balance >= $20.10
+median_trades >= 5
+fee 1.25x worst_balance >= $18.75
+```
+
+Resultado:
+
+```text
+passes_any: false
+best_fee: 1.0x
+```
+
+Lectura:
+
+```text
+El candidate congelado no sostuvo la cola OOS.
+La pérdida principal está en worst_balance y en profitable_window_pct: 1.0x queda en $18.34 y 69.44%, 1.25x queda en $18.32 y 68.75%.
+El DD sí queda cerca del umbral, pero no compensa la caída de balance y frecuencia.
+El candidate sirve como freeze estable, pero todavía no está listo para champion ni para tocar inference.
+No hay champion; no hay PPO; no hay inference.
+```
