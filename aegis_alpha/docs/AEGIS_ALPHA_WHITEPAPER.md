@@ -2170,3 +2170,92 @@ El DD sí queda cerca del umbral, pero no compensa la caída de balance y frecue
 El candidate sirve como freeze estable, pero todavía no está listo para champion ni para tocar inference.
 No hay champion; no hay PPO; no hay inference.
 ```
+
+## Aegis Alpha v0.4.5 - OOS Failure Analysis
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/analyze_strategy_candidate_failures.py.
+Se cargaron:
+  models/strategy_candidates/aegis_long_edge_dynamic_v042.json
+  logs/edge/strategy_candidate_oos_20260503T090317Z.json
+Se re-simularon las 144 ventanas OOS del fee 1.0x para materializar trades detallados.
+No toca inference.
+No promueve champion.
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/oos_failure_analysis_20260503T091718Z.json
+```
+
+Cola OOS:
+
+```text
+top balance failures:
+  monthly:2025-02
+  random_seed:6101
+  monthly:2024-12
+
+top dd failures:
+  monthly:2025-02
+  random_seed:6101
+  non_overlap
+
+top pf failures:
+  monthly:2022-12
+  random_seed:7331
+  non_overlap
+```
+
+Resumen de pérdidas:
+
+```text
+total_trades: 1268
+losses_full_size: 100
+losses_reduced_size: 282
+
+losses_by_regime:
+  mixed: 347
+  chop: 29
+  high_vol: 6
+
+losses_by_exit_reason:
+  edge_deterioration: 336
+  hard_stop: 35
+  max_hold: 11
+
+losses_by_score_bucket:
+  <0.55: 241
+  [0.55,0.60): 41
+  [0.60,0.65): 29
+  [0.65,0.70): 37
+  >=0.70: 34
+
+losses_by_volatility_bucket:
+  low: 356
+  normal: 15
+  high: 6
+  compressed: 5
+```
+
+Recomendaciones automáticas:
+
+```text
+Reducir size o bloquear meta_score < 0.60; ahí se concentra demasiada pérdida.
+Apretar salida por edge deterioration o pausar antes de entrar en condiciones frágiles.
+```
+
+Lectura:
+
+```text
+La peor cola OOS no está concentrada en high_vol sino en mixed con vol_bucket low.
+El meta_score bajo 0.60 domina la pérdida, y edge_deterioration es la salida perdedora principal.
+El tamaño reducido ayuda, pero no elimina la cola; la señal sigue entrando demasiado en estados de baja calidad.
+La conclusión práctica es que la política congelada necesita un bloqueador más fuerte en score bajo y una gestión de salida más temprana cuando el edge se degrada.
+No hay champion; no hay PPO; no hay inference.
+```
