@@ -328,7 +328,7 @@ metrics completas de episode
 
 ### Bloque 2: BC Prudente
 
-Estado: implementado en v0.2.0 como primera base entrenable.
+Estado: implementado en v0.2.0 como primera base entrenable; walk-forward agregado en v0.2.1.
 
 Completado:
 
@@ -337,6 +337,7 @@ tools/build_bc_dataset.py
 bc/labeler.py prudente
 bc/train_bc.py supervisado
 bc/evaluate_bc.py
+tools/evaluate_bc_walkforward.py
 models/bc/aegis_bc_prudent.zip
 ```
 
@@ -370,7 +371,7 @@ Invalid actions: 70
 Fees: $5.14
 ```
 
-Lectura: el BC v0.2.0 ya sirve como semilla prudente para PPO porque controla DD, evita dominancia extrema y no nace de random. No es señal productiva todavía: fees, calibración SignalQ y gap long/short siguen pendientes.
+Lectura: el BC v0.2.0 sirve como baseline de investigación porque evita dominancia extrema y no nace de random. El walk-forward v0.2.1 muestra que no es apto para promoción: pierde en múltiples ventanas históricas por frecuencia/fees/ruido. No es señal productiva todavía.
 
 ### Bloque 3: PPO Sobre BC
 
@@ -533,4 +534,173 @@ No hay champion Aegis activo.
 La API sigue respondiendo IDLE defensivo.
 El bot TypeScript no fue modificado.
 El modelo BC queda como semilla para PPO, no como señal productiva.
+```
+
+### v0.2.1 - BC Walk-Forward Evaluation
+
+Fecha: 2026-05-02.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_bc_walkforward.py.
+Evalúa el BC prudente sobre múltiples ventanas históricas de 4,032 steps.
+Incluye ventanas recientes, aleatorias y seleccionadas por régimen disponible.
+Guarda reportes JSON en logs/coliseum/.
+No modifica inference.
+No promueve champion automáticamente.
+```
+
+Archivo de reporte generado:
+
+```text
+aegis_alpha/logs/coliseum/bc_walkforward_20260502T221905Z.json
+```
+
+Cada ventana reporta:
+
+```text
+start/end timestamp
+regime dominante
+balance/net
+p95_dd/max_dd
+opens/long_opens/short_opens
+manual_closes
+invalid_actions
+fees
+avg_hold_steps/avg_flat_steps
+direction_dominance
+top_prob_avg
+signals_gt_65_pct
+long_short_gap_avg
+```
+
+Resumen del primer walk-forward:
+
+```text
+window_count: 14
+median_balance: $16.23
+p25_balance: $15.42
+worst_balance: $13.44
+median_p95_dd: 21.55%
+worst_max_dd: 38.83%
+median_fees: $4.25
+dominance_median: 67.36%
+dominance_max: 77.89%
+dominance_gt_80_pct: 0.0%
+dominance_gt_95_pct: 0.0%
+```
+
+Lectura:
+
+```text
+El BC v0.2.0 no pasa walk-forward.
+La direccionalidad es sana, pero el modelo sobreopera y pierde por fees/ruido en ventanas históricas.
+Se conserva como baseline de investigación, no como champion ni señal productiva.
+El siguiente ajuste debe atacar frecuencia, hold/flat efectivo, SignalQ/gap y selección de entradas antes de PPO.
+```
+
+### v0.2.2 - Selective BC Experiments
+
+Fecha: 2026-05-02.
+
+Cambios:
+
+```text
+Se agregaron variantes offline de labeler:
+- conservative
+- edge
+- ultra
+
+Se agregaron filtros opcionales de future MFE/MAE para construir labels LONG/SHORT.
+Estos filtros solo existen en tools/build_bc_dataset.py y quedan prohibidos en inference.
+No se tocó inference.
+No se promovió champion.
+```
+
+Artefactos generados:
+
+```text
+aegis_alpha/data/processed/bc_conservative_dataset.npz
+aegis_alpha/data/processed/bc_edge_dataset.npz
+aegis_alpha/data/processed/bc_ultra_dataset.npz
+
+aegis_alpha/models/bc/aegis_bc_conservative.zip
+aegis_alpha/models/bc/aegis_bc_edge.zip
+aegis_alpha/models/bc/aegis_bc_ultra.zip
+
+aegis_alpha/logs/coliseum/bc_walkforward_conservative_20260502T235004Z.json
+aegis_alpha/logs/coliseum/bc_walkforward_edge_20260502T235052Z.json
+aegis_alpha/logs/coliseum/bc_walkforward_ultra_20260502T235142Z.json
+aegis_alpha/logs/coliseum/bc_walkforward_comparison_20260502T235142Z.json
+```
+
+`tools/evaluate_bc_walkforward.py` ahora agrega métricas de calidad de trade:
+
+```text
+avg_return_per_trade
+win_rate
+profit_factor
+avg_win
+avg_loss
+fees_per_trade
+entry_count
+entry_mfe_avg/median
+entry_mae_avg/median
+```
+
+Resumen comparativo walk-forward:
+
+```text
+conservative:
+  median_balance: $16.36
+  p25_balance: $15.08
+  worst_balance: $12.41
+  median_p95_dd: 20.11%
+  worst_max_dd: 37.93%
+  median_fees: $4.82
+  dominance_median: 63.24%
+  dominance_gt_80_pct: 7.14%
+  median_entry_count: 212.5
+  median_avg_return_per_trade: -0.0747%
+  median_win_rate: 36.90%
+  median_profit_factor: 0.58
+
+edge:
+  median_balance: $15.52
+  p25_balance: $14.38
+  worst_balance: $12.85
+  median_p95_dd: 24.67%
+  worst_max_dd: 35.87%
+  median_fees: $4.96
+  dominance_median: 75.00%
+  dominance_gt_80_pct: 21.43%
+  median_entry_count: 224.0
+  median_avg_return_per_trade: -0.0889%
+  median_win_rate: 35.49%
+  median_profit_factor: 0.52
+
+ultra:
+  median_balance: $15.36
+  p25_balance: $13.61
+  worst_balance: $11.13
+  median_p95_dd: 22.93%
+  worst_max_dd: 45.56%
+  median_fees: $4.93
+  dominance_median: 100.00%
+  dominance_gt_80_pct: 100.00%
+  median_entry_count: 224.0
+  median_avg_return_per_trade: -0.0937%
+  median_win_rate: 33.71%
+  median_profit_factor: 0.49
+```
+
+Lectura:
+
+```text
+El ranking compuesto favorece conservative por median_balance, p25_balance, worst_balance, DD, fees y trade quality.
+Ninguna variante pasa como champion: las tres mantienen retorno medio por trade negativo y profit_factor < 1.
+Ultra queda descartado como candidato inmediato por dominance_median 100% y worst_max_dd 45.56%.
+Edge mejora tamaño de dataset, pero sobreopera y pierde contra conservative en balance, drawdown y calidad de trade.
+Conservative queda como mejor baseline offline v0.2.2, no como señal productiva.
 ```

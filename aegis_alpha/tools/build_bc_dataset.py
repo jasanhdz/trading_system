@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 
-from aegis_alpha.bc.labeler import LabelerConfig, label_prudent_action
+from aegis_alpha.bc.labeler import LabelerConfig, LabelerVariant, get_labeler_config, label_bc_action
 from aegis_alpha.config import AegisConfig, load_config
-from aegis_alpha.env.action_mask import CLOSE, LONG, SHORT
+from aegis_alpha.env.action_mask import CLOSE, IDLE, LONG, SHORT
 from aegis_alpha.env.risk_engine import Position, close_position, current_roe, open_position
 from aegis_alpha.features.feature_builder import FEATURE_COLUMNS, build_feature_frame
 from aegis_alpha.features.regime_detector import detect_regime
@@ -17,6 +18,45 @@ from data.storage.database_manager import DatabaseManager
 
 WINDOW_SIZE = 64
 ACTION_NAMES = {0: "IDLE", 1: "LONG", 2: "SHORT", 3: "CLOSE"}
+VARIANTS: tuple[LabelerVariant, ...] = ("conservative", "edge", "ultra")
+
+
+@dataclass(frozen=True)
+class FutureFilterConfig:
+    enabled: bool = True
+    horizon: int = 12
+    long_min_mfe: float = 0.0
+    long_max_mae: float = 1.0
+    short_min_mfe: float = 0.0
+    short_max_mae: float = 1.0
+
+
+DEFAULT_FUTURE_FILTERS: dict[LabelerVariant, FutureFilterConfig] = {
+    "conservative": FutureFilterConfig(
+        enabled=True,
+        horizon=12,
+        long_min_mfe=0.0040,
+        long_max_mae=0.0065,
+        short_min_mfe=0.0040,
+        short_max_mae=0.0065,
+    ),
+    "edge": FutureFilterConfig(
+        enabled=True,
+        horizon=12,
+        long_min_mfe=0.0025,
+        long_max_mae=0.0090,
+        short_min_mfe=0.0025,
+        short_max_mae=0.0090,
+    ),
+    "ultra": FutureFilterConfig(
+        enabled=True,
+        horizon=12,
+        long_min_mfe=0.0065,
+        long_max_mae=0.0045,
+        short_min_mfe=0.0065,
+        short_max_mae=0.0045,
+    ),
+}
 
 
 def _future_stats(close: np.ndarray, idx: int, horizon: int = 12) -> tuple[float, float, float, float, float]:
@@ -32,6 +72,18 @@ def _future_stats(close: np.ndarray, idx: int, horizon: int = 12) -> tuple[float
     mfe = float(np.max(future / price - 1.0))
     mae = float(np.min(future / price - 1.0))
     return ret(3), ret(6), ret(12), mfe, mae
+
+
+def _passes_future_filter(action: int, mfe: float, mae: float, cfg: FutureFilterConfig) -> bool:
+    if not cfg.enabled or action not in (LONG, SHORT):
+        return True
+    if action == LONG:
+        favorable = mfe
+        adverse = max(0.0, -mae)
+        return favorable >= cfg.long_min_mfe and adverse <= cfg.long_max_mae
+    favorable = max(0.0, -mae)
+    adverse = max(0.0, mfe)
+    return favorable >= cfg.short_min_mfe and adverse <= cfg.short_max_mae
 
 
 def _account_obs(
@@ -100,6 +152,7 @@ def build_dataset(
     cfg: AegisConfig,
     label_cfg: LabelerConfig,
     target_idle_pct: float | None,
+    future_filter_cfg: FutureFilterConfig,
 ) -> dict[str, float]:
     candles = load_candles(cfg)
     feature_frame = build_feature_frame(candles)
@@ -113,14 +166,25 @@ def build_dataset(
     flat_steps = cfg.risk.min_flat_steps
 
     refs: list[tuple[int, np.ndarray, int, str, float, float, float, float, float]] = []
+    filtered_entries = Counter()
     for step in range(WINDOW_SIZE, len(features) - 13):
         price = float(close[step])
         row = features[step]
         roe = current_roe(position, price, cfg.risk)
         account = _account_obs(cfg, balance, position, step, price, hold_steps, flat_steps)
-        action = label_prudent_action(row, position.side, hold_steps, flat_steps, roe=roe, cfg=label_cfg)
+        action = label_bc_action(
+            row,
+            position.side,
+            hold_steps,
+            flat_steps,
+            roe=roe,
+            cfg=label_cfg,
+        )
         regime = detect_regime(features[max(0, step - WINDOW_SIZE) : step + 1]).type
-        f3, f6, f12, mfe12, mae12 = _future_stats(close, step)
+        f3, f6, f12, mfe12, mae12 = _future_stats(close, step, future_filter_cfg.horizon)
+        if position.side == 0 and action in (LONG, SHORT) and not _passes_future_filter(action, mfe12, mae12, future_filter_cfg):
+            filtered_entries[ACTION_NAMES[action]] += 1
+            action = IDLE
         refs.append((step, account, action, regime, f3, f6, f12, mfe12, mae12))
 
         if action in (LONG, SHORT) and position.side == 0:
@@ -161,7 +225,9 @@ def build_dataset(
 
     for out_idx, (step, account_obs, action, regime, f3, f6, f12, mfe12, mae12) in enumerate(refs):
         market[out_idx] = features[step - WINDOW_SIZE : step].astype(np.float16)
-        account[out_idx] = account_obs.astype(np.float16)
+        account[out_idx] = np.nan_to_num(account_obs, nan=0.0, posinf=10.0, neginf=-10.0).clip(-10.0, 10.0).astype(
+            np.float16
+        )
         actions[out_idx] = action
         ts[out_idx] = timestamps[step]
         price_arr[out_idx] = close[step]
@@ -188,6 +254,9 @@ def build_dataset(
         mae_12=mae_12,
         feature_columns=np.array(FEATURE_COLUMNS),
         action_names=np.array([ACTION_NAMES[i] for i in range(4)]),
+        labeler_variant=np.array(label_cfg.variant),
+        labeler_config=np.array(str(asdict(label_cfg))),
+        future_filter_config=np.array(str(asdict(future_filter_cfg))),
     )
 
     counts = Counter(actions.tolist())
@@ -199,19 +268,54 @@ def build_dataset(
     print("Regimes:")
     for regime, count in sorted(regime_counts.items()):
         print(f"  {regime}: {count:,} ({count / max(n, 1) * 100:.1f}%)")
+    if future_filter_cfg.enabled:
+        print("Future entry filters:")
+        print(f"  config: {asdict(future_filter_cfg)}")
+        print(f"  filtered: {dict(filtered_entries)}")
     print(f"Saved -> {output} ({output.stat().st_size / 1e6:.1f} MB)")
     return {ACTION_NAMES[action].lower(): counts[action] / max(n, 1) for action in range(4)}
+
+
+def _default_output_for_variant(variant: LabelerVariant) -> str:
+    return f"aegis_alpha/data/processed/bc_{variant}_dataset.npz"
+
+
+def _future_filter_from_args(args: argparse.Namespace) -> FutureFilterConfig:
+    cfg = DEFAULT_FUTURE_FILTERS[args.variant]
+    return FutureFilterConfig(
+        enabled=not args.no_future_filters,
+        horizon=args.future_horizon,
+        long_min_mfe=cfg.long_min_mfe if args.long_min_mfe is None else args.long_min_mfe,
+        long_max_mae=cfg.long_max_mae if args.long_max_mae is None else args.long_max_mae,
+        short_min_mfe=cfg.short_min_mfe if args.short_min_mfe is None else args.short_min_mfe,
+        short_max_mae=cfg.short_max_mae if args.short_max_mae is None else args.short_max_mae,
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="aegis_alpha/configs/base.yaml")
-    parser.add_argument("--output", default="aegis_alpha/data/processed/bc_prudent_dataset.npz")
+    parser.add_argument("--variant", choices=VARIANTS, default="conservative")
+    parser.add_argument("--output", default=None)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--target-idle-pct", type=float, default=0.84)
+    parser.add_argument("--no-future-filters", action="store_true")
+    parser.add_argument("--future-horizon", type=int, default=12)
+    parser.add_argument("--long-min-mfe", type=float, default=None)
+    parser.add_argument("--long-max-mae", type=float, default=None)
+    parser.add_argument("--short-min-mfe", type=float, default=None)
+    parser.add_argument("--short-max-mae", type=float, default=None)
     args = parser.parse_args()
     cfg = load_config(args.config)
-    build_dataset(Path(args.output), args.max_samples, cfg, LabelerConfig(), args.target_idle_pct)
+    output = Path(args.output or _default_output_for_variant(args.variant))
+    build_dataset(
+        output,
+        args.max_samples,
+        cfg,
+        get_labeler_config(args.variant),
+        args.target_idle_pct,
+        _future_filter_from_args(args),
+    )
 
 
 if __name__ == "__main__":
