@@ -1482,6 +1482,147 @@ La señal LONG edge-gated necesita mejorar calidad predictiva, no solo controles
 No hay champion; no hay PPO; no hay inference.
 ```
 
+## Aegis Alpha v0.4.1 - Adaptive Meta-Filter / Defensive Mode
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_long_edge_adaptive_meta.py.
+Base usada:
+  LONG-only
+  expected_return_long top 3%
+  allowed_regimes: mixed, chop, high_vol
+  risk guard: loss7_pause48_pause2_48_maxday3_fee1x
+Meta-filter:
+  aegis_alpha/models/edge/aegis_long_edge_meta_filter_v040.joblib
+No toca inference.
+No promueve champion.
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/long_edge_adaptive_meta_20260503T033742Z.json
+```
+
+Benchmarks:
+
+```text
+v0.3.6:
+  p25_pf: 0.8786
+  worst_balance: $19.19
+  worst_max_dd: 9.29%
+  profitable_window_pct: 66.67%
+  median_trades: 8.0
+
+v0.4.0 threshold 0.65:
+  p25_pf: 2.22
+  worst_balance: $18.01
+  worst_max_dd: 10.44%
+  profitable_window_pct: 79.17%
+  median_trades: 4.0
+```
+
+Variantes evaluadas:
+
+```text
+A_loss_defensive_48:
+  p25_pf: 0.8786
+  worst_balance: $19.10
+  worst_max_dd: 9.29%
+  profitable_window_pct: 66.67%
+  median_trades: 8.5
+  skipped_by_meta: 0
+
+A_loss_defensive_72:
+  p25_pf: 0.78
+  worst_balance: $18.51
+  worst_max_dd: 9.44%
+  profitable_window_pct: 68.75%
+  median_trades: 8.0
+  skipped_by_meta: 95
+
+B_drawdown_defensive_2pct:
+  p25_pf: 0.72
+  worst_balance: $17.74
+  worst_max_dd: 11.72%
+  profitable_window_pct: 66.67%
+  median_trades: 7.0
+  skipped_by_meta: 288
+
+B_drawdown_defensive_3pct:
+  p25_pf: 0.73
+  worst_balance: $17.78
+  worst_max_dd: 11.54%
+  profitable_window_pct: 67.71%
+  median_trades: 8.0
+  skipped_by_meta: 170
+
+C_two_losses_last5:
+  p25_pf: 0.76
+  worst_balance: $17.72
+  worst_max_dd: 11.82%
+  profitable_window_pct: 69.79%
+  median_trades: 7.0
+  skipped_by_meta: 319
+
+D_soft55_defensive65:
+  p25_pf: 1.36
+  worst_balance: $17.96
+  worst_max_dd: 11.05%
+  profitable_window_pct: 77.08%
+  median_trades: 6.0
+  skipped_by_meta: 646
+
+E_dynamic_sizing:
+  p25_pf: 0.8786
+  worst_balance: $19.12
+  worst_max_dd: 6.55%
+  profitable_window_pct: 75.00%
+  median_trades: 8.5
+  reduced_size_trades: 580
+
+D_plus_E_soft_dynamic:
+  p25_pf: 1.37
+  worst_balance: $18.02
+  worst_max_dd: 12.50%
+  profitable_window_pct: 77.08%
+  median_trades: 6.0
+  skipped_by_meta: 502
+  reduced_size_trades: 357
+```
+
+Criterio v0.4.1:
+
+```text
+worst_balance >= $19.00
+worst_max_dd <= 10%
+median_trades >= 6
+profitable_window_pct >= 70%
+p25_pf > 0.8786
+```
+
+Resultado:
+
+```text
+passes_any: false
+beats_v036_p25_pf_count: 2
+best_by_rank: D_plus_E_soft_dynamic
+```
+
+Lectura:
+
+```text
+El modo defensivo con meta-filter sí mejora p25_pf cuando se aplica como filtro suave/estricto, pero vuelve a abrir la cola de pérdida.
+D_soft55_defensive65 y D_plus_E_soft_dynamic superan p25_pf del benchmark, pero fallan worst_balance y worst_max_dd.
+E_dynamic_sizing es la variante más defensiva operacionalmente: mantiene worst_balance sobre $19, baja DD a 6.55%, sube profitable_window_pct a 75% y conserva trades; pero no mejora p25_pf sobre v0.3.6.
+La defensa por drawdown y pérdidas recientes no funciona bien: filtra entradas después del daño y reduce PF de cola.
+La conclusión es clara: dynamic sizing ayuda a supervivencia, meta-filter ayuda a trade quality, pero combinarlos todavía no resuelve simultáneamente cola y p25_pf.
+No hay champion; no hay PPO; no hay inference.
+```
+
 ## Aegis Alpha v0.4.0 - Long Edge Meta-Filter
 
 Fecha: 2026-05-03.
