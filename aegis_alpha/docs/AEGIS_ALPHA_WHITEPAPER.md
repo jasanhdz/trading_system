@@ -1481,3 +1481,120 @@ Con fee 1.5x la robustez de PF empeora más, aunque algunos guards mantienen wor
 La señal LONG edge-gated necesita mejorar calidad predictiva, no solo controles de riesgo.
 No hay champion; no hay PPO; no hay inference.
 ```
+
+## Aegis Alpha v0.3.6 - Risk Guard Fine Tuning + Fee Stress
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se extendió tools/evaluate_long_edge_risk_guard.py.
+Parte de la mejor configuración v0.3.5:
+  LONG-only
+  expected_return_long top 3%
+  allowed_regimes: mixed, chop, high_vol
+  max_window_loss_pct alrededor de 7%
+  pause_after_loss_steps alrededor de 48
+  pause_after_2_losses_steps alrededor de 48
+  max_trades_per_day 3
+No toca inference.
+No promueve champion.
+```
+
+Grid fino evaluado:
+
+```text
+max_window_loss_pct: 5%, 6%, 7%, 8%
+pause_after_loss_steps: 24, 48, 72, 96
+pause_after_2_losses_steps: 48, 96, 144
+max_trades_per_day: 2, 3
+fee_multiplier: 1.0x, 1.25x, 1.5x
+configs: 288
+ventanas: 96
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/long_edge_risk_guard_20260503T013626Z.json
+```
+
+Baseline v0.3.5 best:
+
+```text
+p25_pf: 0.88
+worst_balance: $19.19
+worst_max_dd: 9.29%
+profitable_window_pct: 66.67%
+median_trades: 8.0
+```
+
+Criterio v0.3.6:
+
+```text
+worst_balance >= $19.00
+worst_max_dd <= 10%
+median_balance >= $20.10
+profitable_window_pct >= 65%
+median_trades >= 6
+p25_pf >= 0.95, ideal >= 1.0
+```
+
+Resultado:
+
+```text
+passes_any: false
+hits_p25_pf_target_count: 0
+hits_p25_pf_ideal_count: 0
+```
+
+Mejor configuración:
+
+```text
+config_id: loss7_pause48_pause2_48_maxday3_fee1x
+fee_multiplier: 1.0x
+max_window_loss_pct: 7%
+pause_after_loss_steps: 48
+pause_after_2_losses_steps: 48
+max_trades_per_day: 3
+
+median_balance: $20.22
+p25_balance: $19.89
+worst_balance: $19.19
+median_pf: 3.01
+p25_pf: 0.88
+profitable_window_pct: 66.67%
+median_trades: 8.0
+median_trades_per_month: 17.39
+worst_max_dd: 9.29%
+median_avg_return_per_trade: +0.1880%
+median_exposure_time: 1.87%
+skipped_by_guard: 7,383
+```
+
+Variantes destacadas:
+
+```text
+loss8_pause48_pause2_48_maxday3_fee1x:
+  resultado equivalente al mejor v0.3.5
+  no mejora p25_pf
+
+loss7_pause24_pause2_48_maxday3_fee1x:
+  median_balance: $20.26
+  worst_balance: $18.95
+  p25_pf: 0.86
+  profitable_window_pct: 68.75%
+  median_trades: 8.0
+```
+
+Lectura:
+
+```text
+El fine tuning no encontró una variante superior al mejor risk guard v0.3.5.
+El control de riesgo se mantiene fuerte: worst_balance queda sobre $19.00 y worst_max_dd bajo 10% en la mejor variante.
+El bloqueo real sigue siendo p25_pf: ninguna configuración alcanzó 0.95 y ninguna alcanzó 1.0.
+El fee stress 1.25x y 1.5x degrada la calidad del percentil bajo y no produce una configuración robusta superior.
+La conclusión se mantiene: los guards reducen cola de pérdida, pero no crean edge estadístico suficiente.
+No hay champion; no hay PPO; no hay inference.
+```

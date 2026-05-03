@@ -18,11 +18,11 @@ from aegis_alpha.tools.evaluate_long_edge_gate import MarketData, _load_market
 from aegis_alpha.tools.evaluate_long_edge_robustness import ALLOWED_REGIMES, select_robust_windows
 
 
-FEE_MULTIPLIERS = (1.0, 1.5)
-MAX_WINDOW_LOSS_PCTS = (0.03, 0.05, 0.07)
-PAUSE_AFTER_LOSS_STEPS = (12, 24, 48)
-PAUSE_AFTER_2_LOSSES_STEPS = (48, 96)
-MAX_TRADES_PER_DAY = (1, 2, 3)
+FEE_MULTIPLIERS = (1.0, 1.25, 1.5)
+MAX_WINDOW_LOSS_PCTS = (0.05, 0.06, 0.07, 0.08)
+PAUSE_AFTER_LOSS_STEPS = (24, 48, 72, 96)
+PAUSE_AFTER_2_LOSSES_STEPS = (48, 96, 144)
+MAX_TRADES_PER_DAY = (2, 3)
 
 
 @dataclass(frozen=True)
@@ -296,12 +296,15 @@ def _rank(config_reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 **report["config"],
                 **summary,
                 "passes_success_criteria": bool(
-                    summary["worst_balance"] >= 18.50
-                    and summary["worst_max_dd"] <= 0.15
-                    and summary["p25_pf"] >= 1.0
+                    summary["worst_balance"] >= 19.00
+                    and summary["worst_max_dd"] <= 0.10
+                    and summary["median_balance"] >= 20.10
                     and summary["profitable_window_pct"] >= 0.65
-                    and summary["median_trades"] >= 5.0
+                    and summary["median_trades"] >= 6.0
+                    and summary["p25_pf"] >= 0.95
                 ),
+                "hits_p25_pf_target": bool(summary["p25_pf"] >= 0.95),
+                "hits_p25_pf_ideal": bool(summary["p25_pf"] >= 1.0),
             }
         )
 
@@ -402,7 +405,7 @@ def run_guard(
     ranking = _rank(config_reports)
     created_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     report = {
-        "schema_version": "aegis_long_edge_risk_guard_v1",
+        "schema_version": "aegis_long_edge_risk_guard_fine_v1",
         "created_at": created_at,
         "model_path": str(model_path),
         "config_path": config_path,
@@ -418,20 +421,26 @@ def run_guard(
         },
         "window_count": len(windows),
         "window_steps": window_steps,
-        "baseline_v034_top3_fee1x": {
-            "p25_pf": 0.8530508279800415,
-            "worst_balance": 15.717373847961426,
-            "worst_max_dd": 0.24954913556575775,
-            "profitable_window_pct": 0.7083333333333334,
+        "baseline_v035_best": {
+            "config_id": "loss7_pause48_pause2_48_maxday3_fee1x",
+            "p25_pf": 0.8785714507102966,
+            "worst_balance": 19.187429428100586,
+            "worst_max_dd": 0.09286157041788101,
+            "profitable_window_pct": 0.6666666666666666,
+            "median_trades": 8.0,
         },
         "success_criteria": {
-            "worst_balance": ">=18.50",
-            "worst_max_dd": "<=15%",
-            "p25_pf": ">=1.0",
+            "worst_balance": ">=19.00",
+            "worst_max_dd": "<=10%",
+            "median_balance": ">=20.10",
             "profitable_window_pct": ">=65%",
-            "median_trades": ">=5",
+            "median_trades": ">=6",
+            "p25_pf_target": ">=0.95",
+            "p25_pf_ideal": ">=1.0",
         },
         "passes_any": bool(any(row["passes_success_criteria"] for row in ranking)),
+        "hits_p25_pf_target_count": int(sum(row["hits_p25_pf_target"] for row in ranking)),
+        "hits_p25_pf_ideal_count": int(sum(row["hits_p25_pf_ideal"] for row in ranking)),
         "best_config": ranking[0] if ranking else None,
         "ranking": ranking,
         "configs": config_reports,
