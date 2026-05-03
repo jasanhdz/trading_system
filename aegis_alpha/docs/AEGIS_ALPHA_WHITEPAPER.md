@@ -1095,3 +1095,131 @@ El problema principal es régimen trend_down: concentra 67% de los trades de la 
 El edge LONG existe, pero no es estable a través de regímenes.
 La siguiente mejora no debe ser más grid de salidas; debe ser regime gating explícito para bloquear LONG en trend_down y revalidar.
 ```
+
+### v0.3.3 - Regime-Gated Long Edge Validation
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_long_edge_regime_gate.py.
+Usa baseline v0.3.1:
+  LONG-only
+  top 2% expected_return_long
+  threshold 0.00072011
+No usa SHORT.
+No toca inference.
+No promueve champion.
+```
+
+Variantes evaluadas:
+
+```text
+A) allow_all_except_trend_down
+B) allow_trend_up_mixed_chop_high_vol
+C) allow_mixed_chop_high_vol
+D) allow_mixed_chop
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/long_edge_regime_gate_20260503T004330Z.json
+```
+
+Baseline v0.3.1 top 2%:
+
+```text
+p25_pf: 0.6946
+worst_balance: $17.90
+profitable_window_pct: 57.14%
+median_trades: 11.0
+```
+
+Resultados por variante:
+
+```text
+allow_mixed_chop_high_vol:
+  median_balance: $20.19
+  p25_balance: $20.06
+  worst_balance: $19.76
+  median_pf: 8.76
+  p25_pf: 1.25
+  profitable_window_pct: 78.57%
+  median_trades: 4.5
+  worst_max_dd: 8.27%
+  median_avg_return_per_trade: +0.1912%
+  median_exposure_time: 0.94%
+  allowed_count: 80
+  blocked_count: 533
+  skipped_trend_down_count: 519
+
+allow_all_except_trend_down:
+  median_balance: $20.24
+  p25_balance: $20.01
+  worst_balance: $19.88
+  median_pf: 8.54
+  p25_pf: 1.13
+  profitable_window_pct: 78.57%
+  median_trades: 4.5
+  worst_max_dd: 8.27%
+  median_avg_return_per_trade: +0.2066%
+  median_exposure_time: 0.97%
+  allowed_count: 83
+  blocked_count: 520
+  skipped_trend_down_count: 520
+
+allow_trend_up_mixed_chop_high_vol:
+  median_balance: $20.24
+  p25_balance: $20.01
+  worst_balance: $19.88
+  median_pf: 8.54
+  p25_pf: 1.13
+  profitable_window_pct: 78.57%
+  median_trades: 4.5
+  worst_max_dd: 8.27%
+  median_avg_return_per_trade: +0.2066%
+  median_exposure_time: 0.97%
+  allowed_count: 83
+  blocked_count: 520
+  skipped_trend_down_count: 520
+
+allow_mixed_chop:
+  median_balance: $20.19
+  p25_balance: $20.01
+  worst_balance: $19.76
+  median_pf: 121.26
+  p25_pf: 1.12
+  profitable_window_pct: 78.57%
+  median_trades: 4.5
+  worst_max_dd: 4.13%
+  median_avg_return_per_trade: +0.1912%
+  median_exposure_time: 0.94%
+  allowed_count: 78
+  blocked_count: 557
+  skipped_trend_down_count: 522
+```
+
+Criterio de éxito:
+
+```text
+Mejorar contra v0.3.1 top 2%:
+  p25_pf
+  worst_balance
+  profitable_window_pct
+
+resultado: 4 / 4 variantes cumplen.
+```
+
+Lectura:
+
+```text
+Regime gating resuelve el principal fallo detectado en v0.3.2.
+Bloquear trend_down mejora p25_pf de 0.69 a 1.13-1.25 y worst_balance de $17.90 a $19.76-$19.88.
+El costo es una reducción fuerte de frecuencia: median_trades baja de 11.0 a 4.5 por ventana.
+La mejor variante por ranking es allow_mixed_chop_high_vol porque tiene el mayor p25_pf.
+La variante más conservadora por drawdown es allow_mixed_chop, con worst_max_dd 4.13%, pero menos allowed_count.
+Esto todavía no es champion: hay pocas operaciones por ventana y debe validarse con más ventanas/splits antes de producción.
+Pero v0.3.3 sí confirma que el edge LONG era regime-dependent, no inexistente.
+```
