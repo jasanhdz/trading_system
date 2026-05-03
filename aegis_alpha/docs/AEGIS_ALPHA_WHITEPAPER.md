@@ -1482,6 +1482,45 @@ La señal LONG edge-gated necesita mejorar calidad predictiva, no solo controles
 No hay champion; no hay PPO; no hay inference.
 ```
 
+## v0.4.6 - Score Floor + Low-Vol Mixed Block
+
+Se añadió un filtro de score floor sobre el candidate congelado de v0.4.2 y se probó un bloqueo adicional de `mixed + low_vol`, con fee stress `1.0x` y `1.25x` sobre las mismas 144 ventanas OOS.
+
+Variants evaluadas:
+
+```text
+A) block meta_score < 0.60
+B) block mixed + low_vol
+C) A + B
+D) C + reduced_size 0.10 for 0.60 <= meta_score < 0.70
+```
+
+Mejor resultado:
+
+```text
+variant: A_score_floor
+fee: 1.0x
+median_balance: 20.2621
+p25_balance: 19.8487
+worst_balance: 16.4425
+median_pf: 2.0013
+p25_pf: 0.7851
+profitable_window_pct: 67.36%
+median_trades: 12.0
+worst_max_dd: 19.91%
+median_avg_return_per_trade: 0.1828%
+median_exposure_time: 2.74%
+```
+
+Conclusión:
+
+```text
+El score floor mejora la calidad media, pero la cola sigue rota.
+El bloqueo mixed + low_vol no arregla el peor balance ni el drawdown.
+Ninguna variante cumple el criterio OOS: worst_balance >= 19.10, worst_max_dd <= 7%, profitable_window_pct >= 75%, median_trades >= 5 y p25_pf > 0.8786.
+La señal sigue concentrando pérdida en trend_down y mixed, con edge_deterioration como salida perdedora dominante.
+```
+
 ## Aegis Alpha v0.4.1 - Adaptive Meta-Filter / Defensive Mode
 
 Fecha: 2026-05-03.
