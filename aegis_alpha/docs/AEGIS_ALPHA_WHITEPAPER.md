@@ -940,3 +940,158 @@ La señal LONG edge-gated supera claramente al BC heurístico en mediana, fees y
 Todavía no pasa como champion: p25_pf < 1, profitable_window_pct solo 57.14% y existe una ventana con DD ~16%.
 Siguiente paso razonable: v0.3.2 con validación de estabilidad por régimen y calibración de salida, antes de BC/PPO.
 ```
+
+### v0.3.2 - Regime Stability + Exit Calibration
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_long_edge_gate_grid.py.
+Usa el gate principal top 2% expected_return_long.
+Mantiene política LONG-only.
+No usa SHORT.
+No toca inference.
+No promueve champion.
+```
+
+Grid evaluado:
+
+```text
+max_hold: 6, 12, 18, 24
+take_profit: 0.15%, 0.25%, 0.35%, 0.50%
+stop_loss: -0.15%, -0.25%, -0.35%
+edge_deterioration:
+  expected_return_long < 0
+  expected_return_long < top 5%
+  expected_return_long < top 10%
+
+total configs: 144
+ventanas por config: 14
+entry gate top 2% threshold: 0.00072011
+```
+
+Reportes generados:
+
+```text
+aegis_alpha/logs/edge/long_edge_gate_grid_20260503T003602Z.json
+aegis_alpha/logs/edge/long_edge_regime_report_20260503T003602Z.json
+```
+
+Baseline de comparación v0.3.1 top 2%:
+
+```text
+p25_pf: 0.6946
+worst_balance: $17.90
+profitable_window_pct: 57.14%
+median_trades: 11.0
+```
+
+Mejor configuración del grid:
+
+```text
+config_id: mh18_tp0p50_sl0p25_edge_lt_top10
+max_hold: 18
+take_profit: 0.50%
+stop_loss: -0.25%
+edge_deterioration: expected_return_long < top 10%
+
+median_balance: $20.05
+p25_balance: $19.40
+worst_balance: $17.62
+median_pf: 1.06
+p25_pf: 0.65
+profitable_window_pct: 57.14%
+median_trades: 11.5
+worst_max_dd: 16.43%
+median_avg_return_per_trade: +0.0161%
+median_exposure_time: 1.80%
+```
+
+Resultado del criterio de éxito:
+
+```text
+configs que mejoran simultáneamente:
+  p25_pf
+  worst_balance
+  profitable_window_pct
+  sin reducir demasiado trades
+
+resultado: 0 / 144
+```
+
+Top configs por ranking interno:
+
+```text
+1. mh18_tp0p50_sl0p25_edge_lt_top10
+   p25_pf: 0.65
+   worst_balance: $17.62
+   profitable_window_pct: 57.14%
+   median_trades: 11.5
+
+2. mh24_tp0p50_sl0p25_edge_lt_top10
+   p25_pf: 0.65
+   worst_balance: $17.62
+   profitable_window_pct: 50.00%
+   median_trades: 11.5
+
+3. mh18_tp0p50_sl0p35_edge_lt_0
+   p25_pf: 0.64
+   worst_balance: $17.82
+   profitable_window_pct: 50.00%
+   median_trades: 11.5
+```
+
+Reporte por régimen de la mejor config:
+
+```text
+trend_down:
+  trade_count: 130
+  avg_return: -0.1565%
+  win_rate: 47.69%
+  profit_factor: 0.64
+  drawdown_contribution: 76.38%
+
+mixed:
+  trade_count: 47
+  avg_return: +0.0198%
+  win_rate: 46.81%
+  profit_factor: 1.07
+  drawdown_contribution: 17.46%
+
+chop:
+  trade_count: 7
+  avg_return: +0.1775%
+  win_rate: 57.14%
+  profit_factor: 1.93
+  drawdown_contribution: 1.79%
+
+high_vol:
+  trade_count: 2
+  avg_return: +0.0425%
+  win_rate: 50.00%
+  profit_factor: 1.10
+  drawdown_contribution: 1.12%
+
+trend_up:
+  trade_count: 7
+  avg_return: -0.0119%
+  win_rate: 42.86%
+  profit_factor: 0.97
+  drawdown_contribution: 3.25%
+
+compression:
+  trade_count: 0
+```
+
+Lectura:
+
+```text
+El criterio de éxito v0.3.2 no se cumplió.
+La calibración de salidas no mejoró robustez frente al v0.3.1 top 2%.
+La mejor config reduce la mediana de PF y empeora worst_balance.
+El problema principal es régimen trend_down: concentra 67% de los trades de la mejor config y 76% de la contribución de pérdidas.
+El edge LONG existe, pero no es estable a través de regímenes.
+La siguiente mejora no debe ser más grid de salidas; debe ser regime gating explícito para bloquear LONG en trend_down y revalidar.
+```
