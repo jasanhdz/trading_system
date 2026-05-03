@@ -1524,6 +1524,55 @@ Las variantes con pausas más largas empeoran peor-balance y drawdown; las regla
 La conclusión práctica es que el problema sigue siendo la señal de entrada y no solo la disciplina de salida.
 ```
 
+## v0.5.0 - Signal Lab + Multi-Horizon Edge Research
+
+La rama v0.4 se congeló como `RESEARCH_SIGNAL` porque la estrategia Long Edge mejoró la mediana y la disciplina, pero no aguantó la cola OOS. El problema quedó concentrado en `worst_balance`, `p25_pf` y fragilidad bajo fee stress. Por eso no se promovió champion.
+
+Signal Lab abre una nueva fase: investigar familias de señales y horizontes en vez de seguir reparando una sola política.
+
+Se añadieron:
+
+```text
+signals/common.py
+signals/horizon_targets.py
+signals/signal_registry.py
+tools/build_signal_lab_dataset.py
+signals/train_signal_models.py
+signals/evaluate_signal_deciles.py
+tools/evaluate_signal_combinations.py
+```
+
+Horizontes investigados:
+
+```text
+h6, h12, h24, h48
+```
+
+Se entrenaron modelos para:
+
+```text
+long_edge_h6/h12/h24/h48
+short_edge_h6/h12/h24/h48
+long_failure_risk_h12/h24/h48
+```
+
+Hallazgos iniciales:
+
+```text
+long_edge_h48 mostró el mejor top-3% PF en holdout, pero la cola OOS siguió débil.
+La combinación long_edge_h12 top 3% dio el mejor OOS de la primera tanda, con p25_pf > 1.0, pero worst_balance y worst_max_dd quedaron fuera de criterio.
+Ninguna combinación pasó como champion.
+```
+
+Estado final:
+
+```text
+v0.5.0 es investigación, no producción.
+La rama Long Edge v0.4 queda congelada como benchmark de research signal.
+No hay señales activas.
+No hay champion nuevo.
+```
+
 ## v0.4.6 - Score Floor + Low-Vol Mixed Block
 
 Se añadió un filtro de score floor sobre el candidate congelado de v0.4.2 y se probó un bloqueo adicional de `mixed + low_vol`, con fee stress `1.0x` y `1.25x` sobre las mismas 144 ventanas OOS.
