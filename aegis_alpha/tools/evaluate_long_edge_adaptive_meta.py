@@ -23,6 +23,12 @@ from aegis_alpha.tools.build_long_edge_candidate_dataset import (
 from aegis_alpha.tools.evaluate_long_edge_robustness import ALLOWED_REGIMES, select_robust_windows
 
 
+FULL_SIZE = 0.25
+REDUCED_SIZES = (0.05, 0.075, 0.10, 0.125, 0.15)
+META_HIGH_THRESHOLDS = (0.60, 0.65, 0.70)
+META_LOW_THRESHOLDS: tuple[float | None, ...] = (None, 0.50, 0.55)
+FEE_MULTIPLIERS = (1.0, 1.25, 1.5)
+
 BENCHMARK_V036 = {
     "config_id": "loss7_pause48_pause2_48_maxday3_fee1x",
     "p25_pf": 0.8786,
@@ -39,6 +45,14 @@ BENCHMARK_V040_META_065 = {
     "profitable_window_pct": 0.7916666666666666,
     "median_trades": 4.0,
 }
+BENCHMARK_V041_E_DYNAMIC = {
+    "variant": "E_dynamic_sizing",
+    "p25_pf": 0.8786,
+    "worst_balance": 19.12,
+    "worst_max_dd": 0.0655,
+    "profitable_window_pct": 0.75,
+    "median_trades": 8.5,
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +65,23 @@ class AdaptiveVariant:
     defensive_drawdown: float = 0.0
     defensive_recent_losses: bool = False
     dynamic_sizing: bool = False
+
+
+@dataclass(frozen=True)
+class DynamicSizingConfig:
+    full_size: float
+    reduced_size: float
+    meta_high_threshold: float
+    meta_low_threshold: float | None
+    fee_multiplier: float
+
+    @property
+    def key(self) -> str:
+        low = "none" if self.meta_low_threshold is None else f"{self.meta_low_threshold:.2f}".replace(".", "p")
+        high = f"{self.meta_high_threshold:.2f}".replace(".", "p")
+        reduced = f"{self.reduced_size:.3f}".rstrip("0").rstrip(".").replace(".", "p")
+        fee = f"{self.fee_multiplier:g}".replace(".", "p")
+        return f"full25_reduced{reduced}_high{high}_low{low}_fee{fee}x"
 
 
 @dataclass
@@ -105,6 +136,18 @@ def _predict_meta_prob(classifier: Any, market: MetaMarketData, step: int, gate_
     return float(classifier.predict_proba(x)[0, 1])
 
 
+def _predict_meta_prob_cached(
+    classifier: Any,
+    market: MetaMarketData,
+    step: int,
+    gate_threshold: float,
+    cache: dict[int, float],
+) -> float:
+    if step not in cache:
+        cache[step] = _predict_meta_prob(classifier, market, step, gate_threshold)
+    return cache[step]
+
+
 def _open_position(
     balance: float,
     price: float,
@@ -119,9 +162,36 @@ def _open_position(
     return balance - fee, Position(side=1, size=notional / max(price, 1e-10), entry_price=price, entry_step=step), fee
 
 
+def _open_position_with_fee(
+    balance: float,
+    price: float,
+    step: int,
+    market: MetaMarketData,
+    position_fraction: float,
+    fee_multiplier: float,
+) -> tuple[float, Position, float]:
+    notional = balance * market.cfg.risk.leverage * position_fraction
+    fee = notional * market.cfg.risk.total_fee * fee_multiplier
+    if balance <= fee * 1.5:
+        return balance, Position(), 0.0
+    return balance - fee, Position(side=1, size=notional / max(price, 1e-10), entry_price=price, entry_step=step), fee
+
+
 def _close_position(balance: float, position: Position, price: float, market: MetaMarketData) -> tuple[float, float, float]:
     pnl = abs(position.size) * (price - position.entry_price)
     fee = abs(position.size) * price * market.cfg.risk.total_fee * BASE_GUARD["fee_multiplier"]
+    return max(0.0, balance + pnl - fee), pnl - fee, fee
+
+
+def _close_position_with_fee(
+    balance: float,
+    position: Position,
+    price: float,
+    market: MetaMarketData,
+    fee_multiplier: float,
+) -> tuple[float, float, float]:
+    pnl = abs(position.size) * (price - position.entry_price)
+    fee = abs(position.size) * price * market.cfg.risk.total_fee * fee_multiplier
     return max(0.0, balance + pnl - fee), pnl - fee, fee
 
 
@@ -143,6 +213,41 @@ def _close_trade(
 ) -> tuple[float, dict[str, Any]]:
     price = float(market.close[step])
     new_balance, _, close_fee = _close_position(balance, position, price, market)
+    net = new_balance - trade.balance_before_open
+    trade_return = net / max(trade.entry_notional, 1e-10)
+    mfe, mae = _trade_mfe_mae(market.close, trade.entry_step, step)
+    return new_balance, {
+        "entry_step": int(trade.entry_step),
+        "exit_step": int(step),
+        "entry_timestamp": str(market.timestamps[trade.entry_step]),
+        "exit_timestamp": str(market.timestamps[step]),
+        "entry_regime": trade.entry_regime,
+        "entry_score": safe_float(trade.entry_score),
+        "exit_score": safe_float(market.expected_long_return[step]),
+        "meta_filter_prob": safe_float(trade.meta_filter_prob),
+        "position_fraction": safe_float(trade.position_fraction),
+        "reduced_size": bool(trade.reduced_size),
+        "hold_steps": int(step - trade.entry_step),
+        "net": safe_float(net),
+        "return": safe_float(trade_return),
+        "fees": safe_float(trade.entry_fee + close_fee),
+        "mfe": safe_float(mfe),
+        "mae": safe_float(mae),
+        "reason": reason,
+    }
+
+
+def _close_trade_with_fee(
+    market: MetaMarketData,
+    position: Position,
+    balance: float,
+    step: int,
+    trade: OpenTrade,
+    reason: str,
+    fee_multiplier: float,
+) -> tuple[float, dict[str, Any]]:
+    price = float(market.close[step])
+    new_balance, _, close_fee = _close_position_with_fee(balance, position, price, market, fee_multiplier)
     net = new_balance - trade.balance_before_open
     trade_return = net / max(trade.entry_notional, 1e-10)
     mfe, mae = _trade_mfe_mae(market.close, trade.entry_step, step)
@@ -594,8 +699,389 @@ def run_adaptive_meta_eval(
     return output_path
 
 
+def _evaluate_dynamic_sizing_window(
+    market: MetaMarketData,
+    classifier: Any,
+    meta_prob_cache: dict[int, float],
+    config: DynamicSizingConfig,
+    gate_threshold: float,
+    start_step: int,
+    window_steps: int,
+    source: str,
+    max_hold_steps: int,
+    close_edge_threshold: float,
+    take_profit_roe: float,
+) -> dict[str, Any]:
+    risk = market.cfg.risk
+    initial_balance = risk.initial_balance
+    loss_floor = initial_balance * (1.0 - BASE_GUARD["max_window_loss_pct"])
+    balance = initial_balance
+    position = Position()
+    open_trade: OpenTrade | None = None
+    hold_steps = 0
+    flat_steps = risk.min_flat_steps
+    pause_until = -1
+    consecutive_losses = 0
+    trades_by_day: Counter[int] = Counter()
+    guard_counts: Counter[str] = Counter()
+    skipped_by_meta = 0
+    reduced_size_trades = 0
+    full_size_trades = 0
+    meta_candidate_count = 0
+    exposure_steps = 0
+    total_fees = 0.0
+    equity_curve: list[float] = []
+    trades: list[dict[str, Any]] = []
+    end_limit = min(start_step + window_steps, len(market.close) - 1)
+
+    for step in range(start_step, end_limit):
+        price = float(market.close[step])
+        score = float(market.expected_long_return[step])
+        regime = str(market.regimes[step])
+        day = _day_key(step)
+
+        if position.side == 0:
+            entry_signal = flat_steps >= risk.min_flat_steps and score >= gate_threshold
+            if entry_signal and balance <= loss_floor:
+                guard_counts["max_window_loss"] += 1
+                flat_steps += 1
+            elif entry_signal and step < pause_until:
+                guard_counts["pause"] += 1
+                flat_steps += 1
+            elif entry_signal and trades_by_day[day] >= BASE_GUARD["max_trades_per_day"]:
+                guard_counts["max_trades_per_day"] += 1
+                flat_steps += 1
+            elif entry_signal and regime not in ALLOWED_REGIMES:
+                guard_counts["regime"] += 1
+                flat_steps += 1
+            elif entry_signal:
+                meta_candidate_count += 1
+                meta_prob = _predict_meta_prob_cached(classifier, market, step, gate_threshold, meta_prob_cache)
+                if config.meta_low_threshold is not None and meta_prob < config.meta_low_threshold:
+                    skipped_by_meta += 1
+                    guard_counts["meta_low_threshold"] += 1
+                    flat_steps += 1
+                    continue
+
+                if meta_prob >= config.meta_high_threshold:
+                    position_fraction = config.full_size
+                    reduced_size = False
+                else:
+                    position_fraction = config.reduced_size
+                    reduced_size = True
+
+                before = balance
+                balance, position, fee = _open_position_with_fee(
+                    balance, price, step, market, position_fraction, config.fee_multiplier
+                )
+                if position.side > 0:
+                    total_fees += fee
+                    trades_by_day[day] += 1
+                    reduced_size_trades += int(reduced_size)
+                    full_size_trades += int(not reduced_size)
+                    open_trade = OpenTrade(
+                        balance_before_open=before,
+                        entry_notional=abs(position.size) * position.entry_price,
+                        entry_step=step,
+                        entry_price=price,
+                        entry_score=score,
+                        entry_fee=fee,
+                        entry_regime=regime,
+                        meta_filter_prob=meta_prob,
+                        position_fraction=position_fraction,
+                        reduced_size=reduced_size,
+                    )
+                    hold_steps = 0
+                    flat_steps = 0
+                else:
+                    guard_counts["open_failed"] += 1
+                    flat_steps += 1
+            else:
+                flat_steps += 1
+        else:
+            exposure_steps += 1
+            roe = current_roe(position, price, risk)
+            close_reason = ""
+            if roe <= -risk.hard_stop_roe:
+                close_reason = "hard_stop"
+            elif hold_steps >= risk.min_hold_steps and roe >= take_profit_roe:
+                close_reason = "take_profit"
+            elif hold_steps >= max_hold_steps:
+                close_reason = "max_hold"
+            elif hold_steps >= risk.min_hold_steps and score <= close_edge_threshold:
+                close_reason = "edge_deterioration"
+
+            if close_reason and open_trade is not None:
+                balance, trade = _close_trade_with_fee(
+                    market, position, balance, step, open_trade, close_reason, config.fee_multiplier
+                )
+                total_fees += float(trade["fees"]) - open_trade.entry_fee
+                trades.append(trade)
+                if float(trade["net"]) < 0.0:
+                    consecutive_losses += 1
+                    pause_until = max(pause_until, step + BASE_GUARD["pause_after_loss_steps"])
+                    if consecutive_losses >= 2:
+                        pause_until = max(pause_until, step + BASE_GUARD["pause_after_2_losses_steps"])
+                else:
+                    consecutive_losses = 0
+                position = Position()
+                open_trade = None
+                hold_steps = 0
+                flat_steps = 0
+            else:
+                hold_steps += 1
+                flat_steps = 0
+
+        equity = balance if position.side == 0 else balance + abs(position.size) * (price - position.entry_price)
+        equity_curve.append(float(equity))
+
+    if position.side != 0 and open_trade is not None:
+        balance, trade = _close_trade_with_fee(
+            market, position, balance, end_limit, open_trade, "window_end", config.fee_multiplier
+        )
+        total_fees += float(trade["fees"]) - open_trade.entry_fee
+        trades.append(trade)
+        equity_curve.append(float(balance))
+
+    equity = np.asarray(equity_curve, dtype=np.float32)
+    if len(equity):
+        peak = np.maximum.accumulate(equity)
+        dd = (peak - equity) / np.maximum(peak, 1e-10)
+        final_balance = float(equity[-1])
+    else:
+        dd = np.asarray([0.0], dtype=np.float32)
+        final_balance = initial_balance
+    returns = np.asarray([trade["return"] for trade in trades], dtype=np.float32)
+    wins = returns[returns > 0.0]
+    return {
+        "source": source,
+        "start_step": int(start_step),
+        "end_step": int(end_limit),
+        "balance": safe_float(final_balance),
+        "net": safe_float(final_balance - initial_balance),
+        "p95_dd": safe_float(np.quantile(dd, 0.95)),
+        "max_dd": safe_float(np.max(dd)),
+        "trades": int(len(trades)),
+        "win_rate": safe_float(len(wins) / max(len(returns), 1)),
+        "profit_factor": safe_float(profit_factor(returns)) if len(returns) else 0.0,
+        "avg_return_per_trade": safe_float(np.mean(returns)) if len(returns) else 0.0,
+        "fees": safe_float(total_fees),
+        "exposure_time": safe_float(exposure_steps / max(window_steps, 1)),
+        "trades_per_month": safe_float(len(trades) / max(window_steps * 5.0 / 60.0 / 24.0 / 30.4375, 1e-10)),
+        "skipped_by_meta": int(skipped_by_meta),
+        "reduced_size_trades": int(reduced_size_trades),
+        "full_size_trades": int(full_size_trades),
+        "meta_candidate_count": int(meta_candidate_count),
+        "defensive_candidate_count": 0,
+        "skipped_by_guard": int(sum(guard_counts.values())),
+        "guard_counts": dict(guard_counts),
+        "close_reasons": dict(Counter(trade["reason"] for trade in trades)),
+        "avg_mfe": safe_float(np.mean([trade["mfe"] for trade in trades])) if trades else 0.0,
+        "avg_mae": safe_float(np.mean([trade["mae"] for trade in trades])) if trades else 0.0,
+        "trades_detail": trades,
+    }
+
+
+def _summary_dynamic(windows: list[dict[str, Any]], initial_balance: float) -> dict[str, Any]:
+    summary = _summary(windows, initial_balance)
+    summary["full_size_trades"] = int(sum(w["full_size_trades"] for w in windows))
+    return summary
+
+
+def _rank_dynamic(config_reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for report in config_reports:
+        summary = report["summary"]
+        rows.append(
+            {
+                "config_id": report["config_id"],
+                **report["config"],
+                **summary,
+                "passes_primary_criteria": bool(
+                    summary["worst_balance"] >= 19.10
+                    and summary["worst_max_dd"] <= 0.07
+                    and summary["profitable_window_pct"] >= 0.75
+                    and summary["median_trades"] >= 7.0
+                    and summary["median_balance"] >= 20.15
+                ),
+                "hits_p25_pf_secondary": bool(summary["p25_pf"] >= 0.88),
+                "hits_p25_pf_ideal": bool(summary["p25_pf"] >= 0.95),
+            }
+        )
+
+    def score(row: dict[str, Any]) -> tuple[float, float, float, float, float, float, float]:
+        return (
+            float(row["passes_primary_criteria"]),
+            float(row["hits_p25_pf_secondary"]),
+            float(row["worst_balance"]),
+            -float(row["worst_max_dd"]),
+            float(row["profitable_window_pct"]),
+            float(row["median_balance"]),
+            float(row["p25_pf"]),
+        )
+
+    return sorted(rows, key=score, reverse=True)
+
+
+def run_dynamic_sizing_grid(
+    edge_model_path: Path,
+    meta_filter_path: Path,
+    config_path: str,
+    output_dir: Path,
+    window_steps: int,
+    seed: int,
+    target_max_windows: int,
+    recent_windows: int,
+    random_windows: int,
+    regime_windows_per_regime: int,
+    non_overlap_windows: int,
+    gate_threshold: float | None,
+    max_hold_steps: int,
+    close_edge_threshold: float,
+    take_profit_roe: float,
+) -> Path:
+    market = load_meta_market(config_path, edge_model_path)
+    valid_scores = market.expected_long_return[np.isfinite(market.expected_long_return)]
+    threshold = float(np.quantile(valid_scores, 0.97)) if gate_threshold is None else gate_threshold
+    windows = select_robust_windows(
+        market,
+        window_steps=window_steps,
+        seed=seed,
+        target_max=target_max_windows,
+        recent_windows=recent_windows,
+        random_windows=random_windows,
+        regime_windows_per_regime=regime_windows_per_regime,
+        non_overlap_windows=non_overlap_windows,
+    )
+    bundle = load_model_bundle(meta_filter_path)
+    expected_features = bundle.get("feature_names", [])
+    if expected_features and list(expected_features) != compact_feature_names():
+        raise RuntimeError("Meta-filter feature schema mismatch")
+    classifier = bundle["classifier"]
+    meta_prob_cache: dict[int, float] = {}
+    configs = [
+        DynamicSizingConfig(
+            full_size=FULL_SIZE,
+            reduced_size=reduced_size,
+            meta_high_threshold=high_threshold,
+            meta_low_threshold=low_threshold,
+            fee_multiplier=fee_multiplier,
+        )
+        for fee_multiplier in FEE_MULTIPLIERS
+        for reduced_size in REDUCED_SIZES
+        for high_threshold in META_HIGH_THRESHOLDS
+        for low_threshold in META_LOW_THRESHOLDS
+    ]
+    print(f"Selected windows: {len(windows)}")
+    print(f"Gate threshold top 3%: {threshold:.8f}")
+    print(f"Dynamic sizing configs: {len(configs)}")
+
+    config_reports: list[dict[str, Any]] = []
+    for idx, config in enumerate(configs, start=1):
+        evals = [
+            _evaluate_dynamic_sizing_window(
+                market=market,
+                classifier=classifier,
+                meta_prob_cache=meta_prob_cache,
+                config=config,
+                gate_threshold=threshold,
+                start_step=start_step,
+                window_steps=window_steps,
+                source=source,
+                max_hold_steps=max_hold_steps,
+                close_edge_threshold=close_edge_threshold,
+                take_profit_roe=take_profit_roe,
+            )
+            for start_step, source in windows
+        ]
+        summary = _summary_dynamic(evals, market.cfg.risk.initial_balance)
+        config_reports.append(
+            {
+                "config_id": config.key,
+                "config": {
+                    "full_size": config.full_size,
+                    "reduced_size": config.reduced_size,
+                    "meta_high_threshold": config.meta_high_threshold,
+                    "meta_low_threshold": config.meta_low_threshold,
+                    "fee_multiplier": config.fee_multiplier,
+                },
+                "summary": summary,
+                "windows": evals,
+            }
+        )
+        print(
+            f"[{idx:03d}/{len(configs):03d}] {config.key} "
+            f"p25pf={summary['p25_pf']:.2f} worst={summary['worst_balance']:.2f} "
+            f"dd={summary['worst_max_dd']:.1%} prof={summary['profitable_window_pct']:.1%} "
+            f"trades={summary['median_trades']:.1f} med={summary['median_balance']:.2f} "
+            f"reduced={summary['reduced_size_trades']} full={summary['full_size_trades']}"
+        )
+
+    ranking = _rank_dynamic(config_reports)
+    created_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    report = {
+        "schema_version": "aegis_long_edge_dynamic_sizing_grid_v1",
+        "created_at": created_at,
+        "edge_model_path": str(edge_model_path),
+        "meta_filter_path": str(meta_filter_path),
+        "config_path": config_path,
+        "policy": {
+            "side": "LONG_ONLY",
+            "entry_gate": "top_3pct_expected_return_long",
+            "gate_threshold": threshold,
+            "allowed_regimes": sorted(ALLOWED_REGIMES),
+            "guard": {**BASE_GUARD, "fee_multiplier": "grid"},
+            "full_size": FULL_SIZE,
+            "reduced_sizes": list(REDUCED_SIZES),
+            "meta_high_thresholds": list(META_HIGH_THRESHOLDS),
+            "meta_low_thresholds": ["none", 0.50, 0.55],
+            "fee_multipliers": list(FEE_MULTIPLIERS),
+            "max_hold_steps": max_hold_steps,
+            "close_edge_threshold": close_edge_threshold,
+            "take_profit_roe": take_profit_roe,
+            "short_entries": False,
+        },
+        "window_count": len(windows),
+        "window_steps": window_steps,
+        "benchmark_v041_e_dynamic": BENCHMARK_V041_E_DYNAMIC,
+        "success_criteria": {
+            "primary": {
+                "worst_balance": ">=19.10",
+                "worst_max_dd": "<=7%",
+                "profitable_window_pct": ">=75%",
+                "median_trades": ">=7",
+                "median_balance": ">=20.15",
+            },
+            "secondary": {
+                "p25_pf": ">=0.88",
+                "p25_pf_ideal": ">=0.95",
+            },
+        },
+        "passes_primary_count": int(sum(row["passes_primary_criteria"] for row in ranking)),
+        "hits_p25_pf_secondary_count": int(sum(row["hits_p25_pf_secondary"] for row in ranking)),
+        "hits_p25_pf_ideal_count": int(sum(row["hits_p25_pf_ideal"] for row in ranking)),
+        "best_config": ranking[0] if ranking else None,
+        "ranking": ranking,
+        "configs": config_reports,
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"long_edge_dynamic_sizing_grid_{created_at}.json"
+    output_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    print(f"Report saved -> {output_path}")
+    if ranking:
+        best = ranking[0]
+        print(
+            f"Best {best['config_id']} p25pf={best['p25_pf']:.2f} worst={best['worst_balance']:.2f} "
+            f"dd={best['worst_max_dd']:.1%} prof={best['profitable_window_pct']:.1%} "
+            f"trades={best['median_trades']:.1f} med={best['median_balance']:.2f} "
+            f"primary={best['passes_primary_criteria']}"
+        )
+    return output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--experiment", choices=("adaptive", "dynamic-sizing-grid"), default="dynamic-sizing-grid")
     parser.add_argument("--edge-model", default="aegis_alpha/models/edge/aegis_edge_model_v030.joblib")
     parser.add_argument("--meta-filter", default="aegis_alpha/models/edge/aegis_long_edge_meta_filter_v040.joblib")
     parser.add_argument("--config", default="aegis_alpha/configs/base.yaml")
@@ -612,7 +1098,8 @@ def main() -> None:
     parser.add_argument("--close-edge-threshold", type=float, default=0.0)
     parser.add_argument("--take-profit-roe", type=float, default=0.06)
     args = parser.parse_args()
-    run_adaptive_meta_eval(
+    runner = run_dynamic_sizing_grid if args.experiment == "dynamic-sizing-grid" else run_adaptive_meta_eval
+    runner(
         edge_model_path=Path(args.edge_model),
         meta_filter_path=Path(args.meta_filter),
         config_path=args.config,

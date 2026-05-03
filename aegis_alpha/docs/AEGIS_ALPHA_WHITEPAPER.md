@@ -1883,3 +1883,141 @@ El fee stress 1.25x y 1.5x degrada la calidad del percentil bajo y no produce un
 La conclusión se mantiene: los guards reducen cola de pérdida, pero no crean edge estadístico suficiente.
 No hay champion; no hay PPO; no hay inference.
 ```
+
+## Aegis Alpha v0.4.2 - Dynamic Sizing Calibration + Fee Stress
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se extendió tools/evaluate_long_edge_adaptive_meta.py.
+Se agregó el modo --experiment dynamic-sizing-grid.
+Base usada:
+  LONG-only
+  expected_return_long top 3%
+  allowed_regimes: mixed, chop, high_vol
+  risk guard: loss7_pause48_pause2_48_maxday3
+  full_size: 0.25
+Meta-filter:
+  aegis_alpha/models/edge/aegis_long_edge_meta_filter_v040.joblib
+No toca inference.
+No promueve champion.
+```
+
+Grid evaluado:
+
+```text
+reduced_size: 0.05, 0.075, 0.10, 0.125, 0.15
+meta_high_threshold: 0.60, 0.65, 0.70
+meta_low_threshold: none, 0.50, 0.55
+fee_multiplier: 1.0x, 1.25x, 1.5x
+configs: 135
+ventanas: 96
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/long_edge_dynamic_sizing_grid_20260503T041147Z.json
+```
+
+Benchmark v0.4.1 E_dynamic_sizing:
+
+```text
+p25_pf: 0.8786
+worst_balance: $19.12
+worst_max_dd: 6.55%
+profitable_window_pct: 75.00%
+median_trades: 8.5
+```
+
+Criterio v0.4.2:
+
+```text
+Principal:
+  worst_balance >= $19.10
+  worst_max_dd <= 7%
+  profitable_window_pct >= 75%
+  median_trades >= 7
+  median_balance >= $20.15
+
+Secundario:
+  p25_pf >= 0.88
+  ideal p25_pf >= 0.95
+```
+
+Resultado:
+
+```text
+passes_primary_count: 4
+hits_p25_pf_secondary_count: 90
+hits_p25_pf_ideal_count: 75
+primary_plus_secondary_count: 0
+```
+
+Mejor configuración por criterio principal:
+
+```text
+config_id: full25_reduced0p125_high0p60_lownone_fee1x
+fee_multiplier: 1.0x
+full_size: 0.25
+reduced_size: 0.125
+meta_high_threshold: 0.60
+meta_low_threshold: none
+
+median_balance: $20.27
+p25_balance: $20.02
+worst_balance: $19.18
+median_pf: 2.93
+p25_pf: 0.87857
+profitable_window_pct: 76.04%
+median_trades: 8.5
+median_trades_per_month: 18.48
+worst_max_dd: 6.55%
+median_avg_return_per_trade: +0.1880%
+median_exposure_time: 1.90%
+reduced_size_trades: 472
+full_size_trades: 508
+```
+
+Otras configuraciones que pasan criterio principal:
+
+```text
+full25_reduced0p125_high0p60_lownone_fee1p25x:
+  fee_multiplier: 1.25x
+  median_balance: $20.21
+  worst_balance: $19.12
+  worst_max_dd: 6.68%
+  profitable_window_pct: 75.00%
+  median_trades: 8.5
+  p25_pf: 0.81
+
+full25_reduced0p125_high0p65_lownone_fee1x:
+  median_balance: $20.24
+  worst_balance: $19.12
+  worst_max_dd: 6.55%
+  profitable_window_pct: 75.00%
+  median_trades: 8.5
+  p25_pf: 0.87857
+
+full25_reduced0p125_high0p70_lownone_fee1x:
+  median_balance: $20.16
+  worst_balance: $19.11
+  worst_max_dd: 5.56%
+  profitable_window_pct: 75.00%
+  median_trades: 8.5
+  p25_pf: 0.87857
+```
+
+Lectura:
+
+```text
+La calibración confirma que reduced_size 0.125 es el punto más estable para supervivencia.
+El mejor resultado mejora ligeramente E_dynamic_sizing en worst_balance, median_balance y profitable_window_pct, manteniendo DD bajo 7%.
+El p25_pf queda prácticamente igual al benchmark v0.4.1, pero por valor exacto no alcanza el umbral secundario >= 0.88.
+Aplicar meta_low_threshold mejora p25_pf, pero rompe la cola: worst_balance cae a la zona $17.8-$18.5 y DD sube.
+Fee 1.25x conserva una configuración que pasa el criterio principal, pero degrada p25_pf a 0.81.
+Fee 1.5x no conserva el criterio principal.
+No hay champion; no hay PPO; no hay inference.
+```
