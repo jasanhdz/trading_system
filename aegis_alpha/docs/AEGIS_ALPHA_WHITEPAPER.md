@@ -1358,3 +1358,126 @@ El modelo tampoco cumple la condición de no colapsar con costos 1.5x.
 La señal v0.3.3 era real en el conjunto pequeño, pero no suficientemente robusta para avanzar a champion o PPO.
 Siguiente trabajo: ampliar validación temporal por splits purgados o rediseñar el Edge Model con mejores features/targets; no promover ni conectar a inference.
 ```
+
+### v0.3.5 - Risk Guard Robustness
+
+Fecha: 2026-05-03.
+
+Cambios:
+
+```text
+Se agregó tools/evaluate_long_edge_risk_guard.py.
+Usa la mejor base de v0.3.4:
+  LONG-only
+  expected_return_long top 3%
+  allowed_regimes: mixed, chop, high_vol
+  fee multipliers: 1.0x y 1.5x
+No toca inference.
+No promueve champion.
+```
+
+Guards evaluados:
+
+```text
+max_window_loss_pct: 3%, 5%, 7%
+pause_after_loss_steps: 12, 24, 48
+pause_after_2_losses_steps: 48, 96
+max_trades_per_day: 1, 2, 3
+configs: 108
+ventanas: 96
+```
+
+Reporte generado:
+
+```text
+aegis_alpha/logs/edge/long_edge_risk_guard_20260503T012735Z.json
+```
+
+Baseline v0.3.4 top_3pct_fee1x:
+
+```text
+p25_pf: 0.85
+worst_balance: $15.72
+worst_max_dd: 24.95%
+profitable_window_pct: 70.83%
+```
+
+Criterio de éxito:
+
+```text
+worst_balance >= $18.50
+worst_max_dd <= 15%
+p25_pf >= 1.0
+profitable_window_pct >= 65%
+median_trades >= 5
+```
+
+Resultado:
+
+```text
+passes_any: false
+```
+
+Mejor configuración:
+
+```text
+config_id: loss7_pause48_pause2_48_maxday3_fee1x
+fee_multiplier: 1.0x
+max_window_loss_pct: 7%
+pause_after_loss_steps: 48
+pause_after_2_losses_steps: 48
+max_trades_per_day: 3
+
+median_balance: $20.22
+p25_balance: $19.89
+worst_balance: $19.19
+median_pf: 3.01
+p25_pf: 0.88
+profitable_window_pct: 66.67%
+median_trades: 8.0
+median_trades_per_month: 17.39
+worst_max_dd: 9.29%
+median_avg_return_per_trade: +0.1880%
+median_exposure_time: 1.87%
+skipped_by_guard: 7,383
+stopped_trade_count: 0
+```
+
+Comparación contra v0.3.4 top_3pct_fee1x:
+
+```text
+p25_pf: 0.88 vs 0.85
+worst_balance: $19.19 vs $15.72
+worst_max_dd: 9.29% vs 24.95%
+profitable_window_pct: 66.67% vs 70.83%
+median_trades: 8.0 vs 9.5
+```
+
+Mejores variantes con max_trades_per_day=1:
+
+```text
+loss5_pause12_pause2_48_maxday1_fee1x:
+  worst_balance: $18.59
+  worst_max_dd: 8.22%
+  p25_pf: 0.82
+  profitable_window_pct: 71.88%
+  median_trades: 5.5
+
+loss3_*_maxday1_fee1.5x:
+  worst_balance: $19.02
+  worst_max_dd: 5.4%
+  p25_pf: 0.57
+  profitable_window_pct: 66.67%
+  median_trades: 5.0
+```
+
+Lectura:
+
+```text
+Risk guards sí reducen la cola de pérdida: worst_balance mejora de $15.72 a $19.19 y worst_max_dd baja de 24.95% a 9.29%.
+El costo es menor profitable_window_pct y algo menos de frecuencia.
+El criterio completo no se cumple porque p25_pf no llega a 1.0; el mejor queda en 0.88.
+Con fee 1.5x la robustez de PF empeora más, aunque algunos guards mantienen worst_balance y DD controlados.
+La señal LONG edge-gated necesita mejorar calidad predictiva, no solo controles de riesgo.
+No hay champion; no hay PPO; no hay inference.
+```
