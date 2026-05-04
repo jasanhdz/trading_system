@@ -10,6 +10,8 @@ from aegis_alpha.config import load_config
 from aegis_alpha.features.regime_detector import Regime, detect_regime
 from aegis_alpha.inference.gates import gate_action
 from aegis_alpha.inference.model_loader import AegisModelLoader
+from aegis_alpha.inference.shadow_candidate import evaluate_shadow_candidate
+from aegis_alpha.inference.shadow_logger import safe_log_shadow_signal
 from aegis_alpha.inference.schemas import (
     AegisPredictResponse,
     ExitSignalRequest,
@@ -69,6 +71,45 @@ def _build_response(symbol: str) -> AegisPredictResponse:
     )
 
 
+def _model_dump(payload):
+    return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+
+
+def _aegis_shadow_block(symbol: str, request_source: str = "ml-v2-predict") -> dict:
+    shadow_eval = evaluate_shadow_candidate(symbol)
+    candidate_status = str(shadow_eval.get("candidate_status", "UNKNOWN"))
+    candidate_live_enabled = bool(shadow_eval.get("live_enabled", False))
+    prod_allowed = bool(candidate_status == "LIVE_APPROVED" and candidate_live_enabled)
+    prod = {
+        "allowed": False,
+        "action": "HOLD",
+        "execute": False,
+        "reason": "candidate_not_live" if not prod_allowed else "live_execution_disabled_by_aegis_v060",
+    }
+    shadow = dict(shadow_eval.get("shadow", {}))
+    shadow["execute"] = False
+    shadow["mode"] = "SHADOW_ONLY"
+    shadow["enabled"] = True
+    log_path, log_warning = safe_log_shadow_signal(
+        shadow,
+        price=shadow_eval.get("price"),
+        model_paths=shadow_eval.get("model_paths", {}),
+        model_versions=shadow_eval.get("model_versions", {}),
+        request_source=request_source,
+    )
+    if log_warning:
+        shadow["logging_warning"] = log_warning
+    elif log_path is not None:
+        shadow["log_path"] = str(log_path)
+    return {
+        "candidate": shadow_eval.get("candidate", "no_candidate_loaded"),
+        "candidate_status": candidate_status,
+        "live_enabled": False,
+        "prod": prod,
+        "shadow": shadow,
+    }
+
+
 @app.get("/health")
 def health():
     return {
@@ -87,19 +128,26 @@ def predict(req: PredictRequest):
 
 @app.post("/ml-v2/predict", response_model=LegacyMlV2Response)
 def ml_v2_predict(req: PredictRequest):
-    aegis = _build_response(req.symbol)
+    aegis_response = _build_response(req.symbol)
+    aegis_block = _aegis_shadow_block(req.symbol, request_source="ml-v2-predict")
+    aegis_block["model"] = _model_dump(aegis_response)
     return LegacyMlV2Response(
         symbol=req.symbol,
-        long_prob=aegis.probs.long,
-        short_prob=aegis.probs.short,
-        neutral_prob=aegis.probs.idle,
-        close_prob=aegis.probs.close,
-        consensus_level=aegis.top_prob,
-        meta_verdict=f"AEGIS_ALPHA_{aegis.gated_action}",
-        smart_leverage=cfg.risk.leverage,
-        features=aegis.features,
-        aegis=aegis,
+        long_prob=aegis_response.probs.long,
+        short_prob=aegis_response.probs.short,
+        neutral_prob=aegis_response.probs.idle,
+        close_prob=aegis_response.probs.close,
+        consensus_level=aegis_response.top_prob,
+        meta_verdict=f"AEGIS_ALPHA_{aegis_response.gated_action}",
+        smart_leverage=0.0,
+        features=aegis_response.features,
+        aegis=aegis_block,
     )
+
+
+@app.post("/ml-v2/shadow_signal")
+def ml_v2_shadow_signal(req: PredictRequest):
+    return _aegis_shadow_block(req.symbol, request_source="ml-v2-shadow-signal")
 
 
 @app.post("/ml-v2/exit_signal", response_model=ExitSignalResponse)

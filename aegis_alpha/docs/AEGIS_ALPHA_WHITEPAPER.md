@@ -2032,8 +2032,278 @@ Próximos pasos:
 ```text
 Shadow logging integrado al inference server, manteniendo execute=false.
 Shadow validation por varios días con drift checks.
-Reexportar long_edge_h12 con sklearn 1.8.0 para eliminar el warning restante del modelo v050.
 Fee/slippage live validation antes de cualquier promoción.
+```
+
+## v0.6.1 - Shadow Observation Protocol + sklearn Reexport
+
+Fecha: 2026-05-04.
+
+v0.6.1 mantiene el protocolo shadow-only de v0.6.0 y reexporta `long_edge_h12` con el runtime sklearn actual para eliminar el warning de compatibilidad del modelo v050.
+
+Artefactos:
+
+```text
+aegis_alpha/models/signals/aegis_long_edge_h12_v060.joblib
+aegis_alpha/logs/signals/long_edge_h12_reexport_v060.json
+aegis_alpha/models/strategy_candidates/aegis_h12_tail_risk_candidate_v060.json
+```
+
+El candidate `v060` conserva la configuración de `v052`: mismos thresholds, mismas ventanas OOS, mismo risk guard, mismo sizing y misma lógica. Solo cambia:
+
+```text
+model_paths.long_edge_h12:
+  aegis_alpha/models/signals/aegis_long_edge_h12_v060.joblib
+sklearn_version:
+  1.8.0
+```
+
+`shadow_candidate.py` carga primero `aegis_h12_tail_risk_candidate_v060.json` si existe y cae a `v052` si no está disponible. No hay promoción de champion ni live activation.
+
+Garantías activas:
+
+```text
+/ml-v2/predict sigue legacy compatible.
+/ml-v2/predict devuelve smart_leverage: 0.0.
+prod.execute: false.
+shadow.execute: false.
+execute nunca activa órdenes reales.
+No se toca el bot TypeScript.
+No se promueve champion.
+No se ejecuta PPO.
+```
+
+Observabilidad shadow:
+
+```text
+aegis_alpha/logs/shadow/shadow_signals_YYYYMMDD.jsonl
+aegis_alpha/tools/shadow_status_report.py
+aegis_alpha/tools/evaluate_shadow_log.py
+aegis_alpha/tools/run_shadow_eval_daily.py
+```
+
+Comandos:
+
+```bash
+python3 aegis_alpha/tools/shadow_status_report.py
+python3 aegis_alpha/tools/evaluate_shadow_log.py
+python3 aegis_alpha/tools/run_shadow_eval_daily.py
+```
+
+## v0.6.0 - Shadow in Main Inference Endpoint
+
+Fecha: 2026-05-04.
+
+v0.6.0 integra el candidate offline v052 como señal shadow dentro del endpoint principal que ya consulta el bot TypeScript:
+
+```text
+POST /ml-v2/predict
+```
+
+El objetivo es que el bot no cambie endpoint ni contrato legacy, pero que la respuesta incluya un bloque adicional `aegis.shadow` para observabilidad e investigación.
+
+Garantías:
+
+```text
+No se promueve champion.
+No se activa live trading.
+No se envían órdenes.
+No se toca Binance.
+No se modifica el bot TypeScript.
+No se cambia PM2.
+```
+
+Archivos agregados:
+
+```text
+aegis_alpha/inference/shadow_candidate.py
+aegis_alpha/inference/shadow_logger.py
+aegis_alpha/tools/evaluate_shadow_log.py
+```
+
+Archivos extendidos:
+
+```text
+aegis_alpha/inference/server.py
+aegis_alpha/inference/schemas.py
+aegis_alpha/inference/shadow_schema.py
+```
+
+Respuesta legacy:
+
+```text
+/ml-v2/predict sigue devolviendo:
+  long_prob
+  short_prob
+  neutral_prob
+  close_prob
+  consensus_level
+  meta_verdict
+  smart_leverage
+  features
+  aegis
+```
+
+Mientras el candidate no sea live:
+
+```text
+smart_leverage: 0
+prod.allowed: false
+prod.action: HOLD
+prod.execute: false
+shadow.execute: false
+```
+
+Nuevo bloque:
+
+```text
+aegis:
+  candidate: conservative_tail35_50
+  candidate_status: OFFLINE_CANDIDATE_NOT_LIVE
+  live_enabled: false
+  prod:
+    allowed: false
+    action: HOLD
+    execute: false
+    reason: candidate_not_live
+  shadow:
+    enabled: true
+    mode: SHADOW_ONLY
+    action: HOLD o LONG hipotético
+    would_execute: true/false
+    execute: false
+    reason: regla aplicada
+    size_mode: blocked/full/reduced
+    position_fraction: 0.0/0.25/0.10
+    edge_score_h12
+    tail_risk_score
+    regime
+    risk_tier
+    not_live_reason
+```
+
+`would_execute=true` significa solo que el candidate habría generado una señal shadow. No implica orden real:
+
+```text
+execute siempre false.
+```
+
+Se agregó endpoint de debug:
+
+```text
+POST /ml-v2/shadow_signal
+```
+
+Reutiliza la misma función interna:
+
+```text
+evaluate_shadow_candidate(symbol, payload=None)
+```
+
+Shadow logger:
+
+```text
+aegis_alpha/logs/shadow/shadow_signals_YYYYMMDD.jsonl
+```
+
+Cada evaluación shadow desde `/ml-v2/predict` se guarda como JSONL con:
+
+```text
+timestamp
+symbol
+price
+candidate
+candidate_status
+mode
+execute
+action
+would_execute
+reason
+size_mode
+position_fraction
+edge_score_h12
+tail_risk_score
+regime
+risk_tier
+model_paths/model_versions
+request_source
+```
+
+Evaluador de logs:
+
+```text
+aegis_alpha/tools/evaluate_shadow_log.py
+```
+
+Reporte generado en smoke test:
+
+```text
+aegis_alpha/logs/shadow/shadow_eval_20260504T135115Z.json
+```
+
+Smoke tests:
+
+```text
+GET /health:
+  status: 200
+  service: aegis_alpha
+  model_loaded: false
+
+POST /ml-v2/predict:
+  status: 200
+  legacy keys present: true
+  smart_leverage: 0.0
+  prod.execute: false
+  shadow.mode: SHADOW_ONLY
+  shadow.execute: false
+  shadow.action: HOLD
+  shadow.reason: edge_below_h12_top3
+
+POST /ml-v2/shadow_signal:
+  status: 200
+  shadow.mode: SHADOW_ONLY
+  shadow.execute: false
+
+candidate missing test:
+  status: 200
+  prod.action: HOLD
+  prod.execute: false
+  shadow.reason: no_candidate_loaded
+  smart_leverage: 0.0
+```
+
+Último shadow observado:
+
+```text
+timestamp: 2026-05-04 13:05:00
+symbol: ETHUSDT
+action: HOLD
+would_execute: false
+execute: false
+reason: edge_below_h12_top3
+edge_score_h12: -0.000297
+tail_risk_score: 0.431028
+regime: mixed
+```
+
+Estado final:
+
+```text
+El candidate offline está integrado como shadow en el endpoint principal.
+Prod sigue bloqueado.
+El bot TypeScript puede seguir usando /ml-v2/predict sin cambios.
+No hay champion.
+No hay live trading.
+```
+
+Próximos pasos:
+
+```text
+Correr shadow varios días.
+Evaluar shadow_signals_*.jsonl con evaluate_shadow_log.py.
+Medir frecuencia de LONG shadow, retorno futuro y drift por régimen.
+Reexportar long_edge_h12 con sklearn 1.8.0 para eliminar el warning restante del modelo v050.
+Solo considerar promoción después de shadow validation y fee/slippage live validation.
 ```
 
 ## v0.4.6 - Score Floor + Low-Vol Mixed Block

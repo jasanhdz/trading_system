@@ -58,7 +58,7 @@ class LegacyMlV2Response(BaseModel):
     meta_verdict: str
     smart_leverage: float
     features: dict[str, float]
-    aegis: AegisPredictResponse
+    aegis: dict[str, Any]
 
 
 class ExitSignalRequest(BaseModel):
