@@ -105,3 +105,109 @@ def build_horizon_targets(
         for key, values in out.items()
     }
 
+
+def tail_risk_target_row(
+    close: np.ndarray,
+    regimes: np.ndarray,
+    idx: int,
+    horizon: int,
+    total_fee: float,
+    profit_threshold: float = 0.0030,
+    risk_threshold: float = 0.0030,
+) -> dict[str, int | float]:
+    row = horizon_target_row(
+        close=close,
+        idx=idx,
+        horizon=horizon,
+        total_fee=total_fee,
+        profit_threshold=profit_threshold,
+        risk_threshold=risk_threshold,
+    )
+    entry_regime = str(regimes[idx]) if idx < len(regimes) else ""
+    end = min(idx + horizon, len(regimes) - 1)
+    future_regimes = np.asarray(regimes[idx + 1 : end + 1], dtype=object)
+    regime_shift = bool(len(future_regimes) and np.any(future_regimes != entry_regime))
+    long_net_return = float(row["long_net_return"])
+    long_mfe = float(row["mfe"])
+    long_mae = float(row["mae"])
+    return {
+        **row,
+        "tail_loss_gt_0p20": int(long_net_return <= -0.0020),
+        "tail_loss_gt_0p35": int(long_net_return <= -0.0035),
+        "mae_gt_mfe": int(long_mae > long_mfe),
+        "edge_deterioration_loss": int(long_net_return < 0.0 and long_mfe >= profit_threshold),
+        "regime_shift_loss": int(long_net_return < 0.0 and regime_shift),
+    }
+
+
+def build_tail_risk_targets(
+    close: np.ndarray,
+    regimes: np.ndarray,
+    steps: np.ndarray,
+    total_fee: float,
+    horizons: tuple[int, ...] = HORIZONS,
+    profit_threshold: float = 0.0030,
+    risk_threshold: float = 0.0030,
+) -> dict[str, np.ndarray]:
+    close = np.asarray(close, dtype=np.float32)
+    regimes = np.asarray(regimes)
+    steps = np.asarray(steps, dtype=np.int64)
+    out: dict[str, list[int | float]] = {}
+    for h in horizons:
+        for key in (
+            "tail_loss_gt_0p20",
+            "tail_loss_gt_0p35",
+            "mae_gt_mfe",
+            "edge_deterioration_loss",
+            "regime_shift_loss",
+        ):
+            out[f"h{h}_{key}"] = []
+
+    for step in steps:
+        for h in horizons:
+            row = tail_risk_target_row(
+                close=close,
+                regimes=regimes,
+                idx=int(step),
+                horizon=h,
+                total_fee=total_fee,
+                profit_threshold=profit_threshold,
+                risk_threshold=risk_threshold,
+            )
+            for key in (
+                "tail_loss_gt_0p20",
+                "tail_loss_gt_0p35",
+                "mae_gt_mfe",
+                "edge_deterioration_loss",
+                "regime_shift_loss",
+            ):
+                out[f"h{h}_{key}"].append(row[key])
+
+    return {key: np.asarray(values, dtype=np.int8) for key, values in out.items()}
+
+
+def build_tail_risk_targets_from_dataset(
+    data: dict[str, np.ndarray],
+    horizons: tuple[int, ...] = HORIZONS,
+) -> dict[str, np.ndarray]:
+    regimes = np.asarray(data["regimes"] if "regimes" in data else data["regime"]).astype(str)
+    profit_threshold = float(np.asarray(data.get("profit_threshold", 0.0030)).item())
+    out: dict[str, np.ndarray] = {}
+
+    for h in horizons:
+        net = np.asarray(data[f"h{h}_long_net_return"], dtype=np.float32)
+        mfe = np.asarray(data[f"h{h}_mfe"], dtype=np.float32)
+        mae = np.asarray(data[f"h{h}_mae"], dtype=np.float32)
+        regime_shift = np.zeros(len(net), dtype=bool)
+        for idx, regime in enumerate(regimes):
+            end = min(idx + h + 1, len(regimes))
+            if idx + 1 < end:
+                regime_shift[idx] = bool(np.any(regimes[idx + 1 : end] != regime))
+
+        out[f"h{h}_tail_loss_gt_0p20"] = (net <= -0.0020).astype(np.int8)
+        out[f"h{h}_tail_loss_gt_0p35"] = (net <= -0.0035).astype(np.int8)
+        out[f"h{h}_mae_gt_mfe"] = (mae > mfe).astype(np.int8)
+        out[f"h{h}_edge_deterioration_loss"] = ((net < 0.0) & (mfe >= profit_threshold)).astype(np.int8)
+        out[f"h{h}_regime_shift_loss"] = ((net < 0.0) & regime_shift).astype(np.int8)
+
+    return out

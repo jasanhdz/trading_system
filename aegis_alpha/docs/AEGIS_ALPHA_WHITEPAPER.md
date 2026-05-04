@@ -1573,6 +1573,131 @@ No hay señales activas.
 No hay champion nuevo.
 ```
 
+## v0.5.1 - H12/H48 Failure Analysis + Tail-Risk Targets
+
+Fecha: 2026-05-04.
+
+Se agregó una capa de análisis de cola sobre Signal Lab v0.5.0. El objetivo fue explicar por qué `A_long_edge_h12_top3` tenía buen OOS medio pero fallaba en `worst_balance` y `worst_max_dd`, y probar filtros tail-risk más específicos sin tocar inference, sin promover champion y sin ejecutar PPO.
+
+Artefactos:
+
+```text
+aegis_alpha/tools/analyze_signal_failures.py
+aegis_alpha/tools/evaluate_horizon_agreement.py
+aegis_alpha/signals/train_tail_risk_models.py
+aegis_alpha/logs/signals/signal_failure_analysis_v051.json
+aegis_alpha/logs/signals/tail_risk_train_v051.json
+aegis_alpha/logs/signals/horizon_agreement_report_v051.json
+aegis_alpha/models/signals/aegis_long_tail_risk_h12_v051.joblib
+aegis_alpha/models/signals/aegis_long_tail_risk_h24_v051.joblib
+aegis_alpha/models/signals/aegis_long_tail_risk_h48_v051.joblib
+```
+
+Targets nuevos:
+
+```text
+tail_loss_gt_0p20
+tail_loss_gt_0p35
+mae_gt_mfe
+edge_deterioration_loss
+regime_shift_loss
+```
+
+Entrenamiento tail-risk:
+
+```text
+long_tail_risk_h12:
+  roc_auc: 0.553
+  average_precision: 0.432
+  positive_rate: 39.56%
+
+long_tail_risk_h24:
+  roc_auc: 0.543
+  average_precision: 0.450
+  positive_rate: 42.14%
+
+long_tail_risk_h48:
+  roc_auc: 0.526
+  average_precision: 0.455
+  positive_rate: 43.74%
+```
+
+Failure analysis sobre `A_long_edge_h12_top3`, `long_edge_h48_top3` y `H_ensemble_h12h24_risk50`:
+
+```text
+total_trades: 661
+loss_count: 339
+
+losses_by_combo:
+  A_long_edge_h12_top3: 173
+  long_edge_h48_top3: 103
+  H_ensemble_h12h24_risk50: 63
+
+losses_by_regime:
+  mixed: 313
+  chop: 20
+  high_vol: 6
+
+losses_by_vol_bucket:
+  low: 276
+  normal: 50
+  elevated: 10
+  compressed: 3
+
+losses_by_exit_reason:
+  edge_deterioration: 245
+  hard_stop: 79
+  max_hold: 15
+
+h12/h48 agreement false on losses: 233
+h48_score > h12_score on losses: 279
+```
+
+Evaluación OOS con 144 ventanas y fee 1.0x/1.25x:
+
+```text
+baseline A_h12_top3 fee 1.0x:
+  median_balance: 20.37
+  p25_balance: 20.03
+  worst_balance: 18.15
+  median_pf: 2.39
+  p25_pf: 1.11
+  profitable_window_pct: 77.78%
+  median_trades: 8.5
+  worst_max_dd: 12.35%
+  avg_return_per_trade: 0.208%
+  exposure: 1.60%
+
+best ranked E_h12_top3_tail50 fee 1.0x:
+  median_balance: 20.35
+  p25_balance: 20.04
+  worst_balance: 18.21
+  median_pf: 3.61
+  p25_pf: 1.27
+  profitable_window_pct: 79.17%
+  median_trades: 7.0
+  worst_max_dd: 10.90%
+  avg_return_per_trade: 0.216%
+  exposure: 1.26%
+
+defensive F_h12_top3_tail30 fee 1.0x:
+  worst_balance: 19.13
+  worst_max_dd: 7.10%
+  p25_pf: 0.52
+  profitable_window_pct: 70.83%
+  median_trades: 5.0
+```
+
+Lectura:
+
+```text
+El filtro tail_risk_h12 bottom50 mejora contra A_long_edge_h12_top3 en worst_balance, worst_max_dd, p25_pf y profitable_window_pct, conservando median_trades >= 5.
+No alcanza el ideal de worst_balance >= 19.00 y worst_max_dd <= 9%; esa zona solo aparece con tail30, pero tail30 destruye p25_pf.
+La cola mala sigue dominada por mixed + low volatility y salidas edge_deterioration/hard_stop.
+El failure-risk específico mejora la selección OOS como filtro, aunque su AUC aislado sigue flojo.
+No hay champion; no hay PPO; no hay inference.
+```
+
 ## v0.4.6 - Score Floor + Low-Vol Mixed Block
 
 Se añadió un filtro de score floor sobre el candidate congelado de v0.4.2 y se probó un bloqueo adicional de `mixed + low_vol`, con fee stress `1.0x` y `1.25x` sobre las mismas 144 ventanas OOS.
