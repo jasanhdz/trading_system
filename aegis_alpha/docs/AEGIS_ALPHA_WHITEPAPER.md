@@ -1698,6 +1698,186 @@ El failure-risk específico mejora la selección OOS como filtro, aunque su AUC 
 No hay champion; no hay PPO; no hay inference.
 ```
 
+## v0.5.2 - Tail-Risk Calibration + Reproducibility Fix
+
+Fecha: 2026-05-04.
+
+v0.5.1 dejó una tensión clara:
+
+```text
+tail50:
+  mejora p25_pf y profitable_window_pct, pero deja peor cola.
+
+tail30:
+  mejora worst_balance y DD, pero rompe p25_pf.
+```
+
+v0.5.2 calibró el punto medio entre esos extremos y corrigió reproducibilidad de los modelos tail-risk. El runtime activo usa:
+
+```text
+sklearn_version: 1.8.0
+```
+
+Se reentrenaron modelos tail-risk con sufijo v052:
+
+```text
+aegis_alpha/models/signals/aegis_long_tail_risk_h12_v052.joblib
+aegis_alpha/models/signals/aegis_long_tail_risk_h24_v052.joblib
+aegis_alpha/models/signals/aegis_long_tail_risk_h48_v052.joblib
+```
+
+Reporte:
+
+```text
+aegis_alpha/logs/signals/tail_risk_train_v052.json
+```
+
+Rangos:
+
+```text
+train:
+  2022-03-06 05:40:00 -> 2025-07-03 13:55:00
+holdout:
+  2025-07-03 14:00:00 -> 2026-05-03 10:05:00
+```
+
+Métricas holdout:
+
+```text
+long_tail_risk_h12:
+  roc_auc: 0.553
+  average_precision: 0.432
+  positive_rate: 39.56%
+
+long_tail_risk_h24:
+  roc_auc: 0.543
+  average_precision: 0.450
+  positive_rate: 42.14%
+
+long_tail_risk_h48:
+  roc_auc: 0.526
+  average_precision: 0.455
+  positive_rate: 43.74%
+```
+
+Calibración OOS:
+
+```text
+aegis_alpha/tools/evaluate_tail_risk_calibration.py
+aegis_alpha/logs/signals/tail_risk_calibration_v052.json
+```
+
+Se evaluaron:
+
+```text
+hard_tail30/35/40/45/50
+dynamic_tail30_50
+conservative_tail35_50
+ultra_defensive_tail30_45
+
+fees:
+  1.0x
+  1.25x
+```
+
+Mejor balanceado:
+
+```text
+config_id: conservative_tail35_50
+sizing_mode: conservative_dynamic_sizing
+fee_multiplier: 1.0x
+
+tail <= 35%:
+  full size 0.25
+35% < tail <= 50%:
+  reduced size 0.10
+tail > 50%:
+  no trade
+
+median_balance: 20.29097
+p25_balance: 20.02397
+worst_balance: 19.20109
+median_pf: 3.23979
+p25_pf: 1.24341
+profitable_window_pct: 77.78%
+median_trades: 7.5
+trades_per_month: 16.31
+worst_max_dd: 6.53%
+median_avg_return_per_trade: 0.2167%
+exposure_time: 1.40%
+full_size_trades: 761
+reduced_size_trades: 621
+skipped_by_tail_risk: 1185
+```
+
+Mejor profit-quality:
+
+```text
+config_id: hard_tail45
+fee_multiplier: 1.0x
+p25_pf: 1.29023
+profitable_window_pct: 79.86%
+median_balance: 20.37140
+worst_balance: 18.40321
+worst_max_dd: 9.95%
+
+Lectura:
+  gana calidad/rentabilidad, pero no pasa worst_balance ni DD.
+```
+
+Mejor defensiva cercana:
+
+```text
+config_id: ultra_defensive_tail30_45
+fee_multiplier: 1.0x
+worst_balance: 19.16292
+worst_max_dd: 5.85%
+p25_pf: 1.29023
+profitable_window_pct: 78.47%
+median_trades: 7.0
+median_balance: 20.18078
+
+Lectura:
+  defensa excelente, pero queda bajo median_balance >= 20.25.
+```
+
+Decisión:
+
+```text
+conservative_tail35_50 cumple todos los criterios de candidato fuerte:
+  median_balance >= 20.25
+  p25_balance >= 20.00
+  worst_balance >= 19.00
+  p25_pf >= 1.0
+  profitable_window_pct >= 75%
+  median_trades >= 5
+  worst_max_dd <= 9%
+```
+
+Se congeló candidate offline:
+
+```text
+aegis_alpha/models/strategy_candidates/aegis_h12_tail_risk_candidate_v052.json
+status: OFFLINE_CANDIDATE_NOT_LIVE
+```
+
+Razones para no estar live:
+
+```text
+needs_shadow_validation
+needs_fee_slippage_live_validation
+not_promoted_to_champion
+```
+
+Próximos pasos:
+
+```text
+Validación shadow sin órdenes reales.
+Stress con fees/slippage live.
+Reentrenar o exportar long_edge_h12 en el mismo runtime sklearn si se quiere eliminar también el warning del modelo edge v050.
+No hay champion; no hay PPO; no hay inference; no hay señales reales activadas.
+```
+
 ## v0.4.6 - Score Floor + Low-Vol Mixed Block
 
 Se añadió un filtro de score floor sobre el candidate congelado de v0.4.2 y se probó un bloqueo adicional de `mixed + low_vol`, con fee stress `1.0x` y `1.25x` sobre las mismas 144 ventanas OOS.

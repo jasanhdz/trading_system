@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import sklearn
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, log_loss, roc_auc_score
 
@@ -59,6 +60,7 @@ def train_tail_risk_models(
     dataset_path: Path,
     output_dir: Path,
     report_path: Path,
+    model_version: str,
     test_pct: float,
     max_iter: int,
     learning_rate: float,
@@ -101,10 +103,13 @@ def train_tail_risk_models(
     bundle_metadata = {
         "schema_version": "aegis_tail_risk_models_v1",
         "created_at": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+        "sklearn_version": sklearn.__version__,
         "dataset_path": str(dataset_path),
         "feature_count": int(x.shape[1]),
         "train_samples": int(len(x_train)),
         "test_samples": int(len(x_test)),
+        "train_date_range": train_range,
+        "holdout_date_range": test_range,
         "holdout_range": {"train": train_range, "test": test_range},
         "params": params,
     }
@@ -117,7 +122,7 @@ def train_tail_risk_models(
         clf.fit(x_train, y_train, sample_weight=_class_weights(y_train))
         train_proba = clf.predict_proba(x_train)[:, 1]
         test_proba = clf.predict_proba(x_test)[:, 1]
-        model_path = output_dir / f"aegis_{spec.name}_v051.joblib"
+        model_path = output_dir / f"aegis_{spec.name}_{model_version}.joblib"
         model_bundle = {
             "metadata": {
                 **bundle_metadata,
@@ -146,6 +151,7 @@ def train_tail_risk_models(
         report_models[spec.name] = {
             "target_key": f"h{spec.horizon}_tail_loss_gt_0p20",
             "artifact_path": str(model_path),
+            "model_path": str(model_path),
             "train": _classification_metrics(y_train, train_proba),
             "test": holdout,
         }
@@ -157,7 +163,10 @@ def train_tail_risk_models(
     report = {
         "schema_version": "aegis_tail_risk_models_train_v1",
         "created_at": bundle_metadata["created_at"],
+        "sklearn_version": sklearn.__version__,
         "dataset_path": str(dataset_path),
+        "train_date_range": train_range,
+        "holdout_date_range": test_range,
         "holdout_range": bundle_metadata["holdout_range"],
         "params": params,
         "models": report_models,
@@ -172,7 +181,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="aegis_alpha/data/processed/signal_lab_dataset_v050.npz")
     parser.add_argument("--output-dir", default="aegis_alpha/models/signals")
-    parser.add_argument("--report", default="aegis_alpha/logs/signals/tail_risk_train_v051.json")
+    parser.add_argument("--report", default="aegis_alpha/logs/signals/tail_risk_train_v052.json")
+    parser.add_argument("--model-version", default="v052")
     parser.add_argument("--test-pct", type=float, default=0.20)
     parser.add_argument("--max-iter", type=int, default=220)
     parser.add_argument("--learning-rate", type=float, default=0.045)
@@ -183,6 +193,7 @@ def main() -> None:
         dataset_path=Path(args.dataset),
         output_dir=Path(args.output_dir),
         report_path=Path(args.report),
+        model_version=args.model_version,
         test_pct=args.test_pct,
         max_iter=args.max_iter,
         learning_rate=args.learning_rate,
