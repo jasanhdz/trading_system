@@ -1878,6 +1878,164 @@ Reentrenar o exportar long_edge_h12 en el mismo runtime sklearn si se quiere eli
 No hay champion; no hay PPO; no hay inference; no hay señales reales activadas.
 ```
 
+## v0.5.3 - Candidate Audit + Shadow Readiness
+
+Fecha: 2026-05-04.
+
+v0.5.3 convierte el candidate v052 en un artefacto auditable y reproducible antes de cualquier integración live. No se modificó `server.py`, no se tocó el bot TypeScript, no se promovió champion y no se ejecutó PPO.
+
+Candidate audit:
+
+```text
+tool:
+  aegis_alpha/tools/audit_strategy_candidate.py
+
+report:
+  aegis_alpha/logs/signals/candidate_audit_v053.json
+
+candidate:
+  aegis_alpha/models/strategy_candidates/aegis_h12_tail_risk_candidate_v052.json
+
+passed: true
+status: OFFLINE_CANDIDATE_NOT_LIVE
+live_enabled: false
+missing_fields: []
+missing_files: []
+```
+
+El candidate se enriqueció con metadata explícita:
+
+```text
+entry_rule:
+  long_edge_h12 top 3%
+
+sizing_config:
+  tail <= 35%: size 0.25
+  35% < tail <= 50%: size 0.10
+  tail > 50%: no trade
+
+risk_guard:
+  max_window_loss_pct: 0.07
+  pause_after_loss_steps: 48
+  pause_after_2_losses_steps: 48
+  max_trades_per_day: 3
+
+oos_evaluation:
+  144 frozen windows from tail_risk_calibration_v052
+```
+
+Reproducibility eval:
+
+```text
+tool:
+  aegis_alpha/tools/evaluate_strategy_candidate_from_json.py
+
+report:
+  aegis_alpha/logs/signals/candidate_repro_eval_v053.json
+
+reproducibility_passed: true
+window_source: candidate_json
+window_count: 144
+```
+
+Comparación reproducida:
+
+```text
+median_balance:
+  expected: 20.290966
+  reproduced: 20.290966
+
+p25_balance:
+  expected: 20.023968
+  reproduced: 20.023968
+
+worst_balance:
+  expected: 19.201086
+  reproduced: 19.201086
+
+p25_pf:
+  expected: 1.243410
+  reproduced: 1.243410
+
+profitable_window_pct:
+  expected: 77.78%
+  reproduced: 77.78%
+
+median_trades:
+  expected: 7.5
+  reproduced: 7.5
+
+worst_max_dd:
+  expected: 6.53%
+  reproduced: 6.53%
+```
+
+Nota de reproducibilidad:
+
+```text
+La primera reconstrucción por seeds detectó que las ventanas "recent" cambian cuando avanza la DB.
+Para que el candidate sea reproducible, v0.5.3 congela las 144 ventanas OOS exactas en el JSON del candidate.
+```
+
+Shadow schema:
+
+```text
+aegis_alpha/inference/shadow_schema.py
+```
+
+Garantías:
+
+```text
+mode siempre SHADOW_ONLY
+execute siempre false
+sin side effects
+JSON serializable
+```
+
+Shadow dry-run:
+
+```text
+tool:
+  aegis_alpha/tools/shadow_candidate_dry_run.py
+
+latest output:
+  aegis_alpha/logs/signals/latest_shadow_signal_v053.json
+```
+
+Última señal shadow generada:
+
+```text
+symbol: ETHUSDT
+timestamp: 2026-05-04 13:05:00
+mode: SHADOW_ONLY
+execute: false
+action: HOLD
+reason: edge_below_h12_top3
+regime: mixed
+edge_score_h12: -0.000297
+tail_risk_score: 0.431028
+risk_tier: blocked
+```
+
+Estado final:
+
+```text
+Candidate offline listo para shadow dry-run.
+No está live.
+No hay champion.
+No hay integración con inference server.
+No hay órdenes ni interacción con Binance.
+```
+
+Próximos pasos:
+
+```text
+Shadow logging integrado al inference server, manteniendo execute=false.
+Shadow validation por varios días con drift checks.
+Reexportar long_edge_h12 con sklearn 1.8.0 para eliminar el warning restante del modelo v050.
+Fee/slippage live validation antes de cualquier promoción.
+```
+
 ## v0.4.6 - Score Floor + Low-Vol Mixed Block
 
 Se añadió un filtro de score floor sobre el candidate congelado de v0.4.2 y se probó un bloqueo adicional de `mixed + low_vol`, con fee stress `1.0x` y `1.25x` sobre las mismas 144 ventanas OOS.
