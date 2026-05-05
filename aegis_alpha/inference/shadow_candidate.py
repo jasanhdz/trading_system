@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -13,13 +15,15 @@ from aegis_alpha.edge.common import load_model_bundle
 from aegis_alpha.inference.shadow_schema import build_shadow_signal
 from aegis_alpha.signals.combination_utils import RuleCondition, predict_scores, threshold_for_rule
 from aegis_alpha.signals.common import load_signal_market
-from aegis_alpha.tools.evaluate_long_edge_robustness import ALLOWED_REGIMES
 
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_CONFIG = REPO_ROOT / "aegis_alpha" / "configs" / "base.yaml"
 CANDIDATE_V060 = REPO_ROOT / "aegis_alpha" / "models" / "strategy_candidates" / "aegis_h12_tail_risk_candidate_v060.json"
 CANDIDATE_V052 = REPO_ROOT / "aegis_alpha" / "models" / "strategy_candidates" / "aegis_h12_tail_risk_candidate_v052.json"
+ALLOWED_REGIMES = {"mixed", "chop", "high_vol"}
+SHADOW_HEAVY_EVAL_ENABLED = os.environ.get("AEGIS_SHADOW_HEAVY_EVAL", "0") == "1"
+SHADOW_CACHE_TTL_SECONDS = int(os.environ.get("AEGIS_SHADOW_CACHE_TTL_SECONDS", "60"))
 
 
 def _fallback_shadow(symbol: str, reason: str, candidate: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -89,6 +93,33 @@ def _load_candidate_bundle(path_text: str) -> dict[str, Any]:
     }
 
 
+def _cache_bucket(ttl_seconds: int = SHADOW_CACHE_TTL_SECONDS) -> int:
+    return int(time.time() // max(int(ttl_seconds), 1))
+
+
+@lru_cache(maxsize=2)
+def _load_signal_market_cached(bucket: int):
+    return load_signal_market(DEFAULT_CONFIG)
+
+
+@lru_cache(maxsize=2)
+def _predict_scores_cached(path_text: str, bucket: int) -> tuple[Any, dict[str, np.ndarray]]:
+    bundle = _load_candidate_bundle(path_text)
+    market = _load_signal_market_cached(bucket)
+    preds = predict_scores(market, bundle["models"])
+    return market, preds
+
+
+def runtime_debug() -> dict[str, Any]:
+    return {
+        "heavy_eval_enabled": SHADOW_HEAVY_EVAL_ENABLED,
+        "candidate_path": str(_candidate_path()) if _candidate_path() else None,
+        "candidate_cache": _load_candidate_bundle.cache_info()._asdict(),
+        "market_cache": _load_signal_market_cached.cache_info()._asdict(),
+        "score_cache": _predict_scores_cached.cache_info()._asdict(),
+    }
+
+
 def _band_thresholds(candidate: dict[str, Any]) -> list[float]:
     bands = candidate.get("sizing_config", {}).get("bands") or candidate.get("oos_metrics", {}).get("bands") or []
     return sorted({float(item["max_pct"]) for item in bands})
@@ -119,11 +150,20 @@ def evaluate_shadow_candidate(symbol: str, payload: dict | None = None) -> dict[
     try:
         bundle = _load_candidate_bundle(str(path))
         candidate = bundle["candidate"]
-        market = load_signal_market(DEFAULT_CONFIG)
+        if not SHADOW_HEAVY_EVAL_ENABLED:
+            return {
+                "candidate": path.stem,
+                "candidate_status": str(candidate.get("status", "UNKNOWN")),
+                "live_enabled": False,
+                "model_paths": bundle["model_paths"],
+                "model_versions": bundle["model_versions"],
+                "price": None,
+                "shadow": _fallback_shadow(symbol, "shadow_heavy_eval_disabled_for_api_stability", candidate),
+            }
+        market, preds = _predict_scores_cached(str(path), _cache_bucket())
         if len(market.signal_features) == 0:
             shadow = _fallback_shadow(symbol, "insufficient_data", candidate)
         else:
-            preds = predict_scores(market, bundle["models"])
             rel_idx = len(preds["long_edge_h12"]) - 1
             step = market.cfg.model.window_size + rel_idx
             if rel_idx < 0 or step >= len(market.close):

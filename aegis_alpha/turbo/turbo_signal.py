@@ -16,21 +16,32 @@ from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 
 
 LOGGER = logging.getLogger(__name__)
+TURBO_ALLOW_MARKET_REBUILD = False
+_MODEL_CACHE: dict[str, Any | None] = {}
 
 
 def _model_path(side: str, lookback_days: int) -> Path:
     return DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
 
 
-@lru_cache(maxsize=12)
 def _load_estimator(path_text: str) -> Any | None:
+    if path_text in _MODEL_CACHE:
+        return _MODEL_CACHE[path_text]
     path = Path(path_text)
     if not path.exists():
+        _MODEL_CACHE[path_text] = None
         return None
     bundle = joblib.load(path)
     if isinstance(bundle, dict):
-        return bundle.get("estimator")
-    return bundle
+        _MODEL_CACHE[path_text] = bundle.get("estimator")
+    else:
+        _MODEL_CACHE[path_text] = bundle
+    LOGGER.warning("aegis_turbo_model_loaded path=%s loaded=%s", path.name, _MODEL_CACHE[path_text] is not None)
+    return _MODEL_CACHE[path_text]
+
+
+def model_cache_keys() -> list[str]:
+    return sorted(_MODEL_CACHE.keys())
 
 
 def _safe_float(value: Any) -> float | None:
@@ -98,6 +109,8 @@ def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
             timestamps = data["timestamp"].astype(str)
             if len(x) > 0:
                 return x[-1:].astype(np.float32), str(timestamps[-1])
+    if not TURBO_ALLOW_MARKET_REBUILD:
+        return None, ""
     market = _load_market_cached(_cache_bucket())
     if len(market.signal_features) == 0:
         return None, ""

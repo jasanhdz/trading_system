@@ -23,9 +23,10 @@ class AegisModelLoader:
         self.cfg = cfg
         self.model = None
         self.model_path = REPO_ROOT / cfg.model.champion_path
-        self.reload()
+        self._load_attempted = False
 
     def reload(self) -> bool:
+        self._load_attempted = True
         if not Path(self.model_path).exists():
             self.model = None
             return False
@@ -43,12 +44,14 @@ class AegisModelLoader:
         return self.model is not None
 
     def predict(self, market_window: np.ndarray | None = None, account: np.ndarray | None = None) -> ModelPrediction:
+        # Do not auto-load PPO in request paths. The inference API must remain
+        # responsive even when champion artifacts are absent, huge, or invalid.
         if self.model is None or market_window is None or account is None:
             return ModelPrediction(
                 raw_action="IDLE",
                 probs={"idle": 0.99, "long": 0.005, "short": 0.005, "close": 0.0},
                 model_loaded=False,
-                reason="no_aegis_champion_loaded",
+                reason="aegis_champion_not_loaded_lazy_safe_mode",
             )
 
         obs = {

@@ -2,6 +2,12 @@
 from __future__ import annotations
 
 import os
+import logging
+import platform
+import sys
+import time
+from datetime import datetime, timezone
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI
@@ -10,6 +16,7 @@ from aegis_alpha.config import load_config
 from aegis_alpha.features.regime_detector import Regime, detect_regime
 from aegis_alpha.inference.gates import gate_action
 from aegis_alpha.inference.model_loader import AegisModelLoader
+from aegis_alpha.inference import shadow_candidate
 from aegis_alpha.inference.shadow_candidate import evaluate_shadow_candidate
 from aegis_alpha.inference.shadow_logger import safe_log_shadow_signal
 from aegis_alpha.inference.schemas import (
@@ -25,11 +32,28 @@ from aegis_alpha.inference.schemas import (
 )
 from aegis_alpha.turbo.turbo_logger import safe_log_turbo_shadow
 from aegis_alpha.turbo.turbo_schema import build_turbo_signal
-from aegis_alpha.turbo.turbo_signal import evaluate_turbo_shadow
+from aegis_alpha.turbo import turbo_signal
+from aegis_alpha.turbo.turbo_signal import evaluate_turbo_shadow, model_cache_keys
 
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("AEGIS_LOG_LEVEL", "WARNING").upper(), logging.WARNING),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+LOGGER = logging.getLogger("aegis_alpha.inference.server")
 cfg = load_config(os.environ.get("AEGIS_CONFIG"))
 app = FastAPI(title="Aegis Alpha Inference", version=cfg.model.version)
 loader = AegisModelLoader(cfg)
+START_TIME = time.time()
+LAST_PREDICT: dict[str, Any] = {
+    "total_ms": None,
+    "safe_shadow_ms": None,
+    "turbo_ms": None,
+    "feature_ms": None,
+    "model_load_ms": 0.0,
+    "logger_ms": None,
+    "fallback_used": False,
+    "error": None,
+}
 
 
 def _neutral_features() -> np.ndarray:
@@ -41,6 +65,7 @@ def _account_flat() -> np.ndarray:
 
 
 def _build_response(symbol: str) -> AegisPredictResponse:
+    start = time.perf_counter()
     features = _neutral_features()
     regime: Regime = detect_regime(features)
     pred = loader.predict(features, _account_flat())
@@ -70,12 +95,90 @@ def _build_response(symbol: str) -> AegisPredictResponse:
         ),
         regime=RegimePayload(type=regime.type, confidence=regime.confidence),
         features={"cvd_z": 0.0, "cvd_slope": 0.0, "weakness": 0.0, "volatility_z": 0.0},
-        metadata={"model_loaded": pred.model_loaded, "model_reason": pred.reason},
+        metadata={"model_loaded": pred.model_loaded, "model_reason": pred.reason, "feature_ms": round((time.perf_counter() - start) * 1000, 3)},
     )
 
 
 def _model_dump(payload):
     return payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _defensive_aegis_block(symbol: str, reason: str, error: str | None = None) -> dict:
+    raw = {
+        "action": "HOLD",
+        "would_execute": False,
+        "reason": reason,
+        "turbo_score": 0.0,
+        "confidence": "blocked",
+        "leverage_suggestion": 0.0,
+        "position_fraction": 0.0,
+        "votes": {"long": 0, "short": 0, "neutral": 0},
+        "recent_scores": {
+            "long_7d": None,
+            "short_7d": None,
+            "long_14d": None,
+            "short_14d": None,
+            "long_30d": None,
+            "short_30d": None,
+        },
+    }
+    gated = {
+        "action": "HOLD",
+        "would_execute": False,
+        "reason": reason,
+        "blocked_by": "defensive_fallback",
+    }
+    warning = {"warning": error} if error else {}
+    return {
+        "candidate": "defensive_fallback",
+        "candidate_status": "NOT_LOADED",
+        "live_enabled": False,
+        "prod": {
+            "allowed": False,
+            "action": "HOLD",
+            "execute": False,
+            "reason": "defensive_fallback",
+        },
+        "shadow": {
+            "enabled": False,
+            "mode": "SHADOW_ONLY",
+            "action": "HOLD",
+            "would_execute": False,
+            "execute": False,
+            "reason": reason,
+            **warning,
+        },
+        "turbo": build_turbo_signal(
+            symbol=symbol,
+            enabled=False,
+            action="HOLD",
+            would_execute=False,
+            reason=reason,
+            raw=raw,
+            gated=gated,
+            safe_context={"regime": "unknown", "safe_action": "HOLD", "safe_reason": reason},
+            risk_guard={"blocked": True, "reason": reason},
+        ),
+    }
+
+
+def _defensive_legacy_response(symbol: str, reason: str = "predict_fallback_error", error: str | None = None) -> LegacyMlV2Response:
+    return LegacyMlV2Response(
+        symbol=symbol,
+        long_prob=0.0,
+        short_prob=0.0,
+        neutral_prob=1.0,
+        close_prob=0.0,
+        consensus_level=1.0,
+        meta_verdict="AEGIS_DEFENSIVE_HOLD",
+        smart_leverage=0.0,
+        features={"cvd_z": 0.0, "cvd_slope": 0.0, "weakness": 0.0, "volatility_z": 0.0},
+        aegis=_defensive_aegis_block(symbol, reason, error),
+    )
 
 
 def _aegis_shadow_block(symbol: str, request_source: str = "ml-v2-predict") -> dict:
@@ -93,6 +196,7 @@ def _aegis_shadow_block(symbol: str, request_source: str = "ml-v2-predict") -> d
     shadow["execute"] = False
     shadow["mode"] = "SHADOW_ONLY"
     shadow["enabled"] = True
+    log_start = time.perf_counter()
     log_path, log_warning = safe_log_shadow_signal(
         shadow,
         price=shadow_eval.get("price"),
@@ -100,6 +204,7 @@ def _aegis_shadow_block(symbol: str, request_source: str = "ml-v2-predict") -> d
         model_versions=shadow_eval.get("model_versions", {}),
         request_source=request_source,
     )
+    shadow["logger_ms"] = round((time.perf_counter() - log_start) * 1000, 3)
     if log_warning:
         shadow["logging_warning"] = log_warning
     elif log_path is not None:
@@ -122,7 +227,9 @@ def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
     turbo["execute"] = False
     turbo["live_enabled"] = False
     turbo["production_allowed"] = False
+    log_start = time.perf_counter()
     log_path, log_warning = safe_log_turbo_shadow(turbo)
+    turbo["logger_ms"] = round((time.perf_counter() - log_start) * 1000, 3)
     if log_warning:
         turbo["logging_warning"] = log_warning
     elif log_path is not None:
@@ -133,11 +240,40 @@ def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
 @app.get("/health")
 def health():
     return {
-        "status": "healthy",
         "service": "aegis_alpha",
-        "model_loaded": loader.loaded,
+        "status": "healthy",
         "model_name": cfg.model.name,
         "model_version": cfg.model.version,
+        "ts": _now_iso(),
+    }
+
+
+@app.get("/debug/runtime")
+def debug_runtime():
+    sklearn_version = None
+    try:
+        import sklearn
+
+        sklearn_version = sklearn.__version__
+    except Exception:
+        sklearn_version = "unavailable"
+    return {
+        "service": "aegis_alpha",
+        "pid": os.getpid(),
+        "uptime": round(time.time() - START_TIME, 3),
+        "loaded_candidate": shadow_candidate.runtime_debug(),
+        "model_cache_keys": {
+            "ppo_loaded": loader.loaded,
+            "ppo_path": str(loader.model_path),
+            "turbo": model_cache_keys(),
+        },
+        "last_predict_latency": {k: v for k, v in LAST_PREDICT.items() if k.endswith("_ms") or k == "fallback_used"},
+        "last_predict_error": LAST_PREDICT.get("error"),
+        "shadow_available": True,
+        "turbo_available": True,
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "sklearn_version": sklearn_version,
     }
 
 
@@ -148,22 +284,71 @@ def predict(req: PredictRequest):
 
 @app.post("/ml-v2/predict", response_model=LegacyMlV2Response)
 def ml_v2_predict(req: PredictRequest):
-    aegis_response = _build_response(req.symbol)
-    aegis_block = _aegis_shadow_block(req.symbol, request_source="ml-v2-predict")
-    aegis_block["turbo"] = _turbo_shadow_block(req.symbol, aegis_block)
-    aegis_block["model"] = _model_dump(aegis_response)
-    return LegacyMlV2Response(
-        symbol=req.symbol,
-        long_prob=aegis_response.probs.long,
-        short_prob=aegis_response.probs.short,
-        neutral_prob=aegis_response.probs.idle,
-        close_prob=aegis_response.probs.close,
-        consensus_level=aegis_response.top_prob,
-        meta_verdict=f"AEGIS_ALPHA_{aegis_response.gated_action}",
-        smart_leverage=0.0,
-        features=aegis_response.features,
-        aegis=aegis_block,
-    )
+    total_start = time.perf_counter()
+    timings: dict[str, float | None] = {
+        "feature_ms": None,
+        "safe_shadow_ms": None,
+        "turbo_ms": None,
+        "model_load_ms": 0.0,
+        "logger_ms": None,
+    }
+    fallback_used = False
+    error = None
+    try:
+        feature_start = time.perf_counter()
+        aegis_response = _build_response(req.symbol)
+        timings["feature_ms"] = round((time.perf_counter() - feature_start) * 1000, 3)
+
+        shadow_start = time.perf_counter()
+        try:
+            aegis_block = _aegis_shadow_block(req.symbol, request_source="ml-v2-predict")
+        except Exception as exc:  # pragma: no cover - endpoint safety
+            fallback_used = True
+            LOGGER.exception("aegis_shadow_block_failed")
+            aegis_block = _defensive_aegis_block(req.symbol, "shadow_fallback_error", repr(exc))
+        timings["safe_shadow_ms"] = round((time.perf_counter() - shadow_start) * 1000, 3)
+
+        turbo_start = time.perf_counter()
+        try:
+            aegis_block["turbo"] = _turbo_shadow_block(req.symbol, aegis_block)
+        except Exception as exc:  # pragma: no cover - endpoint safety
+            fallback_used = True
+            LOGGER.exception("aegis_turbo_block_failed")
+            aegis_block["turbo"] = _defensive_aegis_block(req.symbol, "turbo_fallback_error", repr(exc))["turbo"]
+        timings["turbo_ms"] = round((time.perf_counter() - turbo_start) * 1000, 3)
+
+        aegis_block["model"] = _model_dump(aegis_response)
+        total_ms = round((time.perf_counter() - total_start) * 1000, 3)
+        timings["logger_ms"] = round(float((aegis_block.get("shadow") or {}).get("logger_ms", 0.0)) + float((aegis_block.get("turbo") or {}).get("logger_ms", 0.0)), 3)
+        LAST_PREDICT.update({**timings, "total_ms": total_ms, "fallback_used": fallback_used, "error": error})
+        LOGGER.warning(
+            "aegis_predict_latency symbol=%s total_ms=%.3f feature_ms=%s safe_shadow_ms=%s turbo_ms=%s logger_ms=%s fallback_used=%s",
+            req.symbol,
+            total_ms,
+            timings["feature_ms"],
+            timings["safe_shadow_ms"],
+            timings["turbo_ms"],
+            timings["logger_ms"],
+            fallback_used,
+        )
+        return LegacyMlV2Response(
+            symbol=req.symbol,
+            long_prob=aegis_response.probs.long,
+            short_prob=aegis_response.probs.short,
+            neutral_prob=aegis_response.probs.idle,
+            close_prob=aegis_response.probs.close,
+            consensus_level=aegis_response.top_prob,
+            meta_verdict=f"AEGIS_ALPHA_{aegis_response.gated_action}",
+            smart_leverage=0.0,
+            features=aegis_response.features,
+            aegis=aegis_block,
+        )
+    except Exception as exc:  # pragma: no cover - endpoint safety
+        error = repr(exc)
+        total_ms = round((time.perf_counter() - total_start) * 1000, 3)
+        LAST_PREDICT.update({**timings, "total_ms": total_ms, "fallback_used": True, "error": error})
+        LOGGER.exception("aegis_predict_fallback symbol=%s total_ms=%.3f", req.symbol, total_ms)
+        return _defensive_legacy_response(req.symbol, "predict_fallback_error", error)
 
 
 @app.post("/ml-v2/shadow_signal")
