@@ -41,6 +41,27 @@ def _read_rows(pattern: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _raw_view(row: dict[str, Any]) -> dict[str, Any]:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    return {
+        "action": str(raw.get("action", row.get("raw_action", row.get("action", "HOLD")))).upper(),
+        "would_execute": bool(raw.get("would_execute", row.get("raw_would_execute", row.get("would_execute", False)))),
+        "reason": raw.get("reason", row.get("raw_reason", row.get("reason"))),
+        "leverage_suggestion": float(raw.get("leverage_suggestion", row.get("raw_leverage_suggestion", row.get("leverage_suggestion", 0.0))) or 0.0),
+        "position_fraction": float(raw.get("position_fraction", row.get("raw_position_fraction", row.get("position_fraction", 0.0))) or 0.0),
+    }
+
+
+def _gated_view(row: dict[str, Any]) -> dict[str, Any]:
+    gated = row.get("gated") if isinstance(row.get("gated"), dict) else {}
+    return {
+        "action": str(gated.get("action", row.get("gated_action", row.get("action", "HOLD")))).upper(),
+        "would_execute": bool(gated.get("would_execute", row.get("gated_would_execute", row.get("would_execute", False)))),
+        "reason": gated.get("reason", row.get("gated_reason", row.get("reason"))),
+        "blocked_by": gated.get("blocked_by", row.get("gated_blocked_by")),
+    }
+
+
 def _path_stats(close: np.ndarray, idx: int, horizon: int, action: str) -> dict[str, Any]:
     if idx < 0 or idx + horizon >= len(close):
         return {"pending": True}
@@ -105,31 +126,48 @@ def _max_loss_streak(returns: list[float]) -> int:
     return int(best)
 
 
-def evaluate_turbo_shadow_log(config_path: str, log_glob: str, output_dir: Path) -> dict[str, Any]:
-    rows = _read_rows(log_glob)
-    market = load_signal_market(config_path)
-    timestamp_to_step = {str(ts): idx for idx, ts in enumerate(market.timestamps)}
+def _quality(enriched: dict[str, Any]) -> str:
+    if "estimated_roe_12" not in enriched:
+        return "PENDING"
+    mfe = float(enriched.get("MFE_12", 0.0) or 0.0)
+    mae = float(enriched.get("MAE_12", 0.0) or 0.0)
+    roe = float(enriched.get("estimated_roe_12", 0.0) or 0.0)
+    leverage = float(enriched.get("leverage_suggestion", 0.0) or 0.0)
+    best_mfe_roe = mfe * leverage * 100.0
+    worst_mae_roe = -mae * leverage * 100.0
+    if worst_mae_roe <= -15.0 or mae > mfe:
+        return "BAD_CANDIDATE"
+    if best_mfe_roe >= 15.0 or roe >= 10.0 or mfe > mae:
+        return "GOOD_CANDIDATE"
+    return "MIXED_CANDIDATE"
+
+
+def _evaluate_rows(rows: list[dict[str, Any]], timestamp_to_step: dict[str, int], close: np.ndarray, mode: str) -> tuple[list[dict[str, Any]], int]:
     completed: list[dict[str, Any]] = []
     pending_count = 0
-
     for row in rows:
-        if row.get("action") not in {"LONG", "SHORT"} or not bool(row.get("would_execute")):
+        view = _raw_view(row) if mode == "raw" else _gated_view(row)
+        if view["action"] not in {"LONG", "SHORT"} or not view["would_execute"]:
             continue
         idx = timestamp_to_step.get(str(row.get("timestamp")))
         if idx is None:
             pending_count += 1
             continue
         enriched = dict(row)
-        action = str(row.get("action"))
-        leverage = float(row.get("leverage_suggestion", 0.0) or 0.0)
-        fraction = float(row.get("position_fraction", 0.0) or 0.0)
+        enriched["action"] = view["action"]
+        enriched["would_execute"] = view["would_execute"]
+        enriched["reason"] = view["reason"]
+        enriched["leverage_suggestion"] = float(view.get("leverage_suggestion", row.get("leverage_suggestion", 0.0)) or row.get("leverage_suggestion", 0.0) or 0.0)
+        enriched["position_fraction"] = float(view.get("position_fraction", row.get("position_fraction", 0.0)) or row.get("position_fraction", 0.0) or 0.0)
         row_pending = False
         for horizon in HORIZONS:
-            stats = _path_stats(market.close, idx, horizon, action)
+            stats = _path_stats(close, idx, horizon, view["action"])
             if stats.get("pending"):
                 row_pending = True
                 continue
             ret = float(stats["future_return"])
+            leverage = float(enriched.get("leverage_suggestion", 0.0) or 0.0)
+            fraction = float(enriched.get("position_fraction", 0.0) or 0.0)
             enriched[f"future_return_{horizon}"] = safe_float(ret)
             enriched[f"MFE_{horizon}"] = stats["mfe"]
             enriched[f"MAE_{horizon}"] = stats["mae"]
@@ -140,12 +178,30 @@ def evaluate_turbo_shadow_log(config_path: str, log_glob: str, output_dir: Path)
         if "estimated_roe_12" in enriched:
             enriched["estimated_roe"] = enriched["estimated_roe_12"]
             enriched["estimated_account_return"] = enriched["estimated_account_return_12"]
+        enriched["quality_label"] = _quality(enriched)
         safe_context = row.get("safe_context") or {}
         enriched["regime"] = safe_context.get("regime", "unknown")
         completed.append(enriched)
+    return completed, pending_count
 
-    account_returns = [float(row.get("estimated_account_return", 0.0)) for row in completed if "estimated_account_return" in row]
-    roe_values = [float(row.get("estimated_roe", 0.0)) for row in completed if "estimated_roe" in row]
+
+def evaluate_turbo_shadow_log(config_path: str, log_glob: str, output_dir: Path) -> dict[str, Any]:
+    rows = _read_rows(log_glob)
+    market = load_signal_market(config_path)
+    timestamp_to_step = {str(ts): idx for idx, ts in enumerate(market.timestamps)}
+    raw_completed, raw_pending = _evaluate_rows(rows, timestamp_to_step, market.close, "raw")
+    gated_completed, gated_pending = _evaluate_rows(rows, timestamp_to_step, market.close, "gated")
+    completed = gated_completed
+    pending_count = raw_pending + gated_pending
+
+    account_returns = [float(row.get("estimated_account_return", 0.0)) for row in gated_completed if "estimated_account_return" in row]
+    roe_values = [float(row.get("estimated_roe", 0.0)) for row in gated_completed if "estimated_roe" in row]
+    raw_account_returns = [float(row.get("estimated_account_return", 0.0)) for row in raw_completed if "estimated_account_return" in row]
+    raw_roe_values = [float(row.get("estimated_roe", 0.0)) for row in raw_completed if "estimated_roe" in row]
+    safe_blocked = [row for row in rows if _raw_view(row)["would_execute"] and _gated_view(row).get("blocked_by") in {"safe_regime", "safe_tail_risk"}]
+    safe_blocked_completed, safe_blocked_pending = _evaluate_rows(safe_blocked, timestamp_to_step, market.close, "raw")
+    safe_blocked_good = sum(1 for row in safe_blocked_completed if row.get("quality_label") == "GOOD_CANDIDATE")
+    safe_blocked_bad = sum(1 for row in safe_blocked_completed if row.get("quality_label") == "BAD_CANDIDATE")
     report = {
         "schema_version": "aegis_turbo_shadow_eval_v1",
         "created_at": _utc_stamp(),
@@ -157,6 +213,16 @@ def evaluate_turbo_shadow_log(config_path: str, log_glob: str, output_dir: Path)
         "short_count": int(sum(1 for row in rows if row.get("action") == "SHORT" and bool(row.get("would_execute")))),
         "hold_count": int(sum(1 for row in rows if row.get("action") == "HOLD")),
         "pending_count": int(pending_count),
+        "raw_signal_count": int(sum(1 for row in rows if _raw_view(row)["would_execute"])),
+        "gated_signal_count": int(sum(1 for row in rows if _gated_view(row)["would_execute"])),
+        "raw_estimated_win_rate": safe_float(np.mean(np.asarray(raw_account_returns) > 0.0)) if raw_account_returns else 0.0,
+        "raw_estimated_profit_factor": safe_float(profit_factor(np.asarray(raw_account_returns, dtype=np.float32))) if raw_account_returns else 0.0,
+        "raw_avg_estimated_roe": safe_float(np.mean(raw_roe_values)) if raw_roe_values else 0.0,
+        "gated_estimated_win_rate": safe_float(np.mean(np.asarray(account_returns) > 0.0)) if account_returns else 0.0,
+        "safe_blocked_count": int(len(safe_blocked)),
+        "safe_blocked_good_count": int(safe_blocked_good),
+        "safe_blocked_bad_count": int(safe_blocked_bad),
+        "safe_blocked_pending_count": int(safe_blocked_pending),
         "avg_estimated_roe": safe_float(np.mean(roe_values)) if roe_values else 0.0,
         "avg_estimated_account_return": safe_float(np.mean(account_returns)) if account_returns else 0.0,
         "win_rate": safe_float(np.mean(np.asarray(account_returns) > 0.0)) if account_returns else 0.0,

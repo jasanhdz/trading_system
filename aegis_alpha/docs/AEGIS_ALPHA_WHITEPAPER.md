@@ -2154,6 +2154,33 @@ execute siempre false.
 smart_leverage sigue 0.0.
 ```
 
+## Aegis Turbo v0.1.1 - Raw vs Gated Logging
+
+Fecha: 2026-05-05.
+
+La revisión shadow de 6h mostró que Safe bloqueó 100% de las evaluaciones por `regime_block`, mientras Turbo tuvo acuerdo reciente long 2/3 en toda la ventana. No hubo entradas gated, por lo que no se pudo medir MFE/MAE ni ROE hipotético.
+
+v0.1.1 agrega logging raw-vs-gated:
+
+```text
+raw:
+  intención Turbo antes de veto Safe/risk guard
+gated:
+  decisión final después de Safe/risk guard
+```
+
+Esto permite investigar si Safe está protegiendo correctamente o bloqueando oportunidades Turbo. No quita Safe, no activa live y no cambia el contrato legacy:
+
+```text
+mode: TURBO_SHADOW
+execute: false
+live_enabled: false
+production_allowed: false
+smart_leverage: 0.0
+```
+
+Los logs Turbo ahora guardan `raw_action`, `raw_turbo_score`, `raw_votes`, `gated_action`, `gated_reason` y `gated_blocked_by`.
+
 ## v0.6.0 - Shadow in Main Inference Endpoint
 
 Fecha: 2026-05-04.

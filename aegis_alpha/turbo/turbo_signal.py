@@ -148,6 +148,18 @@ def _turbo_score(direction: str, scores: dict[str, float | None], votes: dict[st
     return float(np.clip(score, 0.0, 1.0))
 
 
+def _raw_turbo_score(direction: str, scores: dict[str, float | None], votes: dict[str, int]) -> float:
+    agreement = votes.get(direction, 0) / max(len(DEFAULT_TURBO_CONFIG.lookback_days), 1)
+    side_values = [
+        float(value)
+        for key, value in scores.items()
+        if key.startswith(direction) and value is not None and np.isfinite(float(value))
+    ]
+    magnitude = max(side_values) if side_values else 0.0
+    magnitude_score = float(np.clip(magnitude / 0.003, 0.0, 1.0))
+    return float(np.clip(0.85 * agreement + 0.15 * magnitude_score, 0.0, 1.0))
+
+
 def _sizing(score: float) -> tuple[str, float, float]:
     cfg = DEFAULT_TURBO_CONFIG
     if score >= cfg.thresholds.min_turbo_score_premium:
@@ -155,6 +167,81 @@ def _sizing(score: float) -> tuple[str, float, float]:
     if score >= cfg.thresholds.min_turbo_score_shadow:
         return "normal", cfg.leverage.normal, cfg.position_fraction.normal
     return "blocked", 0.0, 0.0
+
+
+def _raw_decision(scores: dict[str, float | None], votes: dict[str, int]) -> dict[str, Any]:
+    cfg = DEFAULT_TURBO_CONFIG
+    direction = "long" if votes["long"] >= votes["short"] else "short"
+    agreement_count = max(votes["long"], votes["short"])
+    score = _raw_turbo_score(direction, scores, votes) if agreement_count else 0.0
+    confidence, leverage, fraction = _sizing(score)
+    base = {
+        "action": "HOLD",
+        "would_execute": False,
+        "reason": "insufficient_recent_model_agreement",
+        "turbo_score": score,
+        "confidence": "blocked",
+        "leverage_suggestion": 0.0,
+        "position_fraction": 0.0,
+        "votes": votes,
+        "recent_scores": scores,
+    }
+    if agreement_count < cfg.thresholds.min_agreement_count:
+        return base
+    if direction == "short" and not cfg.thresholds.experimental_short:
+        return {**base, "reason": "short_disabled_in_turbo_v010"}
+    if confidence == "blocked":
+        return {**base, "reason": "turbo_score_below_shadow_threshold"}
+    return {
+        "action": direction.upper(),
+        "would_execute": True,
+        "reason": f"raw_recent_{direction}_agreement_{agreement_count}_of_3",
+        "turbo_score": score,
+        "confidence": confidence,
+        "leverage_suggestion": leverage,
+        "position_fraction": fraction,
+        "votes": votes,
+        "recent_scores": scores,
+    }
+
+
+def _gated_decision(raw: dict[str, Any], risk_guard: dict[str, Any], safe_context: dict[str, Any]) -> dict[str, Any]:
+    action = str(raw.get("action", "HOLD")).upper()
+    if action not in {"LONG", "SHORT"} or not bool(raw.get("would_execute", False)):
+        return {
+            "action": action,
+            "would_execute": False,
+            "reason": str(raw.get("reason", "raw_hold")),
+            "blocked_by": None,
+        }
+    if risk_guard.get("blocked"):
+        return {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": f"risk_guard_{risk_guard.get('reason')}",
+            "blocked_by": "risk_guard",
+        }
+    if DEFAULT_TURBO_CONFIG.thresholds.block_if_safe_regime_toxic and safe_context.get("safe_reason") == "regime_block":
+        return {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": "safe_regime_block",
+            "blocked_by": "safe_regime",
+        }
+    tail = safe_context.get("tail_risk_score")
+    if tail is not None and float(tail) >= 0.50 and action == "LONG":
+        return {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": "safe_tail_risk_block",
+            "blocked_by": "safe_tail_risk",
+        }
+    return {
+        "action": action,
+        "would_execute": True,
+        "reason": str(raw.get("reason", "raw_passed_gates")),
+        "blocked_by": None,
+    }
 
 
 def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> dict[str, Any]:
@@ -172,114 +259,86 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
     try:
         x, timestamp = _current_feature(symbol)
         if x is None:
+            raw = {
+                "action": "HOLD",
+                "would_execute": False,
+                "reason": "insufficient_market_features",
+                "turbo_score": 0.0,
+                "confidence": "blocked",
+                "leverage_suggestion": 0.0,
+                "position_fraction": 0.0,
+                "votes": {"long": 0, "short": 0, "neutral": 0},
+                "recent_scores": base_scores,
+            }
+            gated = _gated_decision(raw, risk_guard, safe_context)
             return build_turbo_signal(
                 symbol=symbol,
-                reason="insufficient_market_features",
+                reason=gated["reason"],
                 recent_scores=base_scores,
                 safe_context=safe_context,
                 risk_guard=risk_guard,
+                raw=raw,
+                gated=gated,
             )
         scores, votes = _score_models(x)
         if all(value is None for value in scores.values()):
+            raw = {
+                "action": "HOLD",
+                "would_execute": False,
+                "reason": "no_recent_turbo_models",
+                "turbo_score": 0.0,
+                "confidence": "blocked",
+                "leverage_suggestion": 0.0,
+                "position_fraction": 0.0,
+                "votes": votes,
+                "recent_scores": scores,
+            }
+            gated = _gated_decision(raw, risk_guard, safe_context)
             return build_turbo_signal(
                 symbol=symbol,
                 timestamp=timestamp,
-                reason="no_recent_turbo_models",
+                reason=gated["reason"],
                 votes=votes,
                 recent_scores=scores,
                 safe_context=safe_context,
                 risk_guard=risk_guard,
+                raw=raw,
+                gated=gated,
             )
-        if risk_guard.get("blocked"):
-            return build_turbo_signal(
-                symbol=symbol,
-                timestamp=timestamp,
-                reason=f"risk_guard_{risk_guard.get('reason')}",
-                votes=votes,
-                recent_scores=scores,
-                safe_context=safe_context,
-                risk_guard=risk_guard,
-            )
-
-        direction = "long" if votes["long"] >= votes["short"] else "short"
-        agreement_count = max(votes["long"], votes["short"])
-        if agreement_count < cfg.thresholds.min_agreement_count:
-            return build_turbo_signal(
-                symbol=symbol,
-                timestamp=timestamp,
-                reason="insufficient_recent_model_agreement",
-                votes=votes,
-                recent_scores=scores,
-                safe_context=safe_context,
-                risk_guard=risk_guard,
-            )
-
-        if cfg.thresholds.block_if_safe_regime_toxic and safe_context.get("safe_reason") == "regime_block":
-            return build_turbo_signal(
-                symbol=symbol,
-                timestamp=timestamp,
-                reason="safe_regime_block",
-                votes=votes,
-                recent_scores=scores,
-                safe_context=safe_context,
-                risk_guard=risk_guard,
-            )
-
-        tail = safe_context.get("tail_risk_score")
-        if tail is not None and float(tail) >= 0.50 and direction == "long":
-            return build_turbo_signal(
-                symbol=symbol,
-                timestamp=timestamp,
-                reason="safe_tail_risk_block",
-                votes=votes,
-                recent_scores=scores,
-                safe_context=safe_context,
-                risk_guard=risk_guard,
-            )
-
-        if direction == "short" and not cfg.thresholds.experimental_short:
-            score = _turbo_score(direction, scores, votes, safe_context)
-            return build_turbo_signal(
-                symbol=symbol,
-                timestamp=timestamp,
-                reason="short_disabled_in_turbo_v010",
-                turbo_score=score,
-                votes=votes,
-                recent_scores=scores,
-                safe_context=safe_context,
-                risk_guard=risk_guard,
-            )
-
-        score = _turbo_score(direction, scores, votes, safe_context)
-        confidence, leverage, fraction = _sizing(score)
-        if confidence == "blocked":
-            return build_turbo_signal(
-                symbol=symbol,
-                timestamp=timestamp,
-                reason="turbo_score_below_shadow_threshold",
-                turbo_score=score,
-                votes=votes,
-                recent_scores=scores,
-                safe_context=safe_context,
-                risk_guard=risk_guard,
-            )
+        raw = _raw_decision(scores, votes)
+        gated = _gated_decision(raw, risk_guard, safe_context)
+        final_blocked = gated["action"] == "HOLD"
         return build_turbo_signal(
             symbol=symbol,
             timestamp=timestamp,
-            action=direction.upper(),
-            would_execute=True,
-            reason=f"recent_{direction}_agreement_{agreement_count}_of_3",
-            turbo_score=score,
-            confidence=confidence,
-            leverage_suggestion=leverage,
-            position_fraction=fraction,
+            action=str(gated["action"]),
+            would_execute=bool(gated["would_execute"]),
+            reason=str(gated["reason"]),
+            turbo_score=float(raw["turbo_score"]),
+            confidence="blocked" if final_blocked else str(raw["confidence"]),
+            leverage_suggestion=0.0 if final_blocked else float(raw["leverage_suggestion"]),
+            position_fraction=0.0 if final_blocked else float(raw["position_fraction"]),
             votes=votes,
             recent_scores=scores,
             safe_context=safe_context,
             risk_guard=risk_guard,
+            raw=raw,
+            gated=gated,
         )
     except Exception as exc:  # pragma: no cover - endpoint safety
         LOGGER.exception("turbo shadow evaluation failed")
+        raw = {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": "turbo_error",
+            "turbo_score": 0.0,
+            "confidence": "blocked",
+            "leverage_suggestion": 0.0,
+            "position_fraction": 0.0,
+            "votes": {"long": 0, "short": 0, "neutral": 0},
+            "recent_scores": base_scores,
+        }
+        gated = _gated_decision(raw, risk_guard, safe_context)
         return build_turbo_signal(
             symbol=symbol,
             enabled=False,
@@ -287,4 +346,6 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             recent_scores=base_scores,
             safe_context={**safe_context, "error": repr(exc)},
             risk_guard=risk_guard,
+            raw=raw,
+            gated=gated,
         )

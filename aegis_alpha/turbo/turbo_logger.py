@@ -17,6 +17,8 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
     target_dir.mkdir(parents=True, exist_ok=True)
     day = datetime.now(timezone.utc).strftime("%Y%m%d")
     path = target_dir / f"turbo_shadow_{day}.jsonl"
+    raw = signal.get("raw") or {}
+    gated = signal.get("gated") or {}
     row = {
         "logged_at": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
         "timestamp": signal.get("timestamp"),
@@ -36,6 +38,21 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
         "recent_scores": signal.get("recent_scores", {}),
         "safe_context": signal.get("safe_context", {}),
         "risk_guard": signal.get("risk_guard", {}),
+        "raw": raw,
+        "gated": gated,
+        "raw_action": raw.get("action"),
+        "raw_would_execute": bool(raw.get("would_execute", False)),
+        "raw_reason": raw.get("reason"),
+        "raw_turbo_score": float(raw.get("turbo_score", 0.0) or 0.0),
+        "raw_confidence": raw.get("confidence"),
+        "raw_leverage_suggestion": float(raw.get("leverage_suggestion", 0.0) or 0.0),
+        "raw_position_fraction": float(raw.get("position_fraction", 0.0) or 0.0),
+        "raw_votes": raw.get("votes", {}),
+        "raw_recent_scores": raw.get("recent_scores", {}),
+        "gated_action": gated.get("action"),
+        "gated_would_execute": bool(gated.get("would_execute", False)),
+        "gated_reason": gated.get("reason"),
+        "gated_blocked_by": gated.get("blocked_by"),
     }
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, sort_keys=True) + "\n")

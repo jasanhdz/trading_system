@@ -20,6 +20,8 @@ def build_turbo_signal(
     recent_scores: dict[str, float | None] | None = None,
     safe_context: dict[str, Any] | None = None,
     risk_guard: dict[str, Any] | None = None,
+    raw: dict[str, Any] | None = None,
+    gated: dict[str, Any] | None = None,
     enabled: bool = True,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
@@ -31,6 +33,32 @@ def build_turbo_signal(
     live_enabled = False
     production_allowed = False
     blocked = confidence == "blocked" or action == "HOLD"
+    default_votes = votes or {"long": 0, "short": 0, "neutral": 0}
+    default_scores = recent_scores or {
+        "long_7d": None,
+        "short_7d": None,
+        "long_14d": None,
+        "short_14d": None,
+        "long_30d": None,
+        "short_30d": None,
+    }
+    raw_payload = raw or {
+        "action": action,
+        "would_execute": bool(would_execute and action in {"LONG", "SHORT"}),
+        "reason": str(reason),
+        "turbo_score": float(turbo_score),
+        "confidence": str(confidence),
+        "leverage_suggestion": float(leverage_suggestion),
+        "position_fraction": float(position_fraction),
+        "votes": default_votes,
+        "recent_scores": default_scores,
+    }
+    gated_payload = gated or {
+        "action": action,
+        "would_execute": bool(would_execute and action in {"LONG", "SHORT"}),
+        "reason": str(reason),
+        "blocked_by": None,
+    }
     payload = {
         "mode": TURBO_MODE,
         "enabled": bool(enabled),
@@ -50,15 +78,10 @@ def build_turbo_signal(
         "take_profit_roe": float(cfg.exits.take_profit_roe),
         "trailing_activation_roe": float(cfg.exits.trailing_activation_roe),
         "trailing_callback_roe": float(cfg.exits.trailing_callback_roe),
-        "votes": votes or {"long": 0, "short": 0, "neutral": 0},
-        "recent_scores": recent_scores or {
-            "long_7d": None,
-            "short_7d": None,
-            "long_14d": None,
-            "short_14d": None,
-            "long_30d": None,
-            "short_30d": None,
-        },
+        "votes": default_votes,
+        "recent_scores": default_scores,
+        "raw": raw_payload,
+        "gated": gated_payload,
         "safe_context": safe_context or {
             "regime": "unknown",
             "tail_risk_score": None,
