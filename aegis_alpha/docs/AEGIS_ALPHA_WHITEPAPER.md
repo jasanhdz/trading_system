@@ -2090,6 +2090,70 @@ python3 aegis_alpha/tools/evaluate_shadow_log.py
 python3 aegis_alpha/tools/run_shadow_eval_daily.py
 ```
 
+## Aegis Turbo v0.1 - Recent Regime Adaptive Signal
+
+Fecha: 2026-05-04.
+
+Aegis Turbo v0.1 es un módulo experimental separado de Aegis Safe. Su objetivo es investigar si el reentrenamiento reciente tipo Phantom puede recuperar señales quirúrgicas en cuentas pequeñas, usando ventanas 7d/14d/30d y adaptación a régimen reciente.
+
+Turbo no es producción:
+
+```text
+mode: TURBO_SHADOW
+execute: false
+live_enabled: false
+production_allowed: false
+```
+
+Turbo puede sugerir apalancamiento teórico:
+
+```text
+conservative: 15x
+normal: 20x
+premium: 25x
+max_allowed: 30x
+```
+
+Pero esas sugerencias son paper/shadow. No cambian `smart_leverage`, no envían órdenes, no tocan Binance y no modifican el bot TypeScript.
+
+Componentes:
+
+```text
+aegis_alpha/turbo/config.py
+aegis_alpha/turbo/recent_dataset.py
+aegis_alpha/turbo/train_recent_edge.py
+aegis_alpha/turbo/evaluate_recent_models.py
+aegis_alpha/turbo/turbo_signal.py
+aegis_alpha/turbo/turbo_risk.py
+aegis_alpha/turbo/turbo_schema.py
+aegis_alpha/turbo/turbo_logger.py
+aegis_alpha/tools/evaluate_turbo_shadow_log.py
+aegis_alpha/tools/run_turbo_daily_retrain.py
+```
+
+Integración:
+
+```text
+POST /ml-v2/predict
+  aegis.shadow
+  aegis.turbo
+
+POST /ml-v2/turbo_shadow
+  bloque Turbo standalone para debug
+```
+
+Garantías:
+
+```text
+No live trading.
+No champion promotion.
+No PPO.
+No Binance execution.
+No cambios al bot TypeScript.
+execute siempre false.
+smart_leverage sigue 0.0.
+```
+
 ## v0.6.0 - Shadow in Main Inference Endpoint
 
 Fecha: 2026-05-04.

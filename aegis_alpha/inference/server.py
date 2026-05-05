@@ -23,6 +23,9 @@ from aegis_alpha.inference.schemas import (
     RiskContext,
     SignalQuality,
 )
+from aegis_alpha.turbo.turbo_logger import safe_log_turbo_shadow
+from aegis_alpha.turbo.turbo_schema import build_turbo_signal
+from aegis_alpha.turbo.turbo_signal import evaluate_turbo_shadow
 
 cfg = load_config(os.environ.get("AEGIS_CONFIG"))
 app = FastAPI(title="Aegis Alpha Inference", version=cfg.model.version)
@@ -110,6 +113,23 @@ def _aegis_shadow_block(symbol: str, request_source: str = "ml-v2-predict") -> d
     }
 
 
+def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
+    try:
+        turbo = evaluate_turbo_shadow(symbol, market_payload=aegis_block)
+    except Exception as exc:  # pragma: no cover - endpoint safety
+        turbo = build_turbo_signal(symbol=symbol, enabled=False, reason="turbo_error")
+        turbo["error"] = repr(exc)
+    turbo["execute"] = False
+    turbo["live_enabled"] = False
+    turbo["production_allowed"] = False
+    log_path, log_warning = safe_log_turbo_shadow(turbo)
+    if log_warning:
+        turbo["logging_warning"] = log_warning
+    elif log_path is not None:
+        turbo["log_path"] = str(log_path)
+    return turbo
+
+
 @app.get("/health")
 def health():
     return {
@@ -130,6 +150,7 @@ def predict(req: PredictRequest):
 def ml_v2_predict(req: PredictRequest):
     aegis_response = _build_response(req.symbol)
     aegis_block = _aegis_shadow_block(req.symbol, request_source="ml-v2-predict")
+    aegis_block["turbo"] = _turbo_shadow_block(req.symbol, aegis_block)
     aegis_block["model"] = _model_dump(aegis_response)
     return LegacyMlV2Response(
         symbol=req.symbol,
@@ -148,6 +169,11 @@ def ml_v2_predict(req: PredictRequest):
 @app.post("/ml-v2/shadow_signal")
 def ml_v2_shadow_signal(req: PredictRequest):
     return _aegis_shadow_block(req.symbol, request_source="ml-v2-shadow-signal")
+
+
+@app.post("/ml-v2/turbo_shadow")
+def ml_v2_turbo_shadow(req: PredictRequest):
+    return _turbo_shadow_block(req.symbol)
 
 
 @app.post("/ml-v2/exit_signal", response_model=ExitSignalResponse)
