@@ -259,7 +259,17 @@ def _gated_decision(raw: dict[str, Any], risk_guard: dict[str, Any], safe_contex
 
 def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> dict[str, Any]:
     cfg = DEFAULT_TURBO_CONFIG
-    risk_guard = build_turbo_risk_status()
+    risk_guard_warning = None
+    try:
+        risk_guard = build_turbo_risk_status()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        LOGGER.exception("turbo risk guard unavailable")
+        risk_guard_warning = repr(exc)
+        risk_guard = {
+            "blocked": True,
+            "reason": "risk_guard_unavailable",
+            "warning": risk_guard_warning,
+        }
     safe_context = _safe_context(symbol, market_payload)
     base_scores = {
         "long_7d": None,
@@ -321,7 +331,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
         raw = _raw_decision(scores, votes)
         gated = _gated_decision(raw, risk_guard, safe_context)
         final_blocked = gated["action"] == "HOLD"
-        return build_turbo_signal(
+        signal = build_turbo_signal(
             symbol=symbol,
             timestamp=timestamp,
             action=str(gated["action"]),
@@ -338,6 +348,10 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             raw=raw,
             gated=gated,
         )
+        if risk_guard_warning:
+            signal["risk_guard_warning"] = "history_parse_error_skipped"
+            signal["risk_guard_error"] = risk_guard_warning
+        return signal
     except Exception as exc:  # pragma: no cover - endpoint safety
         LOGGER.exception("turbo shadow evaluation failed")
         raw = {

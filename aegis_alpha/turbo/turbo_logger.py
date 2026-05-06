@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG
 
 
 LOGGER = logging.getLogger(__name__)
+_LOG_LOCK = threading.Lock()
 
 
 def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Path:
@@ -54,8 +56,10 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
         "gated_reason": gated.get("reason"),
         "gated_blocked_by": gated.get("blocked_by"),
     }
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row, sort_keys=True) + "\n")
+    line = json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n"
+    with _LOG_LOCK:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line)
     return path
 
 

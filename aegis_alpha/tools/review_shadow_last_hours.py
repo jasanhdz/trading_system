@@ -17,6 +17,7 @@ if __package__ is None or __package__ == "":
 
 from aegis_alpha.edge.common import profit_factor, safe_float  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
+from aegis_alpha.turbo.jsonl_utils import load_jsonl_safe  # noqa: E402
 
 
 DEFAULT_CONFIG = "aegis_alpha/configs/base.yaml"
@@ -70,23 +71,17 @@ def _event_dt(row: dict[str, Any]) -> datetime | None:
     return _parse_dt(row.get("logged_at")) or _parse_dt(row.get("timestamp"))
 
 
-def _read_jsonl(pattern: str) -> list[dict[str, Any]]:
+def _read_jsonl(pattern: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
     for item in sorted(glob.glob(pattern)):
         path = Path(item)
-        with path.open("r", encoding="utf-8") as f:
-            for line_no, line in enumerate(f, start=1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                row["_log_file"] = str(path)
-                row["_line_no"] = line_no
-                rows.append(row)
-    return rows
+        file_rows, file_errors = load_jsonl_safe(path)
+        for row in file_rows:
+            row["_log_file"] = str(path)
+        rows.extend(file_rows)
+        errors.extend(file_errors)
+    return rows, errors
 
 
 def _filter_rows(rows: list[dict[str, Any]], symbol: str, since: datetime) -> list[dict[str, Any]]:
@@ -536,8 +531,8 @@ def _diagnosis(
 def review_shadow_last_hours(hours: float, symbol: str, include_pending: bool, output_json: str | None = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=float(hours))
-    raw_safe = _read_jsonl(DEFAULT_SAFE_GLOB)
-    raw_turbo = _read_jsonl(DEFAULT_TURBO_GLOB)
+    raw_safe, safe_corrupt_errors = _read_jsonl(DEFAULT_SAFE_GLOB)
+    raw_turbo, turbo_corrupt_errors = _read_jsonl(DEFAULT_TURBO_GLOB)
     safe_rows = _filter_rows(raw_safe, symbol, since)
     turbo_rows = _filter_rows(raw_turbo, symbol, since)
     market_ctx = _market_context(DEFAULT_CONFIG) if safe_rows or turbo_rows else None
@@ -551,6 +546,13 @@ def review_shadow_last_hours(hours: float, symbol: str, include_pending: bool, o
         "symbol": symbol,
         "generated_at": now.strftime("%Y%m%dT%H%M%SZ"),
         "window_start": since.strftime("%Y%m%dT%H%M%SZ"),
+        "corrupted_lines": {
+            "safe_count": int(len(safe_corrupt_errors)),
+            "safe_files": sorted({str(error.get("path")) for error in safe_corrupt_errors}),
+            "turbo_count": int(len(turbo_corrupt_errors)),
+            "turbo_files": sorted({str(error.get("path")) for error in turbo_corrupt_errors}),
+            "first_turbo_error": turbo_corrupt_errors[0] if turbo_corrupt_errors else None,
+        },
         "safe_summary": _safe_summary(safe_rows, bool(raw_safe)),
         "turbo_summary": _turbo_summary(turbo_rows, bool(raw_turbo)),
         "safe_potential_entries": safe_entries,

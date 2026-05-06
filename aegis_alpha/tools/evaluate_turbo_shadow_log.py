@@ -17,6 +17,7 @@ if __package__ is None or __package__ == "":
 
 from aegis_alpha.edge.common import profit_factor, safe_float  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
+from aegis_alpha.turbo.jsonl_utils import load_jsonl_safe  # noqa: E402
 
 
 DEFAULT_CONFIG = "aegis_alpha/configs/base.yaml"
@@ -29,16 +30,15 @@ def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _read_rows(pattern: str) -> list[dict[str, Any]]:
+def _read_rows(pattern: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
     for item in sorted(glob.glob(pattern)):
         path = Path(item)
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    rows.append(json.loads(line))
-    return rows
+        file_rows, file_errors = load_jsonl_safe(path)
+        rows.extend(file_rows)
+        errors.extend(file_errors)
+    return rows, errors
 
 
 def _raw_view(row: dict[str, Any]) -> dict[str, Any]:
@@ -186,7 +186,7 @@ def _evaluate_rows(rows: list[dict[str, Any]], timestamp_to_step: dict[str, int]
 
 
 def evaluate_turbo_shadow_log(config_path: str, log_glob: str, output_dir: Path) -> dict[str, Any]:
-    rows = _read_rows(log_glob)
+    rows, corrupt_errors = _read_rows(log_glob)
     market = load_signal_market(config_path)
     timestamp_to_step = {str(ts): idx for idx, ts in enumerate(market.timestamps)}
     raw_completed, raw_pending = _evaluate_rows(rows, timestamp_to_step, market.close, "raw")
@@ -207,6 +207,9 @@ def evaluate_turbo_shadow_log(config_path: str, log_glob: str, output_dir: Path)
         "created_at": _utc_stamp(),
         "config_path": config_path,
         "log_glob": log_glob,
+        "corrupted_lines_count": int(len(corrupt_errors)),
+        "corrupted_files": sorted({str(error.get("path")) for error in corrupt_errors}),
+        "first_corrupt_error": corrupt_errors[0] if corrupt_errors else None,
         "total_evaluations": int(len(rows)),
         "would_execute_count": int(sum(1 for row in rows if bool(row.get("would_execute")))),
         "long_count": int(sum(1 for row in rows if row.get("action") == "LONG" and bool(row.get("would_execute")))),
