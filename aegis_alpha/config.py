@@ -44,6 +44,13 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class TurboConfig:
+    experimental_short: bool = False
+    max_turbo_trades_per_day: int = 3
+    max_consecutive_losses: int = 2
+
+
+@dataclass(frozen=True)
 class AegisConfig:
     symbol: str = "ETHUSDT"
     timeframe: str = "5m"
@@ -51,12 +58,14 @@ class AegisConfig:
     risk: RiskConfig = RiskConfig()
     gates: SignalGateConfig = SignalGateConfig()
     model: ModelConfig = ModelConfig()
+    turbo: TurboConfig = TurboConfig()
 
 
 def _coerce_config(raw: dict[str, Any]) -> AegisConfig:
     risk = RiskConfig(**raw.get("risk", {}))
     gates = SignalGateConfig(**raw.get("gates", {}))
     model = ModelConfig(**raw.get("model", {}))
+    turbo = TurboConfig(**raw.get("turbo", {}))
     return AegisConfig(
         symbol=raw.get("symbol", "ETHUSDT"),
         timeframe=raw.get("timeframe", "5m"),
@@ -64,6 +73,7 @@ def _coerce_config(raw: dict[str, Any]) -> AegisConfig:
         risk=risk,
         gates=gates,
         model=model,
+        turbo=turbo,
     )
 
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from functools import lru_cache
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +12,12 @@ import joblib
 import numpy as np
 
 from aegis_alpha.signals.common import load_signal_market
-from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG
+from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, get_runtime_turbo_config
+from aegis_alpha.turbo.snapshot_utils import (
+    TURBO_MAX_FEATURE_AGE_SECONDS,
+    load_turbo_snapshot_status,
+    turbo_snapshot_path,
+)
 from aegis_alpha.turbo.turbo_risk import build_turbo_risk_status
 from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 
@@ -18,6 +25,13 @@ from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 LOGGER = logging.getLogger(__name__)
 TURBO_ALLOW_MARKET_REBUILD = False
 _MODEL_CACHE: dict[str, Any | None] = {}
+_STALE_LOG_LAST_EMITTED: dict[str, float] = {}
+LAST_TURBO_RUNTIME: dict[str, Any] = {
+    "reason": None,
+    "turbo_score": None,
+    "freshness": None,
+    "snapshot_path": None,
+}
 
 
 def _model_path(side: str, lookback_days: int) -> Path:
@@ -55,6 +69,76 @@ def _safe_float(value: Any) -> float | None:
 
 def _cache_bucket(ttl_seconds: int = 60) -> int:
     return int(time.time() // ttl_seconds)
+
+
+def _utc_iso(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _stale_reason(rate_limited_key: str, freshness: dict[str, Any]) -> None:
+    last = _STALE_LOG_LAST_EMITTED.get(rate_limited_key, 0.0)
+    now = time.time()
+    if now - last < 600:
+        return
+    _STALE_LOG_LAST_EMITTED[rate_limited_key] = now
+    LOGGER.warning(
+        "turbo_snapshot_stale_blocked path=%s feature_timestamp=%s feature_age_seconds=%s max_feature_age_seconds=%s",
+        freshness.get("path"),
+        freshness.get("feature_timestamp"),
+        freshness.get("feature_age_seconds"),
+        freshness.get("max_feature_age_seconds"),
+    )
+
+
+def _snapshot_candidates() -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days:
+        path = turbo_snapshot_path(int(lookback_days))
+        status = load_turbo_snapshot_status(path, include_sample_count=False)
+        status["lookback_days"] = int(lookback_days)
+        candidates.append(status)
+    return candidates
+
+
+def _select_turbo_snapshot() -> dict[str, Any]:
+    candidates = [candidate for candidate in _snapshot_candidates() if candidate.get("exists")]
+    if not candidates:
+        return {
+            "path": None,
+            "freshness": {
+                "path": None,
+                "exists": False,
+                "snapshot_mtime": None,
+                "snapshot_age_seconds": None,
+                "feature_timestamp": None,
+                "feature_age_seconds": None,
+                "max_feature_age_seconds": TURBO_MAX_FEATURE_AGE_SECONDS,
+                "is_fresh": False,
+                "sample_count": 0,
+                "last_ts": None,
+                "error": "missing_turbo_snapshot",
+            },
+        }
+    candidates.sort(
+        key=lambda item: (
+            item.get("feature_timestamp") is not None,
+            item.get("feature_timestamp") or "",
+            item.get("snapshot_mtime") or "",
+            -int(item.get("lookback_days") or 0),
+        ),
+        reverse=True,
+    )
+    selected = candidates[0]
+    selected["path"] = selected.get("path") or str(turbo_snapshot_path(int(selected.get("lookback_days") or 7)))
+    return {"path": selected["path"], "freshness": selected}
 
 
 @lru_cache(maxsize=4)
@@ -101,14 +185,23 @@ def _safe_context(symbol: str, market_payload: dict[str, Any] | None) -> dict[st
 
 
 def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
-    for lookback_days in reversed(DEFAULT_TURBO_CONFIG.lookback_days):
-        dataset_path = DEFAULT_TURBO_CONFIG.data_dir / f"turbo_recent_{lookback_days}d.npz"
-        if dataset_path.exists():
-            data = np.load(dataset_path, allow_pickle=True)
+    selected = _select_turbo_snapshot()
+    path = selected.get("path")
+    if path:
+        data = np.load(path, allow_pickle=True)
+        live_x = data.get("live_X")
+        if live_x is not None and len(live_x) > 0:
+            x = np.asarray(live_x, dtype=np.float32)
+        else:
             x = np.asarray(data["X"], dtype=np.float32)
-            timestamps = data["timestamp"].astype(str)
-            if len(x) > 0:
-                return x[-1:].astype(np.float32), str(timestamps[-1])
+        feature_timestamp = data.get("feature_timestamp")
+        if feature_timestamp is not None:
+            if hasattr(feature_timestamp, "item"):
+                feature_timestamp = feature_timestamp.item()
+            return x[-1:].astype(np.float32), str(feature_timestamp)
+        timestamps = data["timestamp"].astype(str)
+        if len(x) > 0:
+            return x[-1:].astype(np.float32), str(timestamps[-1])
     if not TURBO_ALLOW_MARKET_REBUILD:
         return None, ""
     market = _load_market_cached(_cache_bucket())
@@ -174,16 +267,18 @@ def _raw_turbo_score(direction: str, scores: dict[str, float | None], votes: dic
 
 
 def _sizing(score: float) -> tuple[str, float, float]:
-    cfg = DEFAULT_TURBO_CONFIG
+    cfg = get_runtime_turbo_config()
     if score >= cfg.thresholds.min_turbo_score_premium:
         return "premium", cfg.leverage.premium, cfg.position_fraction.premium
     if score >= cfg.thresholds.min_turbo_score_shadow:
         return "normal", cfg.leverage.normal, cfg.position_fraction.normal
+    if cfg.thresholds.min_turbo_score_conservative > 0 and score >= cfg.thresholds.min_turbo_score_conservative:
+        return "conservative", cfg.leverage.conservative, cfg.position_fraction.conservative
     return "blocked", 0.0, 0.0
 
 
 def _raw_decision(scores: dict[str, float | None], votes: dict[str, int]) -> dict[str, Any]:
-    cfg = DEFAULT_TURBO_CONFIG
+    cfg = get_runtime_turbo_config()
     direction = "long" if votes["long"] >= votes["short"] else "short"
     agreement_count = max(votes["long"], votes["short"])
     score = _raw_turbo_score(direction, scores, votes) if agreement_count else 0.0
@@ -219,6 +314,7 @@ def _raw_decision(scores: dict[str, float | None], votes: dict[str, int]) -> dic
 
 
 def _gated_decision(raw: dict[str, Any], risk_guard: dict[str, Any], safe_context: dict[str, Any]) -> dict[str, Any]:
+    cfg = get_runtime_turbo_config()
     action = str(raw.get("action", "HOLD")).upper()
     if action not in {"LONG", "SHORT"} or not bool(raw.get("would_execute", False)):
         return {
@@ -234,7 +330,7 @@ def _gated_decision(raw: dict[str, Any], risk_guard: dict[str, Any], safe_contex
             "reason": f"risk_guard_{risk_guard.get('reason')}",
             "blocked_by": "risk_guard",
         }
-    if DEFAULT_TURBO_CONFIG.thresholds.block_if_safe_regime_toxic and safe_context.get("safe_reason") == "regime_block":
+    if cfg.thresholds.block_if_safe_regime_toxic and safe_context.get("safe_reason") == "regime_block":
         return {
             "action": "HOLD",
             "would_execute": False,
@@ -258,7 +354,6 @@ def _gated_decision(raw: dict[str, Any], risk_guard: dict[str, Any], safe_contex
 
 
 def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> dict[str, Any]:
-    cfg = DEFAULT_TURBO_CONFIG
     risk_guard_warning = None
     try:
         risk_guard = build_turbo_risk_status()
@@ -271,6 +366,121 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             "warning": risk_guard_warning,
         }
     safe_context = _safe_context(symbol, market_payload)
+    selected_snapshot = _select_turbo_snapshot()
+    freshness = selected_snapshot["freshness"]
+    freshness["feature_timestamp"] = _utc_iso(freshness.get("feature_timestamp"))
+    if freshness.get("snapshot_mtime"):
+        freshness["snapshot_mtime"] = _utc_iso(freshness.get("snapshot_mtime"))
+    if not freshness.get("feature_timestamp") or freshness.get("feature_age_seconds") is None:
+        _stale_reason(symbol, freshness)
+        reason = "missing_or_invalid_turbo_feature_timestamp"
+        raw = {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": reason,
+            "turbo_score": 0.0,
+            "confidence": "blocked",
+            "leverage_suggestion": 0.0,
+            "position_fraction": 0.0,
+            "votes": {"long": 0, "short": 0, "neutral": 0},
+            "recent_scores": {
+                "long_7d": None,
+                "short_7d": None,
+                "long_14d": None,
+                "short_14d": None,
+                "long_30d": None,
+                "short_30d": None,
+            },
+        }
+        gated = {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": reason,
+            "blocked_by": "stale_snapshot",
+        }
+        signal = build_turbo_signal(
+            symbol=symbol,
+            action="HOLD",
+            would_execute=False,
+            reason=reason,
+            turbo_score=0.0,
+            confidence="blocked",
+            leverage_suggestion=0.0,
+            position_fraction=0.0,
+            recent_scores=raw["recent_scores"],
+            safe_context=safe_context,
+            risk_guard=risk_guard,
+            freshness=freshness,
+            raw=raw,
+            gated=gated,
+            enabled=True,
+            timestamp=None,
+        )
+        LAST_TURBO_RUNTIME.update({
+            "reason": reason,
+            "turbo_score": 0.0,
+            "freshness": freshness,
+            "snapshot_path": selected_snapshot.get("path"),
+        })
+        if risk_guard_warning:
+            signal["risk_guard_warning"] = "history_parse_error_skipped"
+            signal["risk_guard_error"] = risk_guard_warning
+        return signal
+    if float(freshness["feature_age_seconds"]) > TURBO_MAX_FEATURE_AGE_SECONDS:
+        _stale_reason(symbol, freshness)
+        reason = "stale_turbo_snapshot"
+        raw = {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": reason,
+            "turbo_score": 0.0,
+            "confidence": "blocked",
+            "leverage_suggestion": 0.0,
+            "position_fraction": 0.0,
+            "votes": {"long": 0, "short": 0, "neutral": 0},
+            "recent_scores": {
+                "long_7d": None,
+                "short_7d": None,
+                "long_14d": None,
+                "short_14d": None,
+                "long_30d": None,
+                "short_30d": None,
+            },
+        }
+        gated = {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": reason,
+            "blocked_by": "stale_snapshot",
+        }
+        signal = build_turbo_signal(
+            symbol=symbol,
+            action="HOLD",
+            would_execute=False,
+            reason=reason,
+            turbo_score=0.0,
+            confidence="blocked",
+            leverage_suggestion=0.0,
+            position_fraction=0.0,
+            recent_scores=raw["recent_scores"],
+            safe_context=safe_context,
+            risk_guard=risk_guard,
+            freshness=freshness,
+            raw=raw,
+            gated=gated,
+            enabled=True,
+            timestamp=freshness.get("feature_timestamp"),
+        )
+        LAST_TURBO_RUNTIME.update({
+            "reason": reason,
+            "turbo_score": 0.0,
+            "freshness": freshness,
+            "snapshot_path": selected_snapshot.get("path"),
+        })
+        if risk_guard_warning:
+            signal["risk_guard_warning"] = "history_parse_error_skipped"
+            signal["risk_guard_error"] = risk_guard_warning
+        return signal
     base_scores = {
         "long_7d": None,
         "short_7d": None,
@@ -294,15 +504,23 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
                 "recent_scores": base_scores,
             }
             gated = _gated_decision(raw, risk_guard, safe_context)
-            return build_turbo_signal(
+            signal = build_turbo_signal(
                 symbol=symbol,
                 reason=gated["reason"],
                 recent_scores=base_scores,
                 safe_context=safe_context,
                 risk_guard=risk_guard,
+                freshness=freshness,
                 raw=raw,
                 gated=gated,
             )
+            LAST_TURBO_RUNTIME.update({
+                "reason": gated["reason"],
+                "turbo_score": 0.0,
+                "freshness": freshness,
+                "snapshot_path": selected_snapshot.get("path"),
+            })
+            return signal
         scores, votes = _score_models(x)
         if all(value is None for value in scores.values()):
             raw = {
@@ -317,7 +535,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
                 "recent_scores": scores,
             }
             gated = _gated_decision(raw, risk_guard, safe_context)
-            return build_turbo_signal(
+            signal = build_turbo_signal(
                 symbol=symbol,
                 timestamp=timestamp,
                 reason=gated["reason"],
@@ -325,9 +543,17 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
                 recent_scores=scores,
                 safe_context=safe_context,
                 risk_guard=risk_guard,
+                freshness=freshness,
                 raw=raw,
                 gated=gated,
             )
+            LAST_TURBO_RUNTIME.update({
+                "reason": gated["reason"],
+                "turbo_score": 0.0,
+                "freshness": freshness,
+                "snapshot_path": selected_snapshot.get("path"),
+            })
+            return signal
         raw = _raw_decision(scores, votes)
         gated = _gated_decision(raw, risk_guard, safe_context)
         final_blocked = gated["action"] == "HOLD"
@@ -345,9 +571,16 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             recent_scores=scores,
             safe_context=safe_context,
             risk_guard=risk_guard,
+            freshness=freshness,
             raw=raw,
             gated=gated,
         )
+        LAST_TURBO_RUNTIME.update({
+            "reason": str(gated["reason"]),
+            "turbo_score": float(raw["turbo_score"]),
+            "freshness": freshness,
+            "snapshot_path": selected_snapshot.get("path"),
+        })
         if risk_guard_warning:
             signal["risk_guard_warning"] = "history_parse_error_skipped"
             signal["risk_guard_error"] = risk_guard_warning
@@ -373,6 +606,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             recent_scores=base_scores,
             safe_context={**safe_context, "error": repr(exc)},
             risk_guard=risk_guard,
+            freshness=freshness,
             raw=raw,
             gated=gated,
         )

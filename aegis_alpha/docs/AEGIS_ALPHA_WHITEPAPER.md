@@ -186,6 +186,33 @@ Archivos:
 - `model_loader.py`: wrapper de carga de modelo. Si no existe champion en `models/champion/aegis_champion.zip`, devuelve predicción defensiva `IDLE`.
 - `gates.py`: reglas de gating de señal: top probability mínima, gap long/short mínimo y thresholds más estrictos para `chop`.
 
+Regla de documentación viva:
+
+- Todo cambio de arquitectura, sizing, risk guard, endpoint, config YAML, proceso PM2, contrato con TypeScript o bug operativo debe quedar registrado en este documento antes de cerrar la iteración.
+- Si el cambio cruza al bot TypeScript, también debe actualizarse `binance-futures-bot-ts/docs/AEGIS_TS_INTEGRATION_PLAN.md`.
+- La documentación debe explicar intención, archivos tocados, defaults/fallbacks y cómo validar/rollbackear.
+
+## 4. v0.6.5 - Turbo Snapshot Freshness Guard
+
+Se detectó un fallo operativo en Turbo: el `raw_score` quedaba estable porque la API leía la última feature desde snapshots precomputados en `aegis_alpha/data/processed/turbo_recent_*.npz`.
+
+Ese comportamiento solo es válido si el snapshot está fresco. Cuando el archivo envejece, la señal deja de representar mercado actual y no debe permitir ejecución.
+
+La versión v0.6.5 introduce estas reglas:
+
+1. `evaluate_turbo_shadow()` valida frescura antes de calcular la señal.
+2. Si la feature supera `TURBO_MAX_FEATURE_AGE_SECONDS` o el timestamp es inválido, Turbo devuelve `HOLD` defensivo con `reason=stale_turbo_snapshot` o `reason=missing_or_invalid_turbo_feature_timestamp`.
+3. El refresco de snapshots se mueve fuera del request path mediante `aegis_alpha/tools/refresh_turbo_snapshots.py`, para evitar reconstrucción pesada dentro de `/ml-v2/predict`.
+
+El estado de frescura también se expone en `/debug/runtime` y dentro de `aegis.turbo.freshness`, junto con `last_turbo_reason` y `last_turbo_score`.
+
+La intención operativa es simple:
+
+- no usar features viejas para decidir live;
+- mantener `/predict` rápido;
+- refrescar snapshots en un proceso aparte;
+- nunca reconstruir el dataset pesado dentro del endpoint de inferencia.
+
 ### `logs/`
 
 Especialización: estado y reportes runtime.
@@ -2180,6 +2207,80 @@ smart_leverage: 0.0
 ```
 
 Los logs Turbo ahora guardan `raw_action`, `raw_turbo_score`, `raw_votes`, `gated_action`, `gated_reason` y `gated_blocked_by`.
+
+## Aegis Turbo v0.1.2 - Hot-Reload Runtime Sizing Config
+
+Fecha: 2026-05-06.
+
+Problema detectado:
+
+- El bot TypeScript recibía `raw.position_fraction` desde Aegis Turbo y lo usaba para abrir margen real.
+- En Python, los buckets `conservative`, `normal` y `premium` estaban definidos en código dentro de `aegis_alpha/turbo/config.py`.
+- Eso obligaba a cambiar código y reiniciar el servicio para ajustar sizing, aunque el ajuste sea una decisión operativa de trading/riesgo.
+
+Solución:
+
+```text
+aegis_alpha/configs/turbo.yaml
+```
+
+contiene ahora la configuración runtime de Turbo:
+
+```yaml
+enabled: true
+sizing:
+  conservative:
+    leverage: 15.0
+    position_fraction: 0.08
+  normal:
+    leverage: 20.0
+    position_fraction: 0.12
+  premium:
+    leverage: 25.0
+    position_fraction: 0.18
+thresholds:
+  min_turbo_score_conservative: 0.0
+  min_turbo_score_shadow: 0.55
+  min_turbo_score_premium: 0.70
+```
+
+Comportamiento operativo:
+
+- `get_runtime_turbo_config()` lee `aegis_alpha/configs/turbo.yaml` con cache por `mtime_ns` y `size`.
+- Cada evaluación Turbo consulta esa config viva, por lo que cambiar el YAML modifica el siguiente sizing sin reiniciar Python.
+- Si el YAML no existe, está incompleto, tiene campos inválidos o `enabled: false`, se usan los defaults seguros del código.
+- `min_turbo_score_conservative: 0.0` mantiene el bucket conservador desactivado para preservar el comportamiento previo; puede activarse subiéndolo a un threshold real.
+- `AEGIS_TURBO_CONFIG=/ruta/turbo.yaml` permite apuntar a otro YAML sin cambiar código.
+
+Contrato con TypeScript:
+
+```text
+raw.position_fraction = bucket sizing de Aegis Turbo
+gate.positionFraction = min(raw.position_fraction, regime_config.live.yaml:aegis.turbo.position_fraction_cap)
+margin = wallet * (1 - fee_buffer_pct) * gate.positionFraction
+notional = margin * leverage
+```
+
+Por tanto, `position_fraction_cap` del bot TS es un techo, no una orden de usar todo el capital. La fracción efectiva nace en Aegis Turbo y ahora vive en `aegis_alpha/configs/turbo.yaml`.
+
+Observabilidad:
+
+- `/debug/runtime` expone `turbo_config_status` con path, existencia, tamaño, `mtime_ns` y `hot_reload=true`.
+- Los logs Turbo mantienen `raw_position_fraction`, `position_fraction`, `raw_leverage_suggestion` y `leverage_suggestion`.
+
+Validación realizada:
+
+```text
+/home/jasan/.venv_rocm62/bin/python -m compileall aegis_alpha/turbo aegis_alpha/inference/server.py aegis_alpha/tests/test_turbo_runtime_config.py
+```
+
+También se validó manualmente que modificar un YAML temporal cambia `normal.position_fraction` y que `_sizing()` toma el nuevo valor sin reiniciar el intérprete. `pytest` no estaba instalado en el Python del sistema ni en `/home/jasan/.venv_rocm62`, por lo que el test formal queda agregado pero no ejecutado en este entorno.
+
+Rollback:
+
+- Poner `enabled: false` en `aegis_alpha/configs/turbo.yaml` para volver a defaults de código.
+- Alternativamente borrar/renombrar el YAML; el loader cae a defaults.
+- Para desactivar ejecución live, mantener el rollback TS: `TRADING_MODE=AEGIS_SHADOW` o `AEGIS_LIVE_ENABLED=0`.
 
 ## v0.6.0 - Shadow in Main Inference Endpoint
 

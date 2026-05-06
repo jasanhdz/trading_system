@@ -16,6 +16,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.edge.common import safe_float  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
+from aegis_alpha.turbo.snapshot_utils import save_npz_atomic  # noqa: E402
 
 
 MAX_TARGET_HORIZON = 24
@@ -77,6 +78,8 @@ def build_recent_dataset(symbol: str, lookback_days: int, save: bool = True) -> 
     timestamps = timestamps[recent_mask]
 
     fee_round_trip = market.cfg.risk.total_fee * 2.0
+    live_feature = market.signal_features[-1:].astype(np.float32)
+    live_timestamp = str(market.timestamps[-1]) if len(market.timestamps) else None
     target_rows = [_target_stats(market.close, int(step), MAX_TARGET_HORIZON, fee_round_trip) for step in steps]
     future_return_6 = np.asarray([_target_stats(market.close, int(step), 6, fee_round_trip)["future_return"] for step in steps], dtype=np.float32)
     t12 = [_target_stats(market.close, int(step), 12, fee_round_trip) for step in steps]
@@ -112,6 +115,8 @@ def build_recent_dataset(symbol: str, lookback_days: int, save: bool = True) -> 
         "short_good_12": short_good_12,
         "regime": market.regimes[steps],
         "close": market.close[steps].astype(np.float32),
+        "live_X": live_feature,
+        "feature_timestamp": live_timestamp,
     }
 
     report = {
@@ -123,16 +128,18 @@ def build_recent_dataset(symbol: str, lookback_days: int, save: bool = True) -> 
         "date_start": str(timestamps[0]) if len(timestamps) else None,
         "date_end": str(timestamps[-1]) if len(timestamps) else None,
         "feature_count": int(x.shape[1]) if x.ndim == 2 else 0,
+        "feature_timestamp": live_timestamp,
         "long_good_rate": safe_float(np.mean(long_good_12)) if len(long_good_12) else 0.0,
         "short_good_rate": safe_float(np.mean(short_good_12)) if len(short_good_12) else 0.0,
         "avg_long_return": safe_float(np.mean(long_net_return_12)) if len(long_net_return_12) else 0.0,
         "avg_short_return": safe_float(np.mean(short_net_return_12)) if len(short_net_return_12) else 0.0,
+        "last_timestamp": str(timestamps[-1]) if len(timestamps) else None,
     }
 
     if save:
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
         cfg.log_dir.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cfg.data_dir / f"turbo_recent_{lookback_days}d.npz", **dataset)
+        save_npz_atomic(cfg.data_dir / f"turbo_recent_{lookback_days}d.npz", **dataset)
         report_path = cfg.log_dir / f"turbo_recent_dataset_{_utc_stamp()}.json"
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
         report["dataset_path"] = str(cfg.data_dir / f"turbo_recent_{lookback_days}d.npz")

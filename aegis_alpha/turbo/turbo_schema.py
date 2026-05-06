@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, TURBO_MODE
+from aegis_alpha.turbo.config import TURBO_MODE, get_runtime_turbo_config
 
 
 def build_turbo_signal(
@@ -20,12 +20,13 @@ def build_turbo_signal(
     recent_scores: dict[str, float | None] | None = None,
     safe_context: dict[str, Any] | None = None,
     risk_guard: dict[str, Any] | None = None,
+    freshness: dict[str, Any] | None = None,
     raw: dict[str, Any] | None = None,
     gated: dict[str, Any] | None = None,
     enabled: bool = True,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
-    cfg = DEFAULT_TURBO_CONFIG
+    cfg = get_runtime_turbo_config()
     action = str(action).upper()
     if action not in {"HOLD", "LONG", "SHORT"}:
         action = "HOLD"
@@ -89,6 +90,15 @@ def build_turbo_signal(
             "safe_reason": "safe_context_unavailable",
         },
         "risk_guard": risk_guard or {"blocked": False, "reason": None},
+        "freshness": freshness or {
+            "feature_timestamp": None,
+            "feature_age_seconds": None,
+            "snapshot_mtime": None,
+            "snapshot_age_seconds": None,
+            "max_feature_age_seconds": None,
+            "is_fresh": True,
+            "stale": False,
+        },
     }
     payload["execute"] = False
     payload["live_enabled"] = False

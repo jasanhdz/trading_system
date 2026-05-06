@@ -25,3 +25,7 @@ model:
   bc_path: aegis_alpha/models/bc/aegis_bc_prudent.zip
   window_size: 64
   n_features: 21
+
+turbo:
+  experimental_short: true
+  max_turbo_trades_per_day: 0

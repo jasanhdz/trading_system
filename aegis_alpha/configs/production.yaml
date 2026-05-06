@@ -9,3 +9,7 @@ gates:
   min_long_short_gap: 0.15
   chop_min_top_prob: 0.72
   chop_min_gap: 0.20
+
+turbo:
+  experimental_short: true
+  max_turbo_trades_per_day: 0

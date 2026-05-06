@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG
+from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, get_runtime_turbo_config
 from aegis_alpha.turbo.jsonl_utils import load_jsonl_safe
 
 
@@ -67,8 +67,10 @@ def count_recent_losses_if_evaluated(rows: list[dict[str, Any]] | None = None) -
 
 
 def should_block_turbo_today(rows: list[dict[str, Any]] | None = None) -> tuple[bool, str | None]:
-    cfg = DEFAULT_TURBO_CONFIG.risk
+    cfg = get_runtime_turbo_config().risk
     history = rows if rows is not None else load_turbo_shadow_history()
+    if cfg.max_turbo_trades_per_day <= 0:
+        return False, None
     if count_today_turbo_signals(history) >= cfg.max_turbo_trades_per_day:
         return True, "max_turbo_trades_per_day"
     if count_recent_losses_if_evaluated(history) >= cfg.max_consecutive_losses:
@@ -77,6 +79,7 @@ def should_block_turbo_today(rows: list[dict[str, Any]] | None = None) -> tuple[
 
 
 def build_turbo_risk_status(rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    cfg = get_runtime_turbo_config().risk
     history = rows if rows is not None else load_turbo_shadow_history()
     blocked, reason = should_block_turbo_today(history)
     return {
@@ -84,6 +87,6 @@ def build_turbo_risk_status(rows: list[dict[str, Any]] | None = None) -> dict[st
         "reason": reason,
         "today_signal_count": count_today_turbo_signals(history),
         "recent_loss_count": count_recent_losses_if_evaluated(history),
-        "max_turbo_trades_per_day": DEFAULT_TURBO_CONFIG.risk.max_turbo_trades_per_day,
-        "max_consecutive_losses": DEFAULT_TURBO_CONFIG.risk.max_consecutive_losses,
+        "max_turbo_trades_per_day": cfg.max_turbo_trades_per_day,
+        "max_consecutive_losses": cfg.max_consecutive_losses,
     }

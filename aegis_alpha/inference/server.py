@@ -30,10 +30,12 @@ from aegis_alpha.inference.schemas import (
     RiskContext,
     SignalQuality,
 )
+from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, runtime_turbo_config_status
 from aegis_alpha.turbo.turbo_logger import safe_log_turbo_shadow
+from aegis_alpha.turbo.snapshot_utils import load_turbo_snapshot_status, turbo_snapshot_path
 from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 from aegis_alpha.turbo import turbo_signal
-from aegis_alpha.turbo.turbo_signal import evaluate_turbo_shadow, model_cache_keys
+from aegis_alpha.turbo.turbo_signal import LAST_TURBO_RUNTIME, evaluate_turbo_shadow, model_cache_keys
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("AEGIS_LOG_LEVEL", "WARNING").upper(), logging.WARNING),
@@ -105,6 +107,51 @@ def _model_dump(payload):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _runtime_turbo_snapshot_status() -> dict[str, Any]:
+    statuses = {
+        f"{lookback_days}d": load_turbo_snapshot_status(turbo_snapshot_path(int(lookback_days)), include_sample_count=True)
+        for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days
+    }
+    selected_key = None
+    selected_status = None
+    for key, status in statuses.items():
+        if not status.get("exists"):
+            continue
+        if selected_status is None:
+            selected_key, selected_status = key, status
+            continue
+        current_ts = status.get("feature_timestamp") or ""
+        selected_ts = selected_status.get("feature_timestamp") or ""
+        current_mtime = status.get("snapshot_mtime") or ""
+        selected_mtime = selected_status.get("snapshot_mtime") or ""
+        if (current_ts, current_mtime) > (selected_ts, selected_mtime):
+            selected_key, selected_status = key, status
+    if selected_status is None:
+        selected_status = next(iter(statuses.values())) if statuses else {
+            "path": None,
+            "exists": False,
+            "snapshot_mtime": None,
+            "snapshot_age_seconds": None,
+            "feature_timestamp": None,
+            "feature_age_seconds": None,
+            "max_feature_age_seconds": None,
+            "is_fresh": False,
+            "sample_count": 0,
+            "last_ts": None,
+        }
+    return {
+        "selected": selected_key,
+        "last_feature_timestamp": selected_status.get("feature_timestamp") or selected_status.get("last_ts"),
+        "feature_age_seconds": selected_status.get("feature_age_seconds"),
+        "is_fresh": selected_status.get("is_fresh", False),
+        "max_feature_age_seconds": selected_status.get("max_feature_age_seconds"),
+        "snapshot_paths": {key: value.get("path") for key, value in statuses.items()},
+        "snapshot_statuses": statuses,
+        "last_turbo_reason": LAST_TURBO_RUNTIME.get("reason"),
+        "last_turbo_score": LAST_TURBO_RUNTIME.get("turbo_score"),
+    }
 
 
 def _defensive_aegis_block(symbol: str, reason: str, error: str | None = None) -> dict:
@@ -269,6 +316,8 @@ def debug_runtime():
         },
         "last_predict_latency": {k: v for k, v in LAST_PREDICT.items() if k.endswith("_ms") or k == "fallback_used"},
         "last_predict_error": LAST_PREDICT.get("error"),
+        "turbo_snapshot_status": _runtime_turbo_snapshot_status(),
+        "turbo_config_status": runtime_turbo_config_status(),
         "shadow_available": True,
         "turbo_available": True,
         "python_version": sys.version,

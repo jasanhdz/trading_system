@@ -40,6 +40,8 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
         "recent_scores": signal.get("recent_scores", {}),
         "safe_context": signal.get("safe_context", {}),
         "risk_guard": signal.get("risk_guard", {}),
+        "freshness": signal.get("freshness", {}),
+        "stale": not bool((signal.get("freshness") or {}).get("is_fresh", True)),
         "raw": raw,
         "gated": gated,
         "raw_action": raw.get("action"),
