@@ -19,6 +19,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.edge.common import safe_float, save_model_bundle  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, TURBO_VERSION  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
+from aegis_alpha.turbo.snapshot_utils import normalize_turbo_symbol, turbo_symbol_model_dir  # noqa: E402
 
 
 MIN_TRAIN_SAMPLES = 200
@@ -29,15 +30,18 @@ def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _model_path(side: str, lookback_days: int) -> Path:
-    return DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+def _model_path(side: str, lookback_days: int, symbol: str) -> Path:
+    legacy_path = DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+    if normalize_turbo_symbol(symbol) == normalize_turbo_symbol(DEFAULT_TURBO_CONFIG.symbol):
+        return legacy_path
+    return turbo_symbol_model_dir(symbol) / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
 
 
-def _train_one(dataset: dict[str, Any], side: str, lookback_days: int) -> dict[str, Any]:
+def _train_one(dataset: dict[str, Any], side: str, lookback_days: int, symbol: str) -> dict[str, Any]:
     x = np.asarray(dataset["X"], dtype=np.float32)
     target_key = "long_net_return_12" if side == "long" else "short_net_return_12"
     y = np.asarray(dataset[target_key], dtype=np.float32)
-    path = _model_path(side, lookback_days)
+    path = _model_path(side, lookback_days, symbol)
 
     if len(x) < MIN_TRAIN_SAMPLES or len(np.unique(y)) < 2:
         return {
@@ -103,7 +107,8 @@ def _train_one(dataset: dict[str, Any], side: str, lookback_days: int) -> dict[s
 
 def train_recent_edge_models(symbol: str = DEFAULT_TURBO_CONFIG.symbol, lookbacks: tuple[int, ...] | None = None) -> dict[str, Any]:
     cfg = DEFAULT_TURBO_CONFIG
-    cfg.model_dir.mkdir(parents=True, exist_ok=True)
+    symbol = normalize_turbo_symbol(symbol)
+    turbo_symbol_model_dir(symbol).mkdir(parents=True, exist_ok=True)
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
     reports: list[dict[str, Any]] = []
     dataset_reports: list[dict[str, Any]] = []
@@ -111,8 +116,8 @@ def train_recent_edge_models(symbol: str = DEFAULT_TURBO_CONFIG.symbol, lookback
         built = build_recent_dataset(symbol, int(lookback_days), save=True)
         dataset = built["dataset"]
         dataset_reports.append(built["report"])
-        reports.append(_train_one(dataset, "long", int(lookback_days)))
-        reports.append(_train_one(dataset, "short", int(lookback_days)))
+        reports.append(_train_one(dataset, "long", int(lookback_days), symbol))
+        reports.append(_train_one(dataset, "short", int(lookback_days), symbol))
 
     report = {
         "schema_version": "aegis_turbo_train_report_v1",

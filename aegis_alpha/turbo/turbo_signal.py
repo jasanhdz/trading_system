@@ -16,6 +16,8 @@ from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, get_runtime_turbo_con
 from aegis_alpha.turbo.snapshot_utils import (
     TURBO_MAX_FEATURE_AGE_SECONDS,
     load_turbo_snapshot_status,
+    normalize_turbo_symbol,
+    turbo_symbol_model_dir,
     turbo_snapshot_path,
 )
 from aegis_alpha.turbo.turbo_risk import build_turbo_risk_status
@@ -32,10 +34,14 @@ LAST_TURBO_RUNTIME: dict[str, Any] = {
     "freshness": None,
     "snapshot_path": None,
 }
+LAST_TURBO_RUNTIME_BY_SYMBOL: dict[str, dict[str, Any]] = {}
 
 
-def _model_path(side: str, lookback_days: int) -> Path:
-    return DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+def _model_path(side: str, lookback_days: int, symbol: str) -> Path:
+    legacy_path = DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+    if normalize_turbo_symbol(symbol) == normalize_turbo_symbol(DEFAULT_TURBO_CONFIG.symbol) and legacy_path.exists():
+        return legacy_path
+    return turbo_symbol_model_dir(symbol) / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
 
 
 def _load_estimator(path_text: str) -> Any | None:
@@ -56,6 +62,22 @@ def _load_estimator(path_text: str) -> Any | None:
 
 def model_cache_keys() -> list[str]:
     return sorted(_MODEL_CACHE.keys())
+
+
+def runtime_symbols() -> list[str]:
+    symbols = set(LAST_TURBO_RUNTIME_BY_SYMBOL.keys())
+    symbols.add(normalize_turbo_symbol(DEFAULT_TURBO_CONFIG.symbol))
+    return sorted(symbols)
+
+
+def runtime_status_by_symbol() -> dict[str, dict[str, Any]]:
+    return {symbol: dict(status) for symbol, status in LAST_TURBO_RUNTIME_BY_SYMBOL.items()}
+
+
+def _update_runtime(symbol: str, payload: dict[str, Any]) -> None:
+    normalized = normalize_turbo_symbol(symbol)
+    LAST_TURBO_RUNTIME.update(payload)
+    LAST_TURBO_RUNTIME_BY_SYMBOL[normalized] = dict(payload)
 
 
 def _safe_float(value: Any) -> float | None:
@@ -98,18 +120,18 @@ def _stale_reason(rate_limited_key: str, freshness: dict[str, Any]) -> None:
     )
 
 
-def _snapshot_candidates() -> list[dict[str, Any]]:
+def _snapshot_candidates(symbol: str) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days:
-        path = turbo_snapshot_path(int(lookback_days))
+        path = turbo_snapshot_path(int(lookback_days), symbol)
         status = load_turbo_snapshot_status(path, include_sample_count=False)
         status["lookback_days"] = int(lookback_days)
         candidates.append(status)
     return candidates
 
 
-def _select_turbo_snapshot() -> dict[str, Any]:
-    candidates = [candidate for candidate in _snapshot_candidates() if candidate.get("exists")]
+def _select_turbo_snapshot(symbol: str) -> dict[str, Any]:
+    candidates = [candidate for candidate in _snapshot_candidates(symbol) if candidate.get("exists")]
     if not candidates:
         return {
             "path": None,
@@ -137,7 +159,7 @@ def _select_turbo_snapshot() -> dict[str, Any]:
         reverse=True,
     )
     selected = candidates[0]
-    selected["path"] = selected.get("path") or str(turbo_snapshot_path(int(selected.get("lookback_days") or 7)))
+    selected["path"] = selected.get("path") or str(turbo_snapshot_path(int(selected.get("lookback_days") or 7), symbol))
     return {"path": selected["path"], "freshness": selected}
 
 
@@ -185,7 +207,7 @@ def _safe_context(symbol: str, market_payload: dict[str, Any] | None) -> dict[st
 
 
 def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
-    selected = _select_turbo_snapshot()
+    selected = _select_turbo_snapshot(symbol)
     path = selected.get("path")
     if path:
         data = np.load(path, allow_pickle=True)
@@ -204,7 +226,7 @@ def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
             return x[-1:].astype(np.float32), str(timestamps[-1])
     if not TURBO_ALLOW_MARKET_REBUILD:
         return None, ""
-    market = _load_market_cached(_cache_bucket())
+    market = load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=symbol)
     if len(market.signal_features) == 0:
         return None, ""
     # Aegis is currently single-symbol; use the configured market if the
@@ -212,12 +234,12 @@ def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
     return market.signal_features[-1:].astype(np.float32), str(market.timestamps[market.steps[-1]])
 
 
-def _score_models(x: np.ndarray) -> tuple[dict[str, float | None], dict[str, int]]:
+def _score_models(x: np.ndarray, symbol: str) -> tuple[dict[str, float | None], dict[str, int]]:
     scores: dict[str, float | None] = {}
     votes = {"long": 0, "short": 0, "neutral": 0}
     for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days:
-        long_est = _load_estimator(str(_model_path("long", int(lookback_days))))
-        short_est = _load_estimator(str(_model_path("short", int(lookback_days))))
+        long_est = _load_estimator(str(_model_path("long", int(lookback_days), symbol)))
+        short_est = _load_estimator(str(_model_path("short", int(lookback_days), symbol)))
         long_score = float(long_est.predict(x)[0]) if long_est is not None else None
         short_score = float(short_est.predict(x)[0]) if short_est is not None else None
         scores[f"long_{lookback_days}d"] = long_score
@@ -354,6 +376,7 @@ def _gated_decision(raw: dict[str, Any], risk_guard: dict[str, Any], safe_contex
 
 
 def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> dict[str, Any]:
+    symbol = normalize_turbo_symbol(symbol)
     risk_guard_warning = None
     try:
         risk_guard = build_turbo_risk_status()
@@ -366,11 +389,62 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             "warning": risk_guard_warning,
         }
     safe_context = _safe_context(symbol, market_payload)
-    selected_snapshot = _select_turbo_snapshot()
+    selected_snapshot = _select_turbo_snapshot(symbol)
     freshness = selected_snapshot["freshness"]
     freshness["feature_timestamp"] = _utc_iso(freshness.get("feature_timestamp"))
     if freshness.get("snapshot_mtime"):
         freshness["snapshot_mtime"] = _utc_iso(freshness.get("snapshot_mtime"))
+    if not selected_snapshot.get("path") or not freshness.get("exists"):
+        reason = "missing_turbo_artifacts_for_symbol"
+        raw = {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": reason,
+            "turbo_score": 0.0,
+            "confidence": "blocked",
+            "leverage_suggestion": 0.0,
+            "position_fraction": 0.0,
+            "votes": {"long": 0, "short": 0, "neutral": 0},
+            "recent_scores": {
+                "long_7d": None,
+                "short_7d": None,
+                "long_14d": None,
+                "short_14d": None,
+                "long_30d": None,
+                "short_30d": None,
+            },
+        }
+        gated = {
+            "action": "HOLD",
+            "would_execute": False,
+            "reason": reason,
+            "blocked_by": "missing_artifacts",
+        }
+        signal = build_turbo_signal(
+            symbol=symbol,
+            action="HOLD",
+            would_execute=False,
+            reason=reason,
+            turbo_score=0.0,
+            confidence="blocked",
+            leverage_suggestion=0.0,
+            position_fraction=0.0,
+            recent_scores=raw["recent_scores"],
+            safe_context=safe_context,
+            risk_guard=risk_guard,
+            freshness=freshness,
+            raw=raw,
+            gated=gated,
+            enabled=False,
+            timestamp=None,
+        )
+        _update_runtime(symbol, {
+            "reason": reason,
+            "turbo_score": 0.0,
+            "freshness": freshness,
+            "snapshot_path": selected_snapshot.get("path"),
+        })
+        return signal
     if not freshness.get("feature_timestamp") or freshness.get("feature_age_seconds") is None:
         _stale_reason(symbol, freshness)
         reason = "missing_or_invalid_turbo_feature_timestamp"
@@ -416,7 +490,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             enabled=True,
             timestamp=None,
         )
-        LAST_TURBO_RUNTIME.update({
+        _update_runtime(symbol, {
             "reason": reason,
             "turbo_score": 0.0,
             "freshness": freshness,
@@ -471,7 +545,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             enabled=True,
             timestamp=freshness.get("feature_timestamp"),
         )
-        LAST_TURBO_RUNTIME.update({
+        _update_runtime(symbol, {
             "reason": reason,
             "turbo_score": 0.0,
             "freshness": freshness,
@@ -514,14 +588,14 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
                 raw=raw,
                 gated=gated,
             )
-            LAST_TURBO_RUNTIME.update({
+            _update_runtime(symbol, {
                 "reason": gated["reason"],
                 "turbo_score": 0.0,
                 "freshness": freshness,
                 "snapshot_path": selected_snapshot.get("path"),
             })
             return signal
-        scores, votes = _score_models(x)
+        scores, votes = _score_models(x, symbol)
         if all(value is None for value in scores.values()):
             raw = {
                 "action": "HOLD",
@@ -547,7 +621,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
                 raw=raw,
                 gated=gated,
             )
-            LAST_TURBO_RUNTIME.update({
+            _update_runtime(symbol, {
                 "reason": gated["reason"],
                 "turbo_score": 0.0,
                 "freshness": freshness,
@@ -575,7 +649,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             raw=raw,
             gated=gated,
         )
-        LAST_TURBO_RUNTIME.update({
+        _update_runtime(symbol, {
             "reason": str(gated["reason"]),
             "turbo_score": float(raw["turbo_score"]),
             "freshness": freshness,

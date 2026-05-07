@@ -18,6 +18,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.edge.common import profit_factor, safe_float  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, TURBO_VERSION  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
+from aegis_alpha.turbo.snapshot_utils import normalize_turbo_symbol, turbo_symbol_model_dir  # noqa: E402
 
 
 BUCKETS = (0.10, 0.05, 0.03)
@@ -27,8 +28,11 @@ def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _model_path(side: str, lookback_days: int) -> Path:
-    return DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+def _model_path(side: str, lookback_days: int, symbol: str) -> Path:
+    legacy_path = DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+    if normalize_turbo_symbol(symbol) == normalize_turbo_symbol(DEFAULT_TURBO_CONFIG.symbol):
+        return legacy_path
+    return turbo_symbol_model_dir(symbol) / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
 
 
 def _load_estimator(path: Path) -> Any | None:
@@ -57,6 +61,7 @@ def _bucket_eval(scores: np.ndarray, returns: np.ndarray, mfe: np.ndarray, mae: 
 
 def evaluate_recent_models(symbol: str = DEFAULT_TURBO_CONFIG.symbol) -> dict[str, Any]:
     cfg = DEFAULT_TURBO_CONFIG
+    symbol = normalize_turbo_symbol(symbol)
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
     per_model: list[dict[str, Any]] = []
     latest_votes: list[str] = []
@@ -76,7 +81,7 @@ def evaluate_recent_models(symbol: str = DEFAULT_TURBO_CONFIG.symbol) -> dict[st
         latest_margin = 0.0
         side_scores: dict[str, float] = {}
         for side, returns in (("long", long_return), ("short", short_return)):
-            estimator = _load_estimator(_model_path(side, int(lookback_days)))
+            estimator = _load_estimator(_model_path(side, int(lookback_days), symbol))
             if estimator is None or len(x_val) == 0:
                 per_model.append({"lookback_days": int(lookback_days), "side": side, "model_status": "missing", "count": 0})
                 continue

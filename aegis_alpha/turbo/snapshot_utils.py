@@ -41,8 +41,27 @@ def _normalize_path(path: Path | str) -> Path:
     return Path(path)
 
 
-def turbo_snapshot_path(lookback_days: int) -> Path:
-    return DEFAULT_TURBO_CONFIG.data_dir / f"turbo_recent_{lookback_days}d.npz"
+def normalize_turbo_symbol(symbol: str | None = None) -> str:
+    raw = symbol or DEFAULT_TURBO_CONFIG.symbol
+    return str(raw).replace("/", "").strip().upper()
+
+
+def turbo_symbol_data_dir(symbol: str | None = None) -> Path:
+    return DEFAULT_TURBO_CONFIG.data_dir / "turbo" / normalize_turbo_symbol(symbol)
+
+
+def turbo_symbol_model_dir(symbol: str | None = None) -> Path:
+    return DEFAULT_TURBO_CONFIG.model_dir / normalize_turbo_symbol(symbol)
+
+
+def turbo_snapshot_path(lookback_days: int, symbol: str | None = None) -> Path:
+    legacy_path = DEFAULT_TURBO_CONFIG.data_dir / f"turbo_recent_{lookback_days}d.npz"
+    if symbol is None:
+        return legacy_path
+    symbol_path = turbo_symbol_data_dir(symbol) / f"turbo_recent_{lookback_days}d.npz"
+    if normalize_turbo_symbol(symbol) == normalize_turbo_symbol(DEFAULT_TURBO_CONFIG.symbol) and legacy_path.exists():
+        return legacy_path
+    return symbol_path
 
 
 def load_turbo_snapshot_status(path: Path | str, include_sample_count: bool = False) -> dict[str, Any]:
@@ -110,17 +129,17 @@ def load_turbo_snapshot_status(path: Path | str, include_sample_count: bool = Fa
     return freshness
 
 
-def load_turbo_freshness(lookback_days: int = 7) -> dict[str, Any]:
-    return load_turbo_snapshot_status(turbo_snapshot_path(lookback_days))
+def load_turbo_freshness(lookback_days: int = 7, symbol: str | None = None) -> dict[str, Any]:
+    return load_turbo_snapshot_status(turbo_snapshot_path(lookback_days, symbol))
 
 
-def select_freshest_turbo_snapshot() -> dict[str, Any]:
-    candidates = [load_turbo_snapshot_status(turbo_snapshot_path(int(lookback_days)), include_sample_count=False) for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days]
+def select_freshest_turbo_snapshot(symbol: str | None = None) -> dict[str, Any]:
+    candidates = [load_turbo_snapshot_status(turbo_snapshot_path(int(lookback_days), symbol), include_sample_count=False) for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days]
     candidates = [candidate for candidate in candidates if candidate.get("exists")]
     if not candidates:
         return {
             "path": None,
-            "freshness": load_turbo_snapshot_status(turbo_snapshot_path(int(DEFAULT_TURBO_CONFIG.lookback_days[0])), include_sample_count=False)
+            "freshness": load_turbo_snapshot_status(turbo_snapshot_path(int(DEFAULT_TURBO_CONFIG.lookback_days[0]), symbol), include_sample_count=False)
             if DEFAULT_TURBO_CONFIG.lookback_days
             else {
                 "path": None,
@@ -145,7 +164,7 @@ def select_freshest_turbo_snapshot() -> dict[str, Any]:
         reverse=True,
     )
     selected = candidates[0]
-    selected["path"] = selected.get("path") or str(turbo_snapshot_path(int(selected.get("lookback_days") or 7)))
+    selected["path"] = selected.get("path") or str(turbo_snapshot_path(int(selected.get("lookback_days") or 7), symbol))
     return {"path": selected["path"], "freshness": selected}
 
 

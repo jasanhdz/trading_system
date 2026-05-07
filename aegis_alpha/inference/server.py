@@ -32,10 +32,10 @@ from aegis_alpha.inference.schemas import (
 )
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG, runtime_turbo_config_status
 from aegis_alpha.turbo.turbo_logger import safe_log_turbo_shadow
-from aegis_alpha.turbo.snapshot_utils import load_turbo_snapshot_status, turbo_snapshot_path
+from aegis_alpha.turbo.snapshot_utils import load_turbo_snapshot_status, normalize_turbo_symbol, turbo_snapshot_path
 from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 from aegis_alpha.turbo import turbo_signal
-from aegis_alpha.turbo.turbo_signal import LAST_TURBO_RUNTIME, evaluate_turbo_shadow, model_cache_keys
+from aegis_alpha.turbo.turbo_signal import LAST_TURBO_RUNTIME, evaluate_turbo_shadow, model_cache_keys, runtime_status_by_symbol, runtime_symbols
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("AEGIS_LOG_LEVEL", "WARNING").upper(), logging.WARNING),
@@ -109,9 +109,9 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _runtime_turbo_snapshot_status() -> dict[str, Any]:
+def _runtime_turbo_snapshot_status_for_symbol(symbol: str) -> dict[str, Any]:
     statuses = {
-        f"{lookback_days}d": load_turbo_snapshot_status(turbo_snapshot_path(int(lookback_days)), include_sample_count=True)
+        f"{lookback_days}d": load_turbo_snapshot_status(turbo_snapshot_path(int(lookback_days), symbol), include_sample_count=True)
         for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days
     }
     selected_key = None
@@ -142,6 +142,7 @@ def _runtime_turbo_snapshot_status() -> dict[str, Any]:
             "last_ts": None,
         }
     return {
+        "symbol": normalize_turbo_symbol(symbol),
         "selected": selected_key,
         "last_feature_timestamp": selected_status.get("feature_timestamp") or selected_status.get("last_ts"),
         "feature_age_seconds": selected_status.get("feature_age_seconds"),
@@ -152,6 +153,18 @@ def _runtime_turbo_snapshot_status() -> dict[str, Any]:
         "last_turbo_reason": LAST_TURBO_RUNTIME.get("reason"),
         "last_turbo_score": LAST_TURBO_RUNTIME.get("turbo_score"),
     }
+
+
+def _runtime_turbo_snapshot_status() -> dict[str, Any]:
+    symbols = set(runtime_symbols())
+    symbols.add(normalize_turbo_symbol(cfg.symbol))
+    runtime_by_symbol = runtime_status_by_symbol()
+    statuses = {symbol: _runtime_turbo_snapshot_status_for_symbol(symbol) for symbol in sorted(symbols)}
+    for symbol, runtime in runtime_by_symbol.items():
+        if symbol in statuses:
+            statuses[symbol]["last_turbo_reason"] = runtime.get("reason")
+            statuses[symbol]["last_turbo_score"] = runtime.get("turbo_score")
+    return statuses
 
 
 def _defensive_aegis_block(symbol: str, reason: str, error: str | None = None) -> dict:

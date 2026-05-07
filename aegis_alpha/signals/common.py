@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -146,8 +147,10 @@ def build_signal_feature_matrix(features: np.ndarray, window_size: int) -> np.nd
     return build_edge_feature_matrix(features, window_size)
 
 
-def load_signal_market(config_path: str | Path) -> SignalMarket:
+def load_signal_market(config_path: str | Path, symbol_override: str | None = None) -> SignalMarket:
     cfg = load_config(config_path)
+    if symbol_override:
+        cfg = replace(cfg, symbol=str(symbol_override).replace("/", "").upper())
     symbol = cfg.symbol if "/" in cfg.symbol else cfg.symbol.replace("USDT", "/USDT")
     db = DatabaseManager(cfg.database_url)
     df = db.get_ohlcv_data(symbol, cfg.timeframe)
@@ -178,4 +181,3 @@ def load_signal_market(config_path: str | Path) -> SignalMarket:
         feature_names=feature_names,
         steps=steps,
     )
-

@@ -16,7 +16,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.edge.common import safe_float  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
-from aegis_alpha.turbo.snapshot_utils import save_npz_atomic  # noqa: E402
+from aegis_alpha.turbo.snapshot_utils import save_npz_atomic, turbo_snapshot_path  # noqa: E402
 
 
 MAX_TARGET_HORIZON = 24
@@ -59,11 +59,8 @@ def _target_stats(close: np.ndarray, idx: int, horizon: int, fee_round_trip: flo
 
 def build_recent_dataset(symbol: str, lookback_days: int, save: bool = True) -> dict[str, Any]:
     cfg = DEFAULT_TURBO_CONFIG
-    market = load_signal_market(cfg.config_path)
-    if symbol != market.cfg.symbol:
-        # The current Aegis config is single-symbol. Keep the requested symbol in
-        # reports but avoid pretending a different DB slice was loaded.
-        symbol = market.cfg.symbol
+    symbol = symbol.replace("/", "").upper()
+    market = load_signal_market(cfg.config_path, symbol_override=symbol)
 
     valid_mask = market.steps + MAX_TARGET_HORIZON < len(market.close)
     steps = market.steps[valid_mask]
@@ -137,12 +134,12 @@ def build_recent_dataset(symbol: str, lookback_days: int, save: bool = True) -> 
     }
 
     if save:
-        cfg.data_dir.mkdir(parents=True, exist_ok=True)
         cfg.log_dir.mkdir(parents=True, exist_ok=True)
-        save_npz_atomic(cfg.data_dir / f"turbo_recent_{lookback_days}d.npz", **dataset)
+        dataset_path = turbo_snapshot_path(lookback_days, symbol)
+        save_npz_atomic(dataset_path, **dataset)
         report_path = cfg.log_dir / f"turbo_recent_dataset_{_utc_stamp()}.json"
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-        report["dataset_path"] = str(cfg.data_dir / f"turbo_recent_{lookback_days}d.npz")
+        report["dataset_path"] = str(dataset_path)
         report["report_path"] = str(report_path)
     return {"dataset": dataset, "report": report}
 

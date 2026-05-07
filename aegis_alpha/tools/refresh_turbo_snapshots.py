@@ -20,7 +20,7 @@ from config.settings import settings  # noqa: E402
 from data.storage.database_manager import DatabaseManager  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
-from aegis_alpha.turbo.snapshot_utils import load_turbo_snapshot_status, turbo_snapshot_path  # noqa: E402
+from aegis_alpha.turbo.snapshot_utils import load_turbo_snapshot_status, normalize_turbo_symbol, turbo_snapshot_path  # noqa: E402
 from aegis_alpha.turbo.evaluate_recent_models import evaluate_recent_models  # noqa: E402
 from aegis_alpha.turbo.train_recent_edge import train_recent_edge_models  # noqa: E402
 
@@ -147,6 +147,7 @@ def _refresh_market_history(symbol: str, timeframe: str) -> dict[str, Any]:
 
 
 def refresh_features_only(symbol: str) -> dict[str, Any]:
+    symbol = normalize_turbo_symbol(symbol)
     market_refresh = _refresh_market_history(symbol, DEFAULT_TURBO_CONFIG.timeframe)
     files_written: list[str] = []
     sample_count_per_file: dict[str, int] = {}
@@ -155,7 +156,7 @@ def refresh_features_only(symbol: str) -> dict[str, Any]:
     for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days:
         built = build_recent_dataset(symbol, int(lookback_days), save=True)
         report = built["report"]
-        dataset_path = turbo_snapshot_path(int(lookback_days))
+        dataset_path = turbo_snapshot_path(int(lookback_days), symbol)
         files_written.append(str(dataset_path))
         sample_count_per_file[str(dataset_path)] = int(report.get("sample_count") or 0)
         last_timestamp_per_file[str(dataset_path)] = report.get("last_timestamp")
@@ -172,6 +173,7 @@ def refresh_features_only(symbol: str) -> dict[str, Any]:
 
 
 def refresh_full(symbol: str) -> dict[str, Any]:
+    symbol = normalize_turbo_symbol(symbol)
     train_report = train_recent_edge_models(symbol)
     eval_report = evaluate_recent_models(symbol)
     dataset_reports = train_report.get("dataset_reports", []) if isinstance(train_report, dict) else []
@@ -196,27 +198,77 @@ def refresh_full(symbol: str) -> dict[str, Any]:
     }
 
 
+def _symbol_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    statuses = {
+        f"{lookback_days}d": load_turbo_snapshot_status(turbo_snapshot_path(int(lookback_days), payload["symbol"]), include_sample_count=True)
+        for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days
+    }
+    selected = None
+    for status in statuses.values():
+        if not status.get("exists"):
+            continue
+        if selected is None or ((status.get("feature_timestamp") or ""), (status.get("snapshot_mtime") or "")) > ((selected.get("feature_timestamp") or ""), (selected.get("snapshot_mtime") or "")):
+            selected = status
+    return {
+        "success": True,
+        "last_feature_timestamp": (selected or {}).get("feature_timestamp") or (selected or {}).get("last_ts"),
+        "is_fresh": bool((selected or {}).get("is_fresh", False)),
+        "files_written": payload.get("files_written", []),
+        "snapshot_statuses": statuses,
+    }
+
+
+def _parse_symbols(symbol: str, symbols: str | None) -> list[str]:
+    raw_values = symbols.split(",") if symbols else [symbol]
+    parsed = [normalize_turbo_symbol(value) for value in raw_values if value.strip()]
+    return list(dict.fromkeys(parsed))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=DEFAULT_TURBO_CONFIG.symbol)
+    parser.add_argument("--symbols", help="Comma-separated symbols, e.g. ETHUSDT,BTCUSDT")
     parser.add_argument("--mode", choices=("features-only", "full"), default="features-only")
     args = parser.parse_args()
 
     started_at = time.time()
     started_iso = datetime.now(timezone.utc).isoformat()
+    symbols = _parse_symbols(args.symbol, args.symbols)
     report: dict[str, Any] = {
         "started_at": started_iso,
-        "symbol": args.symbol,
+        "symbol": symbols[0] if len(symbols) == 1 else None,
+        "symbols_requested": symbols,
         "mode": args.mode,
         "success": False,
+        "partial_success": False,
         "files_written": [],
         "sample_count_per_file": {},
         "last_timestamp_per_file": {},
+        "symbols": {},
     }
     try:
-        payload = refresh_features_only(args.symbol) if args.mode == "features-only" else refresh_full(args.symbol)
-        report.update(payload)
-        report["success"] = True
+        success_count = 0
+        for symbol in symbols:
+            try:
+                payload = refresh_features_only(symbol) if args.mode == "features-only" else refresh_full(symbol)
+                summary = _symbol_summary(payload)
+                report["symbols"][symbol] = summary
+                report["files_written"].extend(payload.get("files_written", []))
+                report["sample_count_per_file"].update(payload.get("sample_count_per_file", {}))
+                report["last_timestamp_per_file"].update(payload.get("last_timestamp_per_file", {}))
+                success_count += 1
+                if len(symbols) == 1:
+                    report.update(payload)
+            except Exception as exc:
+                report["symbols"][symbol] = {
+                    "success": False,
+                    "last_feature_timestamp": None,
+                    "is_fresh": False,
+                    "files_written": [],
+                    "error": repr(exc),
+                }
+        report["success"] = success_count > 0
+        report["partial_success"] = 0 < success_count < len(symbols)
     except Exception as exc:
         report["error"] = repr(exc)
     finally:
