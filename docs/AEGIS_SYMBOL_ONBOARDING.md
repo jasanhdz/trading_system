@@ -172,25 +172,25 @@ SYMBOL_OVERRIDES:
       leverage: 20
   SOLUSDT:
     AEGIS_TURBO:
-      leverage: 15
+      leverage: 20
   BNBUSDT:
     AEGIS_TURBO:
       leverage: 15
   XRPUSDT:
     AEGIS_TURBO:
-      leverage: 15
+      leverage: 20
   DOGEUSDT:
     AEGIS_TURBO:
       leverage: 10
   ADAUSDT:
     AEGIS_TURBO:
-      leverage: 12
+      leverage: 20
   AVAXUSDT:
     AEGIS_TURBO:
-      leverage: 12
+      leverage: 20
   LINKUSDT:
     AEGIS_TURBO:
-      leverage: 12
+      leverage: 20
   SUIUSDT:
     AEGIS_TURBO:
       leverage: 8
