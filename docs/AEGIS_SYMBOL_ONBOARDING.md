@@ -160,6 +160,47 @@ Reglas de seguridad:
 - Los símbolos `SHADOW` pueden escanearse, loggearse y aparecer en Telegram, pero no ejecutan órdenes.
 - Multi-symbol `LIVE` requiere refactor de portfolio state, multi-position recovery, portfolio risk manager y bracket guard multi-position.
 
+Leverage inicial conservador por símbolo:
+
+```yaml
+SYMBOL_OVERRIDES:
+  ETHUSDT:
+    AEGIS_TURBO:
+      leverage: 20
+  BTCUSDT:
+    AEGIS_TURBO:
+      leverage: 20
+  SOLUSDT:
+    AEGIS_TURBO:
+      leverage: 15
+  BNBUSDT:
+    AEGIS_TURBO:
+      leverage: 15
+  XRPUSDT:
+    AEGIS_TURBO:
+      leverage: 15
+  DOGEUSDT:
+    AEGIS_TURBO:
+      leverage: 10
+  ADAUSDT:
+    AEGIS_TURBO:
+      leverage: 12
+  AVAXUSDT:
+    AEGIS_TURBO:
+      leverage: 12
+  LINKUSDT:
+    AEGIS_TURBO:
+      leverage: 12
+  SUIUSDT:
+    AEGIS_TURBO:
+      leverage: 8
+  LTCUSDT:
+    AEGIS_TURBO:
+      leverage: 15
+```
+
+No subir leverage por encima de estos caps sin evidencia por símbolo en shadow/live pequeño: profit factor, MFE/MAE, slippage/spread, frecuencia de barridas de stop y estabilidad de freshness.
+
 Validar símbolos contra Binance USD-M Futures antes de procesar:
 
 ```bash
