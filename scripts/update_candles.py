@@ -4,6 +4,7 @@ import argparse
 import pandas as pd
 from pathlib import Path
 import ccxt
+from datetime import datetime, timedelta, timezone
 
 # Add project root
 sys.path.append(str(Path(__file__).parent.parent))
@@ -27,7 +28,26 @@ def validate_continuity(df: pd.DataFrame, timeframe: str) -> dict:
     return {"checked": True, "gaps": gaps, "expected_seconds": int(expected.total_seconds())}
 
 
-def update_db(symbol: str | None = None, timeframe: str = "5m", limit: int = 1000):
+def parse_utc_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def update_db(
+    symbol: str | None = None,
+    timeframe: str = "5m",
+    limit: int = 1000,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    days: int | None = None,
+):
     print("🔄 Updating Market Data...")
     collector = BinanceDataCollector()
     
@@ -42,8 +62,18 @@ def update_db(symbol: str | None = None, timeframe: str = "5m", limit: int = 100
     
     symbol = normalize_symbol(symbol or settings.SYMBOL)
     
-    # Fetch last 1000 candles (covers ~3.5 days of 5m data)
-    df = collector.get_ohlcv(symbol, timeframe, limit=limit)
+    if end_date is None:
+        end_date = datetime.now(timezone.utc)
+
+    if start_date is None and days is not None:
+        start_date = end_date - timedelta(days=days)
+
+    if start_date is not None:
+        print(f"   Historical backfill for {symbol} {timeframe}: {start_date.isoformat()} → {end_date.isoformat()}")
+        df = collector.get_historical_data(symbol, timeframe, start_date, end_date)
+    else:
+        # Fetch last candles for incremental refresh.
+        df = collector.get_ohlcv(symbol, timeframe, limit=limit)
     
     if not df.empty:
         print(f"   Fetched {len(df)} candles via API for {symbol}.")
@@ -77,5 +107,15 @@ if __name__ == "__main__":
     parser.add_argument("--symbol", default=settings.SYMBOL, help="Symbol to update, e.g. ETHUSDT or BTCUSDT")
     parser.add_argument("--timeframe", default="5m")
     parser.add_argument("--limit", type=int, default=1000)
+    parser.add_argument("--start-date", help="UTC start date for historical backfill, e.g. 2020-01-01")
+    parser.add_argument("--end-date", help="UTC end date for historical backfill; defaults to now")
+    parser.add_argument("--days", type=int, help="Historical backfill window in days. Ignored if --start-date is set.")
     args = parser.parse_args()
-    update_db(symbol=args.symbol, timeframe=args.timeframe, limit=args.limit)
+    update_db(
+        symbol=args.symbol,
+        timeframe=args.timeframe,
+        limit=args.limit,
+        start_date=parse_utc_datetime(args.start_date),
+        end_date=parse_utc_datetime(args.end_date),
+        days=args.days,
+    )

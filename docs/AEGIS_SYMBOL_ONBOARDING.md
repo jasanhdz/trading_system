@@ -144,3 +144,122 @@ a:
 ```text
 --symbols ETHUSDT,BTCUSDT
 ```
+
+## Mass Shadow Onboarding
+
+Símbolos incorporados para observación SHADOW:
+
+```text
+BTCUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,SUIUSDT,LTCUSDT
+```
+
+Reglas de seguridad:
+
+- `ETHUSDT` sigue siendo el único símbolo `LIVE`.
+- Todos los símbolos nuevos quedan `SHADOW`.
+- Los símbolos `SHADOW` pueden escanearse, loggearse y aparecer en Telegram, pero no ejecutan órdenes.
+- Multi-symbol `LIVE` requiere refactor de portfolio state, multi-position recovery, portfolio risk manager y bracket guard multi-position.
+
+Validar símbolos contra Binance USD-M Futures antes de procesar:
+
+```bash
+/home/jasan/.venv_rocm62/bin/python - <<'PY'
+# Validar con ccxt/binance fapi exchangeInfo y guardar reporte en
+# aegis_alpha/logs/symbol_onboarding/symbol_validation_<timestamp>.json
+PY
+```
+
+Actualizar velas por símbolo:
+
+```bash
+for symbol in BTCUSDT SOLUSDT BNBUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT SUIUSDT LTCUSDT; do
+  /home/jasan/.venv_rocm62/bin/python scripts/update_candles.py --symbol "$symbol"
+done
+```
+
+Para reconstrucciones históricas completas, hacer backup de `data/binance_candles.db` antes de limpiar rows de un símbolo. No borrar datos de `ETHUSDT`.
+
+Entrenar Turbo por símbolo:
+
+```bash
+for symbol in BTCUSDT SOLUSDT BNBUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT SUIUSDT LTCUSDT; do
+  /home/jasan/.venv_rocm62/bin/python aegis_alpha/tools/train_turbo_symbol_models.py --symbol "$symbol" --windows 7d,14d,30d
+done
+```
+
+Refrescar snapshots:
+
+```bash
+/home/jasan/.venv_rocm62/bin/python aegis_alpha/tools/refresh_turbo_snapshots.py \
+  --mode features-only \
+  --symbols ETHUSDT,BTCUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,SUIUSDT,LTCUSDT
+```
+
+Validar freshness:
+
+```bash
+/home/jasan/.venv_rocm62/bin/python aegis_alpha/tools/turbo_snapshot_status.py \
+  --symbols ETHUSDT,BTCUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,SUIUSDT,LTCUSDT
+```
+
+Validar inferencia sin ejecución:
+
+```bash
+curl -s http://127.0.0.1:8001/ml-v2/predict \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTCUSDT"}'
+```
+
+Validación Telegram:
+
+```text
+/signals
+/signal BTCUSDT
+/signal SOLUSDT
+/config
+/status
+```
+
+Refresher PM2 de un solo proceso, solo para cargas pequenas o validacion manual:
+
+```bash
+pm2 delete 04-Aegis-Turbo-Refresh
+pm2 start /home/jasan/.venv_rocm62/bin/python \
+  --name 04-Aegis-Turbo-Refresh \
+  --cron "*/5 * * * *" \
+  --no-autorestart \
+  --cwd /home/jasan/Develop/trading_system \
+  -- aegis_alpha/tools/refresh_turbo_snapshots.py --mode features-only --symbols ETHUSDT,BTCUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,SUIUSDT,LTCUSDT
+pm2 save
+```
+
+Si el refresh completo tarda mas de 240 segundos, usar lotes. En la corrida de onboarding masivo, un refresh unico de 11 simbolos tardo ~746s y no es operativo para el freshness window de 900s.
+
+Configuracion por lotes aplicada para mantener ETH/BTC/SOL en cadencia de 5 minutos y los lotes de 4 simbolos en 7 minutos. Duraciones medidas: A ~198s, B ~291-301s, C ~259s.
+
+```bash
+pm2 delete 04-Aegis-Turbo-Refresh
+
+pm2 start /home/jasan/.venv_rocm62/bin/python \
+  --name 04-Aegis-Turbo-Refresh-A \
+  --cron "0-59/5 * * * *" \
+  --no-autorestart \
+  --cwd /home/jasan/Develop/trading_system \
+  -- aegis_alpha/tools/refresh_turbo_snapshots.py --mode features-only --symbols ETHUSDT,BTCUSDT,SOLUSDT
+
+pm2 start /home/jasan/.venv_rocm62/bin/python \
+  --name 05-Aegis-Turbo-Refresh-B \
+  --cron "1-59/7 * * * *" \
+  --no-autorestart \
+  --cwd /home/jasan/Develop/trading_system \
+  -- aegis_alpha/tools/refresh_turbo_snapshots.py --mode features-only --symbols BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT
+
+pm2 start /home/jasan/.venv_rocm62/bin/python \
+  --name 06-Aegis-Turbo-Refresh-C \
+  --cron "4-59/7 * * * *" \
+  --no-autorestart \
+  --cwd /home/jasan/Develop/trading_system \
+  -- aegis_alpha/tools/refresh_turbo_snapshots.py --mode features-only --symbols AVAXUSDT,LINKUSDT,SUIUSDT,LTCUSDT
+
+pm2 save
+```
