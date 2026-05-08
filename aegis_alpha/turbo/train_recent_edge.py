@@ -30,18 +30,20 @@ def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _model_path(side: str, lookback_days: int, symbol: str) -> Path:
+def _model_path(side: str, lookback_days: int, symbol: str, output_dir: Path | None = None) -> Path:
+    if output_dir is not None:
+        return output_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
     legacy_path = DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
     if normalize_turbo_symbol(symbol) == normalize_turbo_symbol(DEFAULT_TURBO_CONFIG.symbol):
         return legacy_path
     return turbo_symbol_model_dir(symbol) / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
 
 
-def _train_one(dataset: dict[str, Any], side: str, lookback_days: int, symbol: str) -> dict[str, Any]:
+def _train_one(dataset: dict[str, Any], side: str, lookback_days: int, symbol: str, output_dir: Path | None = None) -> dict[str, Any]:
     x = np.asarray(dataset["X"], dtype=np.float32)
     target_key = "long_net_return_12" if side == "long" else "short_net_return_12"
     y = np.asarray(dataset[target_key], dtype=np.float32)
-    path = _model_path(side, lookback_days, symbol)
+    path = _model_path(side, lookback_days, symbol, output_dir)
 
     if len(x) < MIN_TRAIN_SAMPLES or len(np.unique(y)) < 2:
         return {
@@ -105,10 +107,15 @@ def _train_one(dataset: dict[str, Any], side: str, lookback_days: int, symbol: s
     }
 
 
-def train_recent_edge_models(symbol: str = DEFAULT_TURBO_CONFIG.symbol, lookbacks: tuple[int, ...] | None = None) -> dict[str, Any]:
+def train_recent_edge_models(
+    symbol: str = DEFAULT_TURBO_CONFIG.symbol,
+    lookbacks: tuple[int, ...] | None = None,
+    output_dir: Path | str | None = None,
+) -> dict[str, Any]:
     cfg = DEFAULT_TURBO_CONFIG
     symbol = normalize_turbo_symbol(symbol)
-    turbo_symbol_model_dir(symbol).mkdir(parents=True, exist_ok=True)
+    resolved_output_dir = Path(output_dir) if output_dir is not None else None
+    (resolved_output_dir or turbo_symbol_model_dir(symbol)).mkdir(parents=True, exist_ok=True)
     cfg.log_dir.mkdir(parents=True, exist_ok=True)
     reports: list[dict[str, Any]] = []
     dataset_reports: list[dict[str, Any]] = []
@@ -116,14 +123,15 @@ def train_recent_edge_models(symbol: str = DEFAULT_TURBO_CONFIG.symbol, lookback
         built = build_recent_dataset(symbol, int(lookback_days), save=True)
         dataset = built["dataset"]
         dataset_reports.append(built["report"])
-        reports.append(_train_one(dataset, "long", int(lookback_days), symbol))
-        reports.append(_train_one(dataset, "short", int(lookback_days), symbol))
+        reports.append(_train_one(dataset, "long", int(lookback_days), symbol, resolved_output_dir))
+        reports.append(_train_one(dataset, "short", int(lookback_days), symbol, resolved_output_dir))
 
     report = {
         "schema_version": "aegis_turbo_train_report_v1",
         "created_at": _utc_stamp(),
         "turbo_version": TURBO_VERSION,
         "symbol": symbol,
+        "output_dir": str(resolved_output_dir) if resolved_output_dir is not None else None,
         "dataset_reports": dataset_reports,
         "models": reports,
     }

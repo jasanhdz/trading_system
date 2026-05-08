@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 import time
 from functools import lru_cache
 from datetime import datetime, timezone
@@ -26,7 +27,7 @@ from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 
 LOGGER = logging.getLogger(__name__)
 TURBO_ALLOW_MARKET_REBUILD = False
-_MODEL_CACHE: dict[str, Any | None] = {}
+_MODEL_CACHE: dict[str, tuple[int | None, Any | None]] = {}
 _STALE_LOG_LAST_EMITTED: dict[str, float] = {}
 LAST_TURBO_RUNTIME: dict[str, Any] = {
     "reason": None,
@@ -38,26 +39,53 @@ LAST_TURBO_RUNTIME_BY_SYMBOL: dict[str, dict[str, Any]] = {}
 
 
 def _model_path(side: str, lookback_days: int, symbol: str) -> Path:
+    symbol_dir = turbo_symbol_model_dir(symbol)
+    manifest_path = symbol_dir / "active_manifest.json"
+    manifest_key = f"{side}_{lookback_days}d"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            model_paths = manifest.get("model_paths") if isinstance(manifest, dict) else None
+            path_text = model_paths.get(manifest_key) if isinstance(model_paths, dict) else None
+            if path_text:
+                candidate = Path(path_text)
+                if not candidate.is_absolute():
+                    candidate = Path.cwd() / candidate
+                if candidate.exists():
+                    return candidate
+        except Exception as exc:
+            LOGGER.warning("aegis_turbo_active_manifest_ignored path=%s error=%r", manifest_path, exc)
+
+    active_path = symbol_dir / "active" / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+    if active_path.exists():
+        return active_path
+
     legacy_path = DEFAULT_TURBO_CONFIG.model_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
     if normalize_turbo_symbol(symbol) == normalize_turbo_symbol(DEFAULT_TURBO_CONFIG.symbol) and legacy_path.exists():
         return legacy_path
-    return turbo_symbol_model_dir(symbol) / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
+    return symbol_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
 
 
 def _load_estimator(path_text: str) -> Any | None:
-    if path_text in _MODEL_CACHE:
-        return _MODEL_CACHE[path_text]
     path = Path(path_text)
     if not path.exists():
-        _MODEL_CACHE[path_text] = None
+        _MODEL_CACHE[path_text] = (None, None)
         return None
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = None
+    cached = _MODEL_CACHE.get(path_text)
+    if cached is not None and cached[0] == mtime_ns:
+        return cached[1]
     bundle = joblib.load(path)
     if isinstance(bundle, dict):
-        _MODEL_CACHE[path_text] = bundle.get("estimator")
+        estimator = bundle.get("estimator")
     else:
-        _MODEL_CACHE[path_text] = bundle
-    LOGGER.warning("aegis_turbo_model_loaded path=%s loaded=%s", path.name, _MODEL_CACHE[path_text] is not None)
-    return _MODEL_CACHE[path_text]
+        estimator = bundle
+    _MODEL_CACHE[path_text] = (mtime_ns, estimator)
+    LOGGER.warning("aegis_turbo_model_loaded path=%s loaded=%s", path.name, estimator is not None)
+    return estimator
 
 
 def model_cache_keys() -> list[str]:
