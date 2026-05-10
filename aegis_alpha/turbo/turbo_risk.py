@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import glob
 import logging
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,22 @@ from aegis_alpha.turbo.jsonl_utils import load_jsonl_safe
 
 
 LOGGER = logging.getLogger(__name__)
+_RISK_STATUS_CACHE: dict[str, Any] = {"expires_at": 0.0, "status": None}
+
+
+def _risk_cache_ttl_seconds() -> float:
+    try:
+        return max(float(os.environ.get("AEGIS_TURBO_RISK_CACHE_SECONDS", "30")), 0.0)
+    except ValueError:
+        return 30.0
+
+
+def _risk_history_glob() -> str:
+    configured = os.environ.get("AEGIS_TURBO_RISK_HISTORY_GLOB")
+    if configured:
+        return configured
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return str(DEFAULT_TURBO_CONFIG.log_dir / f"turbo_shadow_{today}.jsonl")
 
 
 def load_turbo_shadow_history(log_glob: str | None = None) -> list[dict[str, Any]]:
@@ -41,7 +59,7 @@ def _today_prefix() -> str:
 
 
 def count_today_turbo_signals(rows: list[dict[str, Any]] | None = None) -> int:
-    history = rows if rows is not None else load_turbo_shadow_history()
+    history = rows if rows is not None else load_turbo_shadow_history(_risk_history_glob())
     today = _today_prefix()
     return int(
         sum(
@@ -68,7 +86,7 @@ def count_recent_losses_if_evaluated(rows: list[dict[str, Any]] | None = None) -
 
 def should_block_turbo_today(rows: list[dict[str, Any]] | None = None) -> tuple[bool, str | None]:
     cfg = get_runtime_turbo_config().risk
-    history = rows if rows is not None else load_turbo_shadow_history()
+    history = rows if rows is not None else load_turbo_shadow_history(_risk_history_glob())
     if cfg.max_turbo_trades_per_day <= 0:
         return False, None
     if count_today_turbo_signals(history) >= cfg.max_turbo_trades_per_day:
@@ -79,10 +97,16 @@ def should_block_turbo_today(rows: list[dict[str, Any]] | None = None) -> tuple[
 
 
 def build_turbo_risk_status(rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    if rows is None:
+        now = time.time()
+        cached_status = _RISK_STATUS_CACHE.get("status")
+        if cached_status is not None and now < float(_RISK_STATUS_CACHE.get("expires_at") or 0.0):
+            return dict(cached_status)
+
     cfg = get_runtime_turbo_config().risk
-    history = rows if rows is not None else load_turbo_shadow_history()
+    history = rows if rows is not None else load_turbo_shadow_history(_risk_history_glob())
     blocked, reason = should_block_turbo_today(history)
-    return {
+    status = {
         "blocked": bool(blocked),
         "reason": reason,
         "today_signal_count": count_today_turbo_signals(history),
@@ -90,3 +114,9 @@ def build_turbo_risk_status(rows: list[dict[str, Any]] | None = None) -> dict[st
         "max_turbo_trades_per_day": cfg.max_turbo_trades_per_day,
         "max_consecutive_losses": cfg.max_consecutive_losses,
     }
+    if rows is None:
+        _RISK_STATUS_CACHE.update({
+            "expires_at": time.time() + _risk_cache_ttl_seconds(),
+            "status": dict(status),
+        })
+    return status
