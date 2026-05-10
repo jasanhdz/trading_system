@@ -35,7 +35,14 @@ from aegis_alpha.turbo.turbo_logger import safe_log_turbo_shadow
 from aegis_alpha.turbo.snapshot_utils import load_turbo_snapshot_status, normalize_turbo_symbol, turbo_snapshot_path
 from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 from aegis_alpha.turbo import turbo_signal
-from aegis_alpha.turbo.turbo_signal import LAST_TURBO_RUNTIME, evaluate_turbo_shadow, model_cache_keys, runtime_status_by_symbol, runtime_symbols
+from aegis_alpha.turbo.turbo_signal import (
+    LAST_TURBO_RUNTIME,
+    evaluate_turbo_shadow,
+    model_cache_keys,
+    model_set_cache_status,
+    runtime_status_by_symbol,
+    runtime_symbols,
+)
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("AEGIS_LOG_LEVEL", "WARNING").upper(), logging.WARNING),
@@ -326,6 +333,7 @@ def debug_runtime():
             "ppo_loaded": loader.loaded,
             "ppo_path": str(loader.model_path),
             "turbo": model_cache_keys(),
+            "turbo_sets": model_set_cache_status(),
         },
         "last_predict_latency": {k: v for k, v in LAST_PREDICT.items() if k.endswith("_ms") or k == "fallback_used"},
         "last_predict_error": LAST_PREDICT.get("error"),

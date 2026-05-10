@@ -28,6 +28,7 @@ from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 LOGGER = logging.getLogger(__name__)
 TURBO_ALLOW_MARKET_REBUILD = False
 _MODEL_CACHE: dict[str, tuple[int | None, Any | None]] = {}
+_MODEL_SET_CACHE: dict[str, dict[str, Any]] = {}
 _STALE_LOG_LAST_EMITTED: dict[str, float] = {}
 LAST_TURBO_RUNTIME: dict[str, Any] = {
     "reason": None,
@@ -66,6 +67,37 @@ def _model_path(side: str, lookback_days: int, symbol: str) -> Path:
     return symbol_dir / f"turbo_{side}_edge_{lookback_days}d_v010.joblib"
 
 
+def _manifest_signature(symbol: str) -> tuple[Any, ...]:
+    symbol_dir = turbo_symbol_model_dir(symbol)
+    manifest_path = symbol_dir / "active_manifest.json"
+    if manifest_path.exists():
+        try:
+            stat = manifest_path.stat()
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return (
+                "manifest",
+                str(manifest_path.resolve()),
+                stat.st_mtime_ns,
+                stat.st_size,
+                manifest.get("version") if isinstance(manifest, dict) else None,
+                manifest.get("promoted_at") if isinstance(manifest, dict) else None,
+                manifest.get("validation_status") if isinstance(manifest, dict) else None,
+            )
+        except Exception as exc:
+            LOGGER.warning("aegis_turbo_active_manifest_signature_failed path=%s error=%r", manifest_path, exc)
+
+    file_signature: list[tuple[str, int | None, int | None]] = []
+    for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days:
+        for side in ("long", "short"):
+            path = _model_path(side, int(lookback_days), symbol)
+            try:
+                stat = path.stat()
+                file_signature.append((str(path.resolve()), stat.st_mtime_ns, stat.st_size))
+            except OSError:
+                file_signature.append((str(path), None, None))
+    return ("files", tuple(file_signature))
+
+
 def _load_estimator(path_text: str) -> Any | None:
     path = Path(path_text)
     if not path.exists():
@@ -88,8 +120,51 @@ def _load_estimator(path_text: str) -> Any | None:
     return estimator
 
 
+def _load_model_set(symbol: str) -> dict[str, Any | None]:
+    normalized = normalize_turbo_symbol(symbol)
+    signature = _manifest_signature(normalized)
+    cached = _MODEL_SET_CACHE.get(normalized)
+    if cached is not None and cached.get("signature") == signature:
+        return cached["estimators"]
+
+    estimators: dict[str, Any | None] = {}
+    model_paths: dict[str, str] = {}
+    for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days:
+        for side in ("long", "short"):
+            key = f"{side}_{lookback_days}d"
+            path = _model_path(side, int(lookback_days), normalized)
+            model_paths[key] = str(path)
+            estimators[key] = _load_estimator(str(path))
+
+    _MODEL_SET_CACHE[normalized] = {
+        "signature": signature,
+        "estimators": estimators,
+        "model_paths": model_paths,
+        "loaded_at": time.time(),
+    }
+    LOGGER.warning(
+        "aegis_turbo_model_set_loaded symbol=%s model_count=%s signature_source=%s",
+        normalized,
+        sum(1 for estimator in estimators.values() if estimator is not None),
+        signature[0] if signature else None,
+    )
+    return estimators
+
+
 def model_cache_keys() -> list[str]:
     return sorted(_MODEL_CACHE.keys())
+
+
+def model_set_cache_status() -> dict[str, dict[str, Any]]:
+    return {
+        symbol: {
+            "signature_source": cache.get("signature", (None,))[0],
+            "loaded_model_count": sum(1 for estimator in cache.get("estimators", {}).values() if estimator is not None),
+            "model_paths": dict(cache.get("model_paths", {})),
+            "loaded_at": cache.get("loaded_at"),
+        }
+        for symbol, cache in _MODEL_SET_CACHE.items()
+    }
 
 
 def runtime_symbols() -> list[str]:
@@ -265,9 +340,10 @@ def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
 def _score_models(x: np.ndarray, symbol: str) -> tuple[dict[str, float | None], dict[str, int]]:
     scores: dict[str, float | None] = {}
     votes = {"long": 0, "short": 0, "neutral": 0}
+    estimators = _load_model_set(symbol)
     for lookback_days in DEFAULT_TURBO_CONFIG.lookback_days:
-        long_est = _load_estimator(str(_model_path("long", int(lookback_days), symbol)))
-        short_est = _load_estimator(str(_model_path("short", int(lookback_days), symbol)))
+        long_est = estimators.get(f"long_{lookback_days}d")
+        short_est = estimators.get(f"short_{lookback_days}d")
         long_score = float(long_est.predict(x)[0]) if long_est is not None else None
         short_score = float(short_est.predict(x)[0]) if short_est is not None else None
         scores[f"long_{lookback_days}d"] = long_score
