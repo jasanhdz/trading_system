@@ -21,6 +21,7 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
     path = target_dir / f"turbo_shadow_{day}.jsonl"
     raw = signal.get("raw") or {}
     gated = signal.get("gated") or {}
+    entry_quality_model = signal.get("entry_quality_model")
     row = {
         "logged_at": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
         "timestamp": signal.get("timestamp"),
@@ -41,6 +42,17 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
         "safe_context": signal.get("safe_context", {}),
         "risk_guard": signal.get("risk_guard", {}),
         "freshness": signal.get("freshness", {}),
+        "entry_quality_model": {
+            "mode": entry_quality_model.get("mode"),
+            "model_version": entry_quality_model.get("model_version"),
+            "model_scope": entry_quality_model.get("model_scope"),
+            "entry_quality_score": entry_quality_model.get("entry_quality_score"),
+            "tail_risk_score": entry_quality_model.get("tail_risk_score"),
+            "recommendation": entry_quality_model.get("recommendation"),
+            "reason": entry_quality_model.get("reason"),
+            "feature_status": entry_quality_model.get("feature_status"),
+            "latency_ms": entry_quality_model.get("latency_ms"),
+        } if isinstance(entry_quality_model, dict) else None,
         "stale": not bool((signal.get("freshness") or {}).get("is_fresh", True)),
         "raw": raw,
         "gated": gated,

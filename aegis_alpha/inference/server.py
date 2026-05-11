@@ -19,6 +19,10 @@ from aegis_alpha.inference.model_loader import AegisModelLoader
 from aegis_alpha.inference import shadow_candidate
 from aegis_alpha.inference.shadow_candidate import evaluate_shadow_candidate
 from aegis_alpha.inference.shadow_logger import safe_log_shadow_signal
+from aegis_alpha.entry_quality.entry_quality_shadow import (
+    entry_quality_runtime_status,
+    evaluate_entry_quality_shadow,
+)
 from aegis_alpha.inference.schemas import (
     AegisPredictResponse,
     ExitSignalRequest,
@@ -294,6 +298,27 @@ def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
     turbo["execute"] = False
     turbo["live_enabled"] = False
     turbo["production_allowed"] = False
+    try:
+        turbo["entry_quality_model"] = evaluate_entry_quality_shadow(symbol, {"turbo": turbo})
+    except Exception as exc:  # pragma: no cover - endpoint safety
+        LOGGER.exception("entry_quality_shadow_failed")
+        turbo["entry_quality_model"] = {
+            "mode": "SHADOW",
+            "execute": False,
+            "production_allowed": False,
+            "status": "RESEARCH_CANDIDATE_NOT_LIVE",
+            "symbol": normalize_turbo_symbol(symbol),
+            "model_version": "v020",
+            "entry_quality_score": None,
+            "tail_risk_score": None,
+            "recommendation": "MODEL_ERROR",
+            "reason": f"entry_quality_model_error:{exc!r}",
+            "thresholds": {"quality_min": 0.60, "tail_max": 0.50},
+            "feature_status": "insufficient",
+            "missing_features": [],
+            "model_scope": "none",
+            "latency_ms": 0.0,
+        }
     log_start = time.perf_counter()
     log_path, log_warning = safe_log_turbo_shadow(turbo)
     turbo["logger_ms"] = round((time.perf_counter() - log_start) * 1000, 3)
@@ -339,6 +364,7 @@ def debug_runtime():
         "last_predict_error": LAST_PREDICT.get("error"),
         "turbo_snapshot_status": _runtime_turbo_snapshot_status(),
         "turbo_config_status": runtime_turbo_config_status(),
+        "entry_quality_model_status": entry_quality_runtime_status(load_if_needed=False),
         "shadow_available": True,
         "turbo_available": True,
         "python_version": sys.version,
@@ -386,6 +412,7 @@ def ml_v2_predict(req: PredictRequest):
             LOGGER.exception("aegis_turbo_block_failed")
             aegis_block["turbo"] = _defensive_aegis_block(req.symbol, "turbo_fallback_error", repr(exc))["turbo"]
         timings["turbo_ms"] = round((time.perf_counter() - turbo_start) * 1000, 3)
+        aegis_block["entry_quality_model"] = (aegis_block.get("turbo") or {}).get("entry_quality_model")
 
         aegis_block["model"] = _model_dump(aegis_response)
         total_ms = round((time.perf_counter() - total_start) * 1000, 3)
