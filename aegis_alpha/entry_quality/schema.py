@@ -25,6 +25,13 @@ class EntryQualityShadowResult:
     reason: str = "insufficient_entry_quality_features"
     feature_status: FeatureStatus = "insufficient"
     missing_features: list[str] = field(default_factory=list)
+    feature_parity_pct: float | None = None
+    missing_features_count: int | None = None
+    approximated_features: list[str] = field(default_factory=list)
+    critical_missing_groups: list[str] = field(default_factory=list)
+    feature_build_latency_ms: float | None = None
+    model_latency_ms: float | None = None
+    total_latency_ms: float | None = None
     model_scope: ModelScope = "none"
     latency_ms: float = 0.0
     mode: str = MODE
@@ -48,6 +55,13 @@ class EntryQualityShadowResult:
             "thresholds": dict(self.thresholds),
             "feature_status": self.feature_status,
             "missing_features": list(self.missing_features),
+            "feature_parity_pct": self.feature_parity_pct,
+            "missing_features_count": self.missing_features_count if self.missing_features_count is not None else len(self.missing_features),
+            "approximated_features": list(self.approximated_features),
+            "critical_missing_groups": list(self.critical_missing_groups),
+            "feature_build_latency_ms": self.feature_build_latency_ms,
+            "model_latency_ms": self.model_latency_ms,
+            "total_latency_ms": self.total_latency_ms if self.total_latency_ms is not None else self.latency_ms,
             "model_scope": self.model_scope,
             "latency_ms": self.latency_ms,
         }
@@ -62,6 +76,13 @@ def shadow_result(
     reason: str = "insufficient_entry_quality_features",
     feature_status: FeatureStatus = "insufficient",
     missing_features: list[str] | None = None,
+    feature_parity_pct: float | None = None,
+    missing_features_count: int | None = None,
+    approximated_features: list[str] | None = None,
+    critical_missing_groups: list[str] | None = None,
+    feature_build_latency_ms: float | None = None,
+    model_latency_ms: float | None = None,
+    total_latency_ms: float | None = None,
     model_scope: ModelScope = "none",
     latency_ms: float = 0.0,
     model_version: str = MODEL_VERSION,
@@ -75,6 +96,13 @@ def shadow_result(
         reason=reason,
         feature_status=feature_status,
         missing_features=missing_features or [],
+        feature_parity_pct=round(float(feature_parity_pct), 2) if feature_parity_pct is not None else None,
+        missing_features_count=missing_features_count,
+        approximated_features=approximated_features or [],
+        critical_missing_groups=critical_missing_groups or [],
+        feature_build_latency_ms=round(float(feature_build_latency_ms), 3) if feature_build_latency_ms is not None else None,
+        model_latency_ms=round(float(model_latency_ms), 3) if model_latency_ms is not None else None,
+        total_latency_ms=round(float(total_latency_ms), 3) if total_latency_ms is not None else None,
         model_scope=model_scope,
         latency_ms=round(float(latency_ms), 3),
     ).to_dict()
