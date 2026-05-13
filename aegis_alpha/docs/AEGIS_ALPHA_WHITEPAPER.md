@@ -2210,7 +2210,7 @@ Los logs Turbo ahora guardan `raw_action`, `raw_turbo_score`, `raw_votes`, `gate
 
 ## Aegis Turbo v0.1.2 - Hot-Reload Runtime Sizing Config
 
-Fecha: 2026-05-06.
+Fecha: 2026-05-11.
 
 Problema detectado:
 
@@ -2257,11 +2257,25 @@ Contrato con TypeScript:
 ```text
 raw.position_fraction = bucket sizing de Aegis Turbo
 gate.positionFraction = min(raw.position_fraction, regime_config.live.yaml:aegis.turbo.position_fraction_cap)
+optional bot override = regime_config.live.yaml:aegis.turbo.position_fraction_overrides by symbol + side
 margin = wallet * (1 - fee_buffer_pct) * gate.positionFraction
 notional = margin * leverage
 ```
 
-Por tanto, `position_fraction_cap` del bot TS es un techo, no una orden de usar todo el capital. La fracción efectiva nace en Aegis Turbo y ahora vive en `aegis_alpha/configs/turbo.yaml`.
+Por tanto, `position_fraction_cap` del bot TS es un techo, no una orden de usar todo el capital. La fracción efectiva nace en Aegis Turbo y ahora vive en `aegis_alpha/configs/turbo.yaml`, salvo cuando el bot TS encuentra una regla explícita en `aegis.turbo.position_fraction_overrides`.
+
+Override operativo por símbolo/lado:
+
+```yaml
+aegis:
+  turbo:
+    position_fraction_overrides:
+      - name: majors_link_btc_eth_ada_long
+        symbols: [LINKUSDT, BTCUSDT, ETHUSDT, ADAUSDT]
+        long: 0.50
+```
+
+La primera regla que coincide con `symbol + side` reemplaza el `gate.positionFraction` derivado de ML. Después siguen aplicando los controles TypeScript existentes, incluido `short_gate` para shorts y `portfolio_risk` antes de abrir la orden.
 
 Observabilidad:
 
