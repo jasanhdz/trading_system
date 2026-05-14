@@ -22,6 +22,7 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
     raw = signal.get("raw") or {}
     gated = signal.get("gated") or {}
     entry_quality_model = signal.get("entry_quality_model")
+    event_risk_auto = signal.get("event_risk_auto")
     row = {
         "logged_at": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
         "timestamp": signal.get("timestamp"),
@@ -60,6 +61,20 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
             "total_latency_ms": entry_quality_model.get("total_latency_ms"),
             "latency_ms": entry_quality_model.get("latency_ms"),
         } if isinstance(entry_quality_model, dict) else None,
+        "event_risk_auto": {
+            "mode": event_risk_auto.get("mode"),
+            "suggested_mode": event_risk_auto.get("suggested_mode"),
+            "confidence": event_risk_auto.get("confidence"),
+            "reasons": event_risk_auto.get("reasons"),
+            "btc_context": event_risk_auto.get("btc_context"),
+            "eth_context": event_risk_auto.get("eth_context"),
+            "market_context": event_risk_auto.get("market_context"),
+            "execute": event_risk_auto.get("execute"),
+            "production_allowed": event_risk_auto.get("production_allowed"),
+            "does_not_change_event_risk_mode": event_risk_auto.get("does_not_change_event_risk_mode"),
+            "latency_ms": event_risk_auto.get("latency_ms"),
+            "last_update": event_risk_auto.get("last_update"),
+        } if isinstance(event_risk_auto, dict) else None,
         "stale": not bool((signal.get("freshness") or {}).get("is_fresh", True)),
         "raw": raw,
         "gated": gated,

@@ -23,6 +23,10 @@ from aegis_alpha.entry_quality.entry_quality_shadow import (
     entry_quality_runtime_status,
     evaluate_entry_quality_shadow,
 )
+from aegis_alpha.event_risk.event_risk_detector import (
+    evaluate_event_risk_auto,
+    event_risk_runtime_status,
+)
 from aegis_alpha.inference.schemas import (
     AegisPredictResponse,
     ExitSignalRequest,
@@ -61,6 +65,7 @@ LAST_PREDICT: dict[str, Any] = {
     "total_ms": None,
     "safe_shadow_ms": None,
     "turbo_ms": None,
+    "event_risk_auto_ms": None,
     "feature_ms": None,
     "model_load_ms": 0.0,
     "logger_ms": None,
@@ -204,6 +209,12 @@ def _defensive_aegis_block(symbol: str, reason: str, error: str | None = None) -
         "blocked_by": "defensive_fallback",
     }
     warning = {"warning": error} if error else {}
+    event_risk_auto = evaluate_event_risk_auto({
+        "symbol": symbol,
+        "btc": None,
+        "eth": None,
+        "api_warnings": [reason],
+    })
     return {
         "candidate": "defensive_fallback",
         "candidate_status": "NOT_LOADED",
@@ -234,6 +245,7 @@ def _defensive_aegis_block(symbol: str, reason: str, error: str | None = None) -
             safe_context={"regime": "unknown", "safe_action": "HOLD", "safe_reason": reason},
             risk_guard={"blocked": True, "reason": reason},
         ),
+        "event_risk_auto": event_risk_auto,
     }
 
 
@@ -319,6 +331,19 @@ def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
             "model_scope": "none",
             "latency_ms": 0.0,
         }
+    try:
+        log_aegis_block = dict(aegis_block or {})
+        log_aegis_block["turbo"] = turbo
+        log_aegis_block["entry_quality_model"] = turbo.get("entry_quality_model")
+        turbo["event_risk_auto"] = _event_risk_auto_block(symbol, log_aegis_block)
+    except Exception as exc:  # pragma: no cover - endpoint safety
+        LOGGER.exception("event_risk_auto_for_turbo_log_failed")
+        turbo["event_risk_auto"] = evaluate_event_risk_auto({
+            "symbol": symbol,
+            "btc": None,
+            "eth": None,
+            "api_warnings": [f"event_risk_auto_log_error:{exc!r}"],
+        })
     log_start = time.perf_counter()
     log_path, log_warning = safe_log_turbo_shadow(turbo)
     turbo["logger_ms"] = round((time.perf_counter() - log_start) * 1000, 3)
@@ -327,6 +352,115 @@ def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
     elif log_path is not None:
         turbo["log_path"] = str(log_path)
     return turbo
+
+
+def _event_risk_context_from_turbo(
+    symbol: str,
+    turbo: dict[str, Any] | None,
+    entry_quality_model: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    turbo = turbo or {}
+    raw = turbo.get("raw") or {}
+    gated = turbo.get("gated") or {}
+    safe_context = turbo.get("safe_context") or {}
+    freshness = turbo.get("freshness") or {}
+    eq = entry_quality_model if isinstance(entry_quality_model, dict) else turbo.get("entry_quality_model")
+    eq = eq if isinstance(eq, dict) else {}
+    return {
+        "symbol": normalize_turbo_symbol(symbol),
+        "turbo_action": raw.get("action") or turbo.get("action"),
+        "turbo_score": raw.get("turbo_score", turbo.get("turbo_score")),
+        "gated_action": gated.get("action"),
+        "gated_reason": gated.get("reason"),
+        "freshness": freshness,
+        "entry_quality_score": eq.get("entry_quality_score"),
+        "tail_risk_score": eq.get("tail_risk_score", safe_context.get("tail_risk_score")),
+        "recommendation": eq.get("recommendation"),
+        "reason": turbo.get("reason") or raw.get("reason") or gated.get("reason"),
+    }
+
+
+def _event_risk_peer_context(
+    peer_symbol: str,
+    request_symbol: str,
+    current_turbo: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    normalized_peer = normalize_turbo_symbol(peer_symbol)
+    if normalized_peer == normalize_turbo_symbol(request_symbol) and current_turbo is not None:
+        return _event_risk_context_from_turbo(normalized_peer, current_turbo), None
+    try:
+        peer_turbo = evaluate_turbo_shadow(normalized_peer)
+        return _event_risk_context_from_turbo(normalized_peer, peer_turbo), None
+    except Exception as exc:  # pragma: no cover - endpoint safety
+        LOGGER.exception("event_risk_peer_context_failed symbol=%s", normalized_peer)
+        return None, f"{normalized_peer}_context_error:{exc!r}"
+
+
+def _event_risk_market_context(current_symbol: str, current_turbo: dict[str, Any] | None) -> dict[str, Any]:
+    runtime = runtime_status_by_symbol()
+    alt_hold_count = 0
+    alt_block_shadow_count = 0
+    alt_signal_count = 0
+    stale_symbol_count = 0
+    for symbol, status in runtime.items():
+        normalized = normalize_turbo_symbol(symbol)
+        if normalized in {"BTCUSDT", "ETHUSDT"}:
+            continue
+        alt_signal_count += 1
+        reason = str(status.get("reason") or "").lower()
+        score = status.get("turbo_score")
+        freshness = status.get("freshness") or {}
+        if reason.startswith("insufficient") or "hold" in reason or (score is not None and float(score or 0.0) <= 0.0):
+            alt_hold_count += 1
+        if "block" in reason or "stale" in reason or "missing" in reason:
+            alt_block_shadow_count += 1
+        if freshness.get("is_fresh") is False or freshness.get("stale") is True:
+            stale_symbol_count += 1
+
+    if normalize_turbo_symbol(current_symbol) not in {"BTCUSDT", "ETHUSDT"} and current_turbo is not None:
+        raw = current_turbo.get("raw") or {}
+        gated = current_turbo.get("gated") or {}
+        action = str(gated.get("action") or raw.get("action") or current_turbo.get("action") or "HOLD").upper()
+        reason = str(gated.get("reason") or raw.get("reason") or current_turbo.get("reason") or "").lower()
+        if normalize_turbo_symbol(current_symbol) not in runtime:
+            alt_signal_count += 1
+        if action == "HOLD":
+            alt_hold_count += 1
+        if "block" in reason or "stale" in reason or "missing" in reason:
+            alt_block_shadow_count += 1
+        eq = current_turbo.get("entry_quality_model")
+        if isinstance(eq, dict) and str(eq.get("recommendation") or "").upper() == "BLOCK_SHADOW":
+            alt_block_shadow_count += 1
+
+    return {
+        "alt_hold_count": alt_hold_count,
+        "alt_block_shadow_count": alt_block_shadow_count,
+        "alt_signal_count": alt_signal_count,
+        "stale_symbol_count": stale_symbol_count,
+        "runtime_symbol_count": len(runtime),
+    }
+
+
+def _event_risk_auto_block(symbol: str, aegis_block: dict[str, Any]) -> dict[str, Any]:
+    start = time.perf_counter()
+    current_turbo = aegis_block.get("turbo") if isinstance(aegis_block.get("turbo"), dict) else {}
+    current_eq = aegis_block.get("entry_quality_model") if isinstance(aegis_block.get("entry_quality_model"), dict) else None
+    warnings: list[str] = []
+    btc_context, btc_warning = _event_risk_peer_context("BTCUSDT", symbol, current_turbo)
+    eth_context, eth_warning = _event_risk_peer_context("ETHUSDT", symbol, current_turbo)
+    for warning in (btc_warning, eth_warning):
+        if warning:
+            warnings.append(warning)
+    result = evaluate_event_risk_auto({
+        "symbol": symbol,
+        "btc": btc_context,
+        "eth": eth_context,
+        "current": _event_risk_context_from_turbo(symbol, current_turbo, current_eq),
+        "market": _event_risk_market_context(symbol, current_turbo),
+        "api_warnings": warnings,
+    })
+    result["latency_ms"] = round((time.perf_counter() - start) * 1000, 3)
+    return result
 
 
 @app.get("/health")
@@ -362,6 +496,7 @@ def debug_runtime():
         },
         "last_predict_latency": {k: v for k, v in LAST_PREDICT.items() if k.endswith("_ms") or k == "fallback_used"},
         "last_predict_error": LAST_PREDICT.get("error"),
+        "event_risk_auto": event_risk_runtime_status(),
         "turbo_snapshot_status": _runtime_turbo_snapshot_status(),
         "turbo_config_status": runtime_turbo_config_status(),
         "entry_quality_model_status": entry_quality_runtime_status(load_if_needed=False),
@@ -385,6 +520,7 @@ def ml_v2_predict(req: PredictRequest):
         "feature_ms": None,
         "safe_shadow_ms": None,
         "turbo_ms": None,
+        "event_risk_auto_ms": None,
         "model_load_ms": 0.0,
         "logger_ms": None,
     }
@@ -413,6 +549,25 @@ def ml_v2_predict(req: PredictRequest):
             aegis_block["turbo"] = _defensive_aegis_block(req.symbol, "turbo_fallback_error", repr(exc))["turbo"]
         timings["turbo_ms"] = round((time.perf_counter() - turbo_start) * 1000, 3)
         aegis_block["entry_quality_model"] = (aegis_block.get("turbo") or {}).get("entry_quality_model")
+
+        event_risk_start = time.perf_counter()
+        event_risk_auto = (aegis_block.get("turbo") or {}).get("event_risk_auto")
+        if not isinstance(event_risk_auto, dict):
+            try:
+                event_risk_auto = _event_risk_auto_block(req.symbol, aegis_block)
+            except Exception as exc:  # pragma: no cover - endpoint safety
+                fallback_used = True
+                LOGGER.exception("event_risk_auto_failed")
+                event_risk_auto = evaluate_event_risk_auto({
+                    "symbol": req.symbol,
+                    "btc": None,
+                    "eth": None,
+                    "api_warnings": [f"event_risk_auto_error:{exc!r}"],
+                })
+        aegis_block["event_risk_auto"] = event_risk_auto
+        if isinstance(aegis_block.get("turbo"), dict):
+            aegis_block["turbo"]["event_risk_auto"] = event_risk_auto
+        timings["event_risk_auto_ms"] = round((time.perf_counter() - event_risk_start) * 1000, 3)
 
         aegis_block["model"] = _model_dump(aegis_response)
         total_ms = round((time.perf_counter() - total_start) * 1000, 3)
