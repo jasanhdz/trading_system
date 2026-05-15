@@ -93,6 +93,38 @@ Feature status:
 
 Even when probabilities are emitted, `feature_status` must be reviewed before trusting the signal.
 
+## Phase 6.1 Runtime Feature Parity
+
+Phase 6 initially connected the model, but runtime parity was only about `51.8%`. The largest missing area was the `eq_*` market and MTF feature group, plus portfolio context.
+
+Phase 6.1 improves runtime parity by:
+
+- Reusing EntryQuality runtime market features from local SQLite recent candles.
+- Mapping 5m returns, momentum, EMA, ATR, volume, 15m MTF and 1h MTF fields into the Decision Brain `eq_*` columns.
+- Reading News/Sentiment latest JSON with a TTL cache.
+- Reading Event Risk Overlay mode from TS YAML as read-only config when available.
+- Preserving EventRiskAuto mode, confidence and reason count as model features.
+- Filling unavailable portfolio context with explicit neutral values and `portfolio_context_available=0`.
+- Reporting `available_feature_groups`, `critical_missing_groups`, `approximated_features`, `feature_group_coverage_pct`, and per-symbol runtime status.
+
+Portfolio values remain approximate/unavailable because Python should not call Binance or mutate TS state from `/ml-v2/predict`. Those neutral values increase column parity while still marking the group as unavailable for interpretation.
+
+Decision Brain remains SHADOW:
+
+- `execute=false`
+- `production_allowed=false`
+- no ENFORCE
+- no order routing
+- no TradingService gating
+- no `marketOpen` changes
+
+Runtime feature audit reports are written under:
+
+```text
+aegis_alpha/logs/decision_brain/decision_brain_runtime_feature_audit_<timestamp>.json
+aegis_alpha/logs/decision_brain/decision_brain_runtime_feature_audit_<timestamp>.md
+```
+
 ## Phase 7 Use
 
 Phase 7 Outcome Analyzer should compare Decision Brain SHADOW decisions against actual outcomes:

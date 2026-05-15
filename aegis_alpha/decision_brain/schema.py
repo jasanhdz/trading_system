@@ -36,6 +36,11 @@ class DecisionBrainShadowOutput:
     missing_features_count: int = 0
     missing_features: list[str] = field(default_factory=list)
     critical_missing_groups: list[str] = field(default_factory=list)
+    available_feature_groups: list[str] = field(default_factory=list)
+    approximated_features: list[str] = field(default_factory=list)
+    missing_features_by_group: dict[str, list[str]] = field(default_factory=dict)
+    feature_group_coverage_pct: dict[str, float] = field(default_factory=dict)
+    feature_warnings: list[str] = field(default_factory=list)
     feature_build_latency_ms: float = 0.0
     model_latency_ms: float = 0.0
     total_latency_ms: float = 0.0

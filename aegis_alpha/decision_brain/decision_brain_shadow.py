@@ -32,6 +32,9 @@ REASON_BY_DECISION = {
 LAST_DECISION_BY_SYMBOL: dict[str, str] = {}
 LAST_FEATURE_STATUS_BY_SYMBOL: dict[str, str] = {}
 LAST_FEATURE_PARITY_BY_SYMBOL: dict[str, float] = {}
+LAST_MISSING_COUNT_BY_SYMBOL: dict[str, int] = {}
+LAST_CRITICAL_MISSING_BY_SYMBOL: dict[str, list[str]] = {}
+LAST_LATENCY_BY_SYMBOL: dict[str, float] = {}
 LAST_ERRORS: list[str] = []
 
 
@@ -95,6 +98,11 @@ def evaluate_decision_brain_shadow(
         output.missing_features_count = feature_meta["missing_features_count"]
         output.missing_features = list(feature_meta["missing_features"])
         output.critical_missing_groups = list(feature_meta["critical_missing_groups"])
+        output.available_feature_groups = list(feature_meta.get("available_feature_groups") or [])
+        output.approximated_features = list(feature_meta.get("approximated_features") or [])
+        output.missing_features_by_group = dict(feature_meta.get("missing_features_by_group") or {})
+        output.feature_group_coverage_pct = dict(feature_meta.get("feature_group_coverage_pct") or {})
+        output.feature_warnings = list(feature_meta.get("feature_warnings") or [])
         output.feature_build_latency_ms = feature_meta["feature_build_latency_ms"]
         if feature_vector.shape[1] != len(artifacts.feature_columns):
             output.recommendation = "INSUFFICIENT_DATA"
@@ -137,6 +145,9 @@ def evaluate_decision_brain_shadow(
         LAST_DECISION_BY_SYMBOL[normalized_symbol] = output.decision
         LAST_FEATURE_STATUS_BY_SYMBOL[normalized_symbol] = output.feature_status
         LAST_FEATURE_PARITY_BY_SYMBOL[normalized_symbol] = output.feature_parity_pct
+        LAST_MISSING_COUNT_BY_SYMBOL[normalized_symbol] = output.missing_features_count
+        LAST_CRITICAL_MISSING_BY_SYMBOL[normalized_symbol] = list(output.critical_missing_groups)
+        LAST_LATENCY_BY_SYMBOL[normalized_symbol] = output.total_latency_ms
     return model_dump(output)
 
 
@@ -153,6 +164,9 @@ def decision_brain_runtime_status() -> dict[str, Any]:
         "last_decision_by_symbol": dict(LAST_DECISION_BY_SYMBOL),
         "last_feature_status_by_symbol": dict(LAST_FEATURE_STATUS_BY_SYMBOL),
         "last_feature_parity_pct_by_symbol": dict(LAST_FEATURE_PARITY_BY_SYMBOL),
+        "last_missing_features_count_by_symbol": dict(LAST_MISSING_COUNT_BY_SYMBOL),
+        "last_critical_missing_groups_by_symbol": dict(LAST_CRITICAL_MISSING_BY_SYMBOL),
+        "last_latency_by_symbol": dict(LAST_LATENCY_BY_SYMBOL),
         "cache_size": 1 if artifacts is not None else 0,
         "last_errors": list(LAST_ERRORS) + list(loader_status.get("last_errors") or []),
     }
