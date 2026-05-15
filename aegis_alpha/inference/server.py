@@ -23,6 +23,10 @@ from aegis_alpha.entry_quality.entry_quality_shadow import (
     entry_quality_runtime_status,
     evaluate_entry_quality_shadow,
 )
+from aegis_alpha.decision_brain.decision_brain_shadow import (
+    decision_brain_runtime_status,
+    evaluate_decision_brain_shadow,
+)
 from aegis_alpha.event_risk.event_risk_detector import (
     evaluate_event_risk_auto,
     event_risk_runtime_status,
@@ -66,6 +70,7 @@ LAST_PREDICT: dict[str, Any] = {
     "safe_shadow_ms": None,
     "turbo_ms": None,
     "event_risk_auto_ms": None,
+    "decision_brain_ms": None,
     "feature_ms": None,
     "model_load_ms": 0.0,
     "logger_ms": None,
@@ -246,6 +251,14 @@ def _defensive_aegis_block(symbol: str, reason: str, error: str | None = None) -
             risk_guard={"blocked": True, "reason": reason},
         ),
         "event_risk_auto": event_risk_auto,
+        "decision_brain": evaluate_decision_brain_shadow(
+            symbol=symbol,
+            side=None,
+            turbo_context=None,
+            entry_quality_model=None,
+            event_risk_auto=event_risk_auto,
+            news_sentiment=None,
+        ),
     }
 
 
@@ -344,6 +357,39 @@ def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
             "eth": None,
             "api_warnings": [f"event_risk_auto_log_error:{exc!r}"],
         })
+    try:
+        turbo["decision_brain"] = evaluate_decision_brain_shadow(
+            symbol=symbol,
+            side=str((turbo.get("raw") or {}).get("action") or turbo.get("action") or "UNKNOWN"),
+            turbo_context=turbo,
+            entry_quality_model=turbo.get("entry_quality_model"),
+            event_risk_auto=turbo.get("event_risk_auto"),
+            news_sentiment=None,
+        )
+    except Exception as exc:  # pragma: no cover - endpoint safety
+        LOGGER.exception("decision_brain_for_turbo_log_failed")
+        turbo["decision_brain"] = {
+            "mode": "SHADOW",
+            "execute": False,
+            "production_allowed": False,
+            "status": "RESEARCH_CANDIDATE_NOT_LIVE",
+            "model_version": "v010",
+            "symbol": normalize_turbo_symbol(symbol),
+            "side": str((turbo.get("raw") or {}).get("action") or turbo.get("action") or "UNKNOWN"),
+            "decision": "UNKNOWN",
+            "enter_now_prob": 0.0,
+            "wait_confirmation_prob": 0.0,
+            "manual_only_prob": 0.0,
+            "do_not_enter_prob": 0.0,
+            "recommendation": "MODEL_ERROR",
+            "reason": f"decision_brain_model_error:{exc!r}",
+            "feature_status": "insufficient",
+            "feature_parity_pct": 0.0,
+            "missing_features_count": 0,
+            "missing_features": [],
+            "critical_missing_groups": [],
+            "latency_ms": 0.0,
+        }
     log_start = time.perf_counter()
     log_path, log_warning = safe_log_turbo_shadow(turbo)
     turbo["logger_ms"] = round((time.perf_counter() - log_start) * 1000, 3)
@@ -497,6 +543,7 @@ def debug_runtime():
         "last_predict_latency": {k: v for k, v in LAST_PREDICT.items() if k.endswith("_ms") or k == "fallback_used"},
         "last_predict_error": LAST_PREDICT.get("error"),
         "event_risk_auto": event_risk_runtime_status(),
+        "decision_brain_status": decision_brain_runtime_status(),
         "turbo_snapshot_status": _runtime_turbo_snapshot_status(),
         "turbo_config_status": runtime_turbo_config_status(),
         "entry_quality_model_status": entry_quality_runtime_status(load_if_needed=False),
@@ -521,6 +568,7 @@ def ml_v2_predict(req: PredictRequest):
         "safe_shadow_ms": None,
         "turbo_ms": None,
         "event_risk_auto_ms": None,
+        "decision_brain_ms": None,
         "model_load_ms": 0.0,
         "logger_ms": None,
     }
@@ -568,6 +616,49 @@ def ml_v2_predict(req: PredictRequest):
         if isinstance(aegis_block.get("turbo"), dict):
             aegis_block["turbo"]["event_risk_auto"] = event_risk_auto
         timings["event_risk_auto_ms"] = round((time.perf_counter() - event_risk_start) * 1000, 3)
+
+        decision_brain_start = time.perf_counter()
+        decision_brain = (aegis_block.get("turbo") or {}).get("decision_brain") if isinstance(aegis_block.get("turbo"), dict) else None
+        if not isinstance(decision_brain, dict):
+            try:
+                turbo_block = aegis_block.get("turbo") if isinstance(aegis_block.get("turbo"), dict) else {}
+                decision_brain = evaluate_decision_brain_shadow(
+                    symbol=req.symbol,
+                    side=str((turbo_block.get("raw") or {}).get("action") or turbo_block.get("action") or "UNKNOWN"),
+                    turbo_context=turbo_block,
+                    entry_quality_model=aegis_block.get("entry_quality_model"),
+                    event_risk_auto=event_risk_auto,
+                    news_sentiment=None,
+                )
+            except Exception as exc:  # pragma: no cover - endpoint safety
+                fallback_used = True
+                LOGGER.exception("decision_brain_failed")
+                decision_brain = {
+                    "mode": "SHADOW",
+                    "execute": False,
+                    "production_allowed": False,
+                    "status": "RESEARCH_CANDIDATE_NOT_LIVE",
+                    "model_version": "v010",
+                    "symbol": normalize_turbo_symbol(req.symbol),
+                    "side": "UNKNOWN",
+                    "decision": "UNKNOWN",
+                    "enter_now_prob": 0.0,
+                    "wait_confirmation_prob": 0.0,
+                    "manual_only_prob": 0.0,
+                    "do_not_enter_prob": 0.0,
+                    "recommendation": "MODEL_ERROR",
+                    "reason": f"decision_brain_model_error:{exc!r}",
+                    "feature_status": "insufficient",
+                    "feature_parity_pct": 0.0,
+                    "missing_features_count": 0,
+                    "missing_features": [],
+                    "critical_missing_groups": [],
+                    "latency_ms": 0.0,
+                }
+        aegis_block["decision_brain"] = decision_brain
+        if isinstance(aegis_block.get("turbo"), dict):
+            aegis_block["turbo"]["decision_brain"] = decision_brain
+        timings["decision_brain_ms"] = round((time.perf_counter() - decision_brain_start) * 1000, 3)
 
         aegis_block["model"] = _model_dump(aegis_response)
         total_ms = round((time.perf_counter() - total_start) * 1000, 3)

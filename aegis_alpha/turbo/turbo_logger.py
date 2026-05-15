@@ -23,6 +23,7 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
     gated = signal.get("gated") or {}
     entry_quality_model = signal.get("entry_quality_model")
     event_risk_auto = signal.get("event_risk_auto")
+    decision_brain = signal.get("decision_brain")
     row = {
         "logged_at": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
         "timestamp": signal.get("timestamp"),
@@ -75,6 +76,28 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
             "latency_ms": event_risk_auto.get("latency_ms"),
             "last_update": event_risk_auto.get("last_update"),
         } if isinstance(event_risk_auto, dict) else None,
+        "decision_brain": {
+            "mode": decision_brain.get("mode"),
+            "status": decision_brain.get("status"),
+            "model_version": decision_brain.get("model_version"),
+            "decision": decision_brain.get("decision"),
+            "enter_now_prob": decision_brain.get("enter_now_prob"),
+            "wait_confirmation_prob": decision_brain.get("wait_confirmation_prob"),
+            "manual_only_prob": decision_brain.get("manual_only_prob"),
+            "do_not_enter_prob": decision_brain.get("do_not_enter_prob"),
+            "recommendation": decision_brain.get("recommendation"),
+            "reason": decision_brain.get("reason"),
+            "feature_status": decision_brain.get("feature_status"),
+            "feature_parity_pct": decision_brain.get("feature_parity_pct"),
+            "missing_features_count": decision_brain.get("missing_features_count"),
+            "critical_missing_groups": decision_brain.get("critical_missing_groups"),
+            "feature_build_latency_ms": decision_brain.get("feature_build_latency_ms"),
+            "model_latency_ms": decision_brain.get("model_latency_ms"),
+            "total_latency_ms": decision_brain.get("total_latency_ms"),
+            "latency_ms": decision_brain.get("latency_ms"),
+            "execute": decision_brain.get("execute"),
+            "production_allowed": decision_brain.get("production_allowed"),
+        } if isinstance(decision_brain, dict) else None,
         "stale": not bool((signal.get("freshness") or {}).get("is_fresh", True)),
         "raw": raw,
         "gated": gated,
