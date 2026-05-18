@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import json
@@ -27,8 +28,11 @@ from aegis_alpha.turbo.turbo_schema import build_turbo_signal
 
 LOGGER = logging.getLogger(__name__)
 TURBO_ALLOW_MARKET_REBUILD = False
+TURBO_SCORE_CACHE_TTL_SECONDS = int(os.environ.get("AEGIS_TURBO_SCORE_CACHE_TTL_SECONDS", "90"))
 _MODEL_CACHE: dict[str, tuple[int | None, Any | None]] = {}
 _MODEL_SET_CACHE: dict[str, dict[str, Any]] = {}
+_FEATURE_CACHE: dict[tuple[str, str, int | None, int | None], tuple[np.ndarray, str]] = {}
+_SCORE_CACHE: dict[tuple[str, str, tuple[Any, ...]], tuple[float, dict[str, float | None], dict[str, int]]] = {}
 _STALE_LOG_LAST_EMITTED: dict[str, float] = {}
 LAST_TURBO_RUNTIME: dict[str, Any] = {
     "reason": None,
@@ -164,6 +168,14 @@ def model_set_cache_status() -> dict[str, dict[str, Any]]:
             "loaded_at": cache.get("loaded_at"),
         }
         for symbol, cache in _MODEL_SET_CACHE.items()
+    }
+
+
+def turbo_runtime_cache_status() -> dict[str, Any]:
+    return {
+        "feature_cache_size": len(_FEATURE_CACHE),
+        "score_cache_size": len(_SCORE_CACHE),
+        "score_cache_ttl_seconds": TURBO_SCORE_CACHE_TTL_SECONDS,
     }
 
 
@@ -313,6 +325,14 @@ def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
     selected = _select_turbo_snapshot(symbol)
     path = selected.get("path")
     if path:
+        try:
+            stat = Path(str(path)).stat()
+            cache_key = (normalize_turbo_symbol(symbol), str(path), stat.st_mtime_ns, stat.st_size)
+            cached = _FEATURE_CACHE.get(cache_key)
+            if cached is not None:
+                return cached[0].copy(), cached[1]
+        except OSError:
+            cache_key = None
         data = np.load(path, allow_pickle=True)
         live_x = data.get("live_X")
         if live_x is not None and len(live_x) > 0:
@@ -323,10 +343,18 @@ def _current_feature(symbol: str) -> tuple[np.ndarray | None, str]:
         if feature_timestamp is not None:
             if hasattr(feature_timestamp, "item"):
                 feature_timestamp = feature_timestamp.item()
-            return x[-1:].astype(np.float32), str(feature_timestamp)
+            current = x[-1:].astype(np.float32)
+            timestamp = str(feature_timestamp)
+            if cache_key is not None:
+                _FEATURE_CACHE[cache_key] = (current.copy(), timestamp)
+            return current, timestamp
         timestamps = data["timestamp"].astype(str)
         if len(x) > 0:
-            return x[-1:].astype(np.float32), str(timestamps[-1])
+            current = x[-1:].astype(np.float32)
+            timestamp = str(timestamps[-1])
+            if cache_key is not None:
+                _FEATURE_CACHE[cache_key] = (current.copy(), timestamp)
+            return current, timestamp
     if not TURBO_ALLOW_MARKET_REBUILD:
         return None, ""
     market = load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=symbol)
@@ -356,6 +384,24 @@ def _score_models(x: np.ndarray, symbol: str) -> tuple[dict[str, float | None], 
             votes["long"] += 1
         else:
             votes["short"] += 1
+    return scores, votes
+
+
+def _score_models_cached(x: np.ndarray, symbol: str, feature_timestamp: str) -> tuple[dict[str, float | None], dict[str, int]]:
+    normalized = normalize_turbo_symbol(symbol)
+    signature = _manifest_signature(normalized)
+    cache_key = (normalized, str(feature_timestamp), signature)
+    now = time.time()
+    cached = _SCORE_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] <= TURBO_SCORE_CACHE_TTL_SECONDS:
+        return copy.deepcopy(cached[1]), dict(cached[2])
+
+    scores, votes = _score_models(x, normalized)
+    _SCORE_CACHE[cache_key] = (now, copy.deepcopy(scores), dict(votes))
+    if len(_SCORE_CACHE) > 512:
+        oldest_keys = sorted(_SCORE_CACHE, key=lambda key: _SCORE_CACHE[key][0])[:128]
+        for old_key in oldest_keys:
+            _SCORE_CACHE.pop(old_key, None)
     return scores, votes
 
 
@@ -699,7 +745,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
                 "snapshot_path": selected_snapshot.get("path"),
             })
             return signal
-        scores, votes = _score_models(x, symbol)
+        scores, votes = _score_models_cached(x, symbol, timestamp)
         if all(value is None for value in scores.values()):
             raw = {
                 "action": "HOLD",

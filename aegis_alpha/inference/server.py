@@ -52,6 +52,7 @@ from aegis_alpha.turbo.turbo_signal import (
     evaluate_turbo_shadow,
     model_cache_keys,
     model_set_cache_status,
+    turbo_runtime_cache_status,
     runtime_status_by_symbol,
     runtime_symbols,
 )
@@ -539,6 +540,7 @@ def debug_runtime():
             "ppo_path": str(loader.model_path),
             "turbo": model_cache_keys(),
             "turbo_sets": model_set_cache_status(),
+            "turbo_runtime_cache": turbo_runtime_cache_status(),
         },
         "last_predict_latency": {k: v for k, v in LAST_PREDICT.items() if k.endswith("_ms") or k == "fallback_used"},
         "last_predict_error": LAST_PREDICT.get("error"),
