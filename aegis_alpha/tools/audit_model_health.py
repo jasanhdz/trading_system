@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -11,6 +12,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from aegis_alpha.config import REPO_ROOT
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG
@@ -51,6 +54,7 @@ REPORT_COLUMNS = (
     "validationScoreAvg",
     "rmseAvg",
     "directionalMetricsAvailable",
+    "directionalConfidence",
     "operationalWarnings",
     "directionalWarnings",
     "legacyWarnings",
@@ -80,10 +84,14 @@ class ModelHealthRow:
     validationScoreAvg: float | None
     rmseAvg: float | None
     directionalMetricsAvailable: bool
+    directionalConfidence: float | None = None
     operationalWarnings: list[str] = field(default_factory=list)
     directionalWarnings: list[str] = field(default_factory=list)
     legacyWarnings: list[str] = field(default_factory=list)
     recommendedAction: list[str] = field(default_factory=list)
+    directionalPhase2Actions: list[str] = field(default_factory=list)
+    directionalMetricsSummary: dict[str, Any] | None = None
+    directionalReportPath: str | None = None
     modelPaths: list[str] = field(default_factory=list)
     manifestPath: str | None = None
     snapshotPath: str | None = None
@@ -358,9 +366,53 @@ def recommended_actions(row: ModelHealthRow) -> list[str]:
         actions.append("legacy_check_document_or_remove_from_turbo_health")
     if row.operationalStatus == "RED":
         actions.append("fix_missing_or_stale_runtime_artifacts")
+    actions.extend(row.directionalPhase2Actions)
     if not actions:
         actions.append("no_action_phase1")
-    return actions
+    return sorted(set(actions))
+
+
+def load_directional_report(path: str | Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    report_path = Path(path)
+    data = read_json(report_path)
+    if data is not None:
+        data["_path"] = str(report_path)
+    return data
+
+
+def apply_directional_report(rows: list[ModelHealthRow], directional_report: dict[str, Any] | None) -> None:
+    if not directional_report:
+        return
+    summaries = directional_report.get("symbolSummaries")
+    if not isinstance(summaries, list):
+        return
+    by_symbol = {str(item.get("symbol", "")).upper(): item for item in summaries if isinstance(item, dict)}
+    for row in rows:
+        summary = by_symbol.get(row.symbol)
+        if not summary:
+            continue
+        row.directionalStatus = str(summary.get("directionalStatus") or row.directionalStatus)
+        row.directionalConfidence = finite_float(summary.get("directionalConfidence"))
+        row.directionalMetricsAvailable = True
+        row.directionalWarnings = [warning for warning in row.directionalWarnings if warning != "no_class_precision_metrics_long_short_neutral"]
+        for warning in summary.get("directionalWarnings") or []:
+            warning_text = str(warning)
+            if warning_text not in row.directionalWarnings:
+                row.directionalWarnings.append(warning_text)
+        row.directionalPhase2Actions = [str(action) for action in (summary.get("recommendedAction") or [])]
+        row.directionalMetricsSummary = {
+            "sampleCount": summary.get("sampleCount"),
+            "scoreCalibration": summary.get("scoreCalibration"),
+            "longCount": (summary.get("long") or {}).get("count") if isinstance(summary.get("long"), dict) else None,
+            "longExpectancy60m": (summary.get("long") or {}).get("netExpectancy60m") if isinstance(summary.get("long"), dict) else None,
+            "longHit8BeforeMinus5": (summary.get("long") or {}).get("hit8BeforeMinus5") if isinstance(summary.get("long"), dict) else None,
+            "shortCount": (summary.get("short") or {}).get("count") if isinstance(summary.get("short"), dict) else None,
+            "shortExpectancy60m": (summary.get("short") or {}).get("netExpectancy60m") if isinstance(summary.get("short"), dict) else None,
+            "shortHit8BeforeMinus5": (summary.get("short") or {}).get("hit8BeforeMinus5") if isinstance(summary.get("short"), dict) else None,
+        }
+        row.directionalReportPath = directional_report.get("_path")
 
 
 def ping_predict(symbol: str, base_url: str, timeout_seconds: float = 2.0) -> ApiPredictResult:
@@ -386,6 +438,7 @@ def audit_symbols(
     check_api: bool = False,
     api_base_url: str | None = None,
     api_timeout_seconds: float = 5.0,
+    directional_report_path: str | Path | None = None,
 ) -> dict[str, Any]:
     normalized_symbols = [normalize_turbo_symbol(symbol) for symbol in symbols]
     latest = latest_retrain_report()
@@ -476,6 +529,9 @@ def audit_symbols(
     if len(rmse_values) > 1:
         weakest_symbols.add(max(rmse_values, key=lambda item: item[1])[0])
 
+    directional_report = load_directional_report(directional_report_path)
+    apply_directional_report(rows, directional_report)
+
     for row in rows:
         if row.symbol in weakest_symbols:
             if "weakest_relative_metrics" not in row.operationalWarnings:
@@ -509,6 +565,7 @@ def audit_symbols(
         "check_api": check_api,
         "api_base_url": base_url if check_api else None,
         "api_timeout_seconds": api_timeout_seconds if check_api else None,
+        "directional_report_path": str(directional_report_path) if directional_report_path else None,
         "latest_retrain": latest_summary,
         "operationalStatusCounts": status_counts(rows, "operationalStatus"),
         "directionalStatusCounts": status_counts(rows, "directionalStatus"),
@@ -594,6 +651,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--check-api", "--ping-predict", action="store_true", dest="check_api", help="Optionally call /ml-v2/predict for each symbol.")
     parser.add_argument("--api-url", default=os.environ.get("ML_SERVICE_URL", "http://127.0.0.1:8001"), help="Base URL for --check-api.")
     parser.add_argument("--api-timeout-seconds", type=float, default=5.0, help="Timeout per /ml-v2/predict call when --check-api is enabled.")
+    parser.add_argument("--directional-report", default=None, help="Optional Phase 2 directional metrics JSON to merge into this report.")
     return parser.parse_args()
 
 
@@ -605,6 +663,7 @@ def main() -> int:
         check_api=bool(args.check_api),
         api_base_url=args.api_url,
         api_timeout_seconds=float(args.api_timeout_seconds),
+        directional_report_path=args.directional_report,
     )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     paths = write_reports(report, Path(args.out_dir), timestamp)

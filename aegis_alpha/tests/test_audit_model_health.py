@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from aegis_alpha.tools import audit_model_health as audit
 
@@ -163,3 +166,38 @@ def test_weakest_relative_metrics_warns_without_red(monkeypatch, tmp_path):
     assert "weakest_relative_metrics" in rows["SUIUSDT"]["operationalWarnings"]
     assert "weakest_relative_metrics" in rows["SUIUSDT"]["directionalWarnings"]
     assert rows["SUIUSDT"]["operationalStatus"] != "RED"
+
+
+def test_directional_report_overrides_directional_status(monkeypatch, tmp_path):
+    _patch_common(monkeypatch, tmp_path, {"ETHUSDT": _snapshot("ETHUSDT", source="legacy_global")})
+    directional_path = tmp_path / "directional.json"
+    directional_path.write_text(
+        json.dumps(
+            {
+                "symbolSummaries": [
+                    {
+                        "symbol": "ETHUSDT",
+                        "directionalStatus": "RED",
+                        "directionalConfidence": 0.25,
+                        "sampleCount": 50,
+                        "scoreCalibration": "NOT_CALIBRATED",
+                        "directionalWarnings": ["score_not_calibrated"],
+                        "recommendedAction": ["reduce_confidence_until_directional_metrics"],
+                        "long": {"count": 40, "netExpectancy60m": -0.01, "hit8BeforeMinus5": 0.2},
+                        "short": {"count": 10, "netExpectancy60m": 0.002, "hit8BeforeMinus5": 0.5},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = audit.audit_symbols(["ETHUSDT"], directional_report_path=directional_path)
+    row = report["rows"][0]
+
+    assert row["directionalStatus"] == "RED"
+    assert row["directionalMetricsAvailable"] is True
+    assert row["directionalConfidence"] == 0.25
+    assert "score_not_calibrated" in row["directionalWarnings"]
+    assert "no_class_precision_metrics_long_short_neutral" not in row["directionalWarnings"]
+    assert row["directionalMetricsSummary"]["longExpectancy60m"] == -0.01
