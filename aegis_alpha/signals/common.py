@@ -18,6 +18,8 @@ class SignalMarket:
     cfg: AegisConfig
     features: np.ndarray
     signal_features: np.ndarray
+    high: np.ndarray
+    low: np.ndarray
     close: np.ndarray
     timestamps: np.ndarray
     regimes: np.ndarray
@@ -161,6 +163,8 @@ def load_signal_market(config_path: str | Path, symbol_override: str | None = No
 
     frame = build_feature_frame(df)
     features = frame[FEATURE_COLUMNS].values.astype(np.float32)
+    high = frame["high"].values.astype(np.float32)
+    low = frame["low"].values.astype(np.float32)
     close = frame["close"].values.astype(np.float32)
     timestamps = frame.index.astype(str).values
     window_size = cfg.model.window_size
@@ -175,6 +179,8 @@ def load_signal_market(config_path: str | Path, symbol_override: str | None = No
         cfg=cfg,
         features=features,
         signal_features=signal_features,
+        high=high,
+        low=low,
         close=close,
         timestamps=timestamps,
         regimes=regimes,

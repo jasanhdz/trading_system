@@ -19,7 +19,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from aegis_alpha.edge.common import WINDOW_FEATURE_NAMES, edge_feature_names
 from aegis_alpha.features.feature_builder import FEATURE_COLUMNS
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG
-from aegis_alpha.turbo.recent_dataset import MAX_TARGET_HORIZON, build_recent_dataset
+from aegis_alpha.turbo.recent_dataset import (
+    MAX_TARGET_HORIZON,
+    OPERABLE_TARGET_NAMES,
+    OPERABLE_TARGET_SCHEMA_VERSION,
+    TRADE_QUALITY_FORMULA,
+    build_recent_dataset,
+)
 from aegis_alpha.turbo.snapshot_utils import (
     load_turbo_snapshot_status,
     normalize_turbo_symbol,
@@ -548,6 +554,29 @@ def recommendations_for_phase_b() -> list[str]:
     ]
 
 
+def load_operable_targets_context(path_text: str | None) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "operable_v2_targets_present": True,
+        "schema_version": OPERABLE_TARGET_SCHEMA_VERSION,
+        "target_names": list(OPERABLE_TARGET_NAMES),
+        "trade_quality_formula": TRADE_QUALITY_FORMULA,
+        "distribution_report_path": path_text,
+        "distribution_report_loaded": False,
+        "global_horizon_12": [],
+    }
+    if not path_text:
+        return context
+    try:
+        payload = json.loads(Path(path_text).read_text(encoding="utf-8"))
+        context["distribution_report_loaded"] = True
+        context["global_horizon_12"] = payload.get("global_horizon_12", [])
+        context["best_symbol_sides_30d_h12"] = payload.get("best_symbol_sides_30d_h12", [])
+        context["worst_symbol_sides_30d_h12"] = payload.get("worst_symbol_sides_30d_h12", [])
+    except Exception as exc:
+        context["distribution_report_error"] = repr(exc)
+    return context
+
+
 def feature_quality_summary(feature_rows: list[FeatureAuditRow]) -> dict[str, Any]:
     constant = [row.feature_name for row in feature_rows if (row.constant_rate or 0.0) >= 0.5]
     high_zero = [row.feature_name for row in feature_rows if (row.zero_rate or 0.0) > 0.9]
@@ -583,7 +612,12 @@ def feature_quality_summary(feature_rows: list[FeatureAuditRow]) -> dict[str, An
     }
 
 
-def build_report(symbols: list[str], lookback_days: int, load_dataset: bool) -> tuple[dict[str, Any], list[FeatureAuditRow], list[LeakageRiskRow]]:
+def build_report(
+    symbols: list[str],
+    lookback_days: int,
+    load_dataset: bool,
+    operable_targets_report: str | None = None,
+) -> tuple[dict[str, Any], list[FeatureAuditRow], list[LeakageRiskRow]]:
     audits: list[SymbolDatasetAudit] = []
     stat_maps: list[dict[str, dict[str, float | str]]] = []
     for symbol in symbols:
@@ -616,6 +650,7 @@ def build_report(symbols: list[str], lookback_days: int, load_dataset: bool) -> 
                 "short_good_12",
             ],
             "target_gap": "Return target is close-to-close and does not model SL/TP/BE/trailing or hit-before-stop order.",
+            "operable_targets": load_operable_targets_context(operable_targets_report),
         },
         "training_settings": {
             "model_type": "HistGradientBoostingRegressor",
@@ -663,6 +698,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         for row in report.get("leakage_risks", [])
     ]
     feature_quality = report.get("feature_quality_summary", {})
+    operable_targets = report.get("current_targets", {}).get("operable_targets", {})
     lines = [
         f"# Aegis Turbo Training Pipeline Audit {report['created_at']}",
         "",
@@ -700,6 +736,15 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"- Trained targets: `{', '.join(report['current_targets']['trained_targets'])}`",
         f"- Gap: {report['current_targets']['target_gap']}",
         "",
+        "## Fase B Operable Targets",
+        "",
+        f"- Operable V2 targets present: `{operable_targets.get('operable_v2_targets_present')}`",
+        f"- Schema: `{operable_targets.get('schema_version')}`",
+        f"- New target column count: `{len(operable_targets.get('target_names') or [])}`",
+        f"- Distribution report: `{operable_targets.get('distribution_report_path') or 'not supplied'}`",
+        f"- Distribution report loaded: `{operable_targets.get('distribution_report_loaded')}`",
+        f"- Formula: `{operable_targets.get('trade_quality_formula')}`",
+        "",
         "## Leakage And Parity Risks",
         "",
         "| Area | Severity | Risk | Evidence |",
@@ -723,12 +768,18 @@ def main() -> None:
     parser.add_argument("--lookback-days", type=int, default=30)
     parser.add_argument("--out-dir", default="/home/jasan/Develop")
     parser.add_argument("--skip-dataset", action="store_true", help="Only static audit; skip loading build_recent_dataset.")
+    parser.add_argument("--operable-targets-report", help="Optional JSON output from audit_turbo_operable_targets.py.")
     args = parser.parse_args()
 
     symbols = parse_symbols(args.symbols)
     stamp = utc_stamp()
     out_dir = Path(args.out_dir)
-    report, feature_rows, leakage_rows = build_report(symbols, args.lookback_days, load_dataset=not args.skip_dataset)
+    report, feature_rows, leakage_rows = build_report(
+        symbols,
+        args.lookback_days,
+        load_dataset=not args.skip_dataset,
+        operable_targets_report=args.operable_targets_report,
+    )
 
     json_path = out_dir / f"aegis_turbo_training_pipeline_audit_{stamp}.json"
     md_path = out_dir / f"aegis_turbo_training_pipeline_audit_{stamp}.md"

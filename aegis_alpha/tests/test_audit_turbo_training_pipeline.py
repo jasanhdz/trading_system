@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sys
+import json
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +17,7 @@ from aegis_alpha.tools.audit_turbo_training_pipeline import (
     duplicate_or_correlated_features,
     feature_quality_summary,
     feature_stats_matrix,
+    load_operable_targets_context,
     likely_phase2_red_explanation,
     merge_feature_stats,
     recommendations_for_phase_b,
@@ -121,6 +124,16 @@ def test_explanations_and_phase_b_recommendations() -> None:
     assert_true("trade_quality" in recommendations, "Fase B should recommend trade_quality targets")
 
 
+def test_operable_target_report_context() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        path = Path(temp_dir) / "targets.json"
+        path.write_text(json.dumps({"global_horizon_12": [{"side": "LONG"}]}), encoding="utf-8")
+        context = load_operable_targets_context(str(path))
+    assert_true(context["operable_v2_targets_present"], "V2 target availability should be recorded")
+    assert_true(context["distribution_report_loaded"], "distribution JSON should load")
+    assert_true(context["global_horizon_12"][0]["side"] == "LONG", "global summary should pass through")
+
+
 def run_all() -> None:
     test_feature_stats_detects_nan_inf_zero_constant()
     test_duplicate_detector_flags_duplicate_column()
@@ -129,6 +142,7 @@ def run_all() -> None:
     test_feature_quality_summary_marks_dead_columns()
     test_pipeline_map_mentions_runtime_and_training()
     test_explanations_and_phase_b_recommendations()
+    test_operable_target_report_context()
     print("manual_turbo_training_pipeline_audit_tests_passed")
 
 
