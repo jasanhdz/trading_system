@@ -342,6 +342,8 @@ def train_side_models(
     feature_set = str(dataset.get("feature_set", "base"))
     base_feature_count = int(dataset.get("base_feature_count", len(feature_names)))
     new_feature_count = int(dataset.get("new_feature_count", 0))
+    operable_v2_feature_count = int(dataset.get("operable_v2_feature_count", 0))
+    operable_v3_feature_count = int(dataset.get("operable_v3_feature_count", 0))
     if len(x) < MIN_TRAIN_SAMPLES:
         return {
             "symbol": symbol,
@@ -373,7 +375,10 @@ def train_side_models(
         "feature_count": int(len(feature_names)),
         "base_feature_count": base_feature_count,
         "new_feature_count": new_feature_count,
+        "operable_v2_feature_count": operable_v2_feature_count,
+        "operable_v3_feature_count": operable_v3_feature_count,
         "feature_schema_hash": feature_schema_hash(feature_names),
+        "feature_diagnostics": dataset.get("feature_diagnostics"),
         "split_samples": {name: int(len(indices)) for name, indices in split.items()},
         "target_distributions": distributions,
         "baseline_test": {
@@ -407,6 +412,9 @@ def train_side_models(
             "feature_set": feature_set,
             "base_feature_count": base_feature_count,
             "new_feature_count": new_feature_count,
+            "operable_v2_feature_count": operable_v2_feature_count,
+            "operable_v3_feature_count": operable_v3_feature_count,
+            "feature_diagnostics": dataset.get("feature_diagnostics"),
         })
         path = research_model_path(run_dir, normalized_side, family, horizon, lookback_days)
         family_result: dict[str, Any] = {

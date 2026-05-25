@@ -74,6 +74,14 @@ def row(
 
 def test_classification_statuses() -> None:
     assert_true(classify_short_config(row()) == "SHORT_STRONG_RESEARCH", "strong classification")
+    assert_true(
+        classify_short_config(row(feature_set="operable_v3")) == "SHORT_STRONG_RESEARCH",
+        "V3 strong classification",
+    )
+    assert_true(
+        classify_short_config(row(feature_set="combined_v3")) == "SHORT_STRONG_RESEARCH",
+        "combined V3 strong classification",
+    )
     mixed = row(quality_lift=-0.01, hit8_lift=0.05, latest_quality=-0.01, corr=-0.03, net_lift=-0.02)
     assert_true(classify_short_config(mixed) == "SHORT_MIXED_RESEARCH", "mixed classification")
     bad = row(quality_lift=-0.08, hit8_lift=-0.04, latest_quality=-0.06, corr=-0.05, net_lift=-0.09)

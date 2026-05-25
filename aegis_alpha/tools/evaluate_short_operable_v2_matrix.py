@@ -15,7 +15,6 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.config import REPO_ROOT  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.tools.evaluate_ada_short_operable_v2_matrix import (  # noqa: E402
-    FEATURE_SETS,
     _family,
     enrich_summary,
     finite,
@@ -26,7 +25,7 @@ from aegis_alpha.tools.evaluate_ada_short_operable_v2_matrix import (  # noqa: E
     validate_research_model_dir,
 )
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
-from aegis_alpha.turbo.operable_feature_builder_v2 import apply_feature_set  # noqa: E402
+from aegis_alpha.turbo.operable_feature_builder_v3 import FEATURE_SETS, apply_feature_set  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
 from aegis_alpha.turbo.snapshot_utils import normalize_turbo_symbol  # noqa: E402
 from aegis_alpha.turbo.walk_forward_operable_v2 import run_walk_forward  # noqa: E402
@@ -59,6 +58,12 @@ SUMMARY_COLUMNS = (
     "symbol",
     "side",
     "feature_set",
+    "feature_count",
+    "base_feature_count",
+    "new_feature_count",
+    "operable_v2_feature_count",
+    "operable_v3_feature_count",
+    "feature_schema_hash",
     "lookback_days",
     "horizon_candles",
     "fold_count",
@@ -116,7 +121,7 @@ def classify_short_config(row: dict[str, Any]) -> str:
     strong = (
         row.get("recommendation") == "WALK_FORWARD_PROMISING"
         and valid_folds >= 4
-        and row.get("feature_set") == PRIMARY_FEATURE_SET
+        and row.get("feature_set") in {PRIMARY_FEATURE_SET, "operable_v3", "combined_v3"}
         and finite(row.get("quality_top_decile_lift_mean")) > 0.0
         and finite(row.get("hit8_top_decile_lift_mean")) > 0.0
         and finite(row.get("latest_fold_quality_lift")) > 0.0
@@ -335,6 +340,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     market_cache: dict[str, Any] = {}
     dataset_cache: dict[tuple[str, int, str], dict[str, Any]] = {}
+    context_markets: dict[str, Any] = {}
     evaluated: set[tuple[str, str, int, int]] = set()
 
     def evaluate(configuration: tuple[str, str, int, int]) -> None:
@@ -348,7 +354,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             key = (symbol, lookback, feature_set)
             if key not in dataset_cache:
                 base = build_recent_dataset(symbol, lookback, save=False, market=market_cache[symbol])["dataset"]
-                dataset_cache[key] = apply_feature_set(base, market_cache[symbol], feature_set)
+                if feature_set in {"operable_v3", "combined_v3"} and not context_markets:
+                    context_markets.update({
+                        value: load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=value)
+                        for value in ("BTCUSDT", "ETHUSDT")
+                    })
+                dataset_cache[key] = apply_feature_set(
+                    base,
+                    market_cache[symbol],
+                    feature_set,
+                    context_markets=context_markets,
+                )
             result = run_walk_forward(
                 dataset_cache[key],
                 symbol=symbol,

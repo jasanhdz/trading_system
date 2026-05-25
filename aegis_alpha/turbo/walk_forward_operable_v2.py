@@ -173,6 +173,8 @@ def train_fold_models(
     feature_set = str(dataset.get("feature_set", "base"))
     base_feature_count = int(dataset.get("base_feature_count", len(feature_names)))
     new_feature_count = int(dataset.get("new_feature_count", 0))
+    operable_v2_feature_count = int(dataset.get("operable_v2_feature_count", 0))
+    operable_v3_feature_count = int(dataset.get("operable_v3_feature_count", 0))
     test = split["test"]
     baseline = {
         "hit8_rate": finite_float(np.mean(arrays["hit8"][test])),
@@ -203,6 +205,10 @@ def train_fold_models(
         "feature_count": int(len(feature_names)),
         "base_feature_count": base_feature_count,
         "new_feature_count": new_feature_count,
+        "operable_v2_feature_count": operable_v2_feature_count,
+        "operable_v3_feature_count": operable_v3_feature_count,
+        "feature_schema_hash": dataset.get("feature_schema_hash"),
+        "feature_diagnostics": dataset.get("feature_diagnostics"),
         "split_samples": {name: int(len(indices)) for name, indices in split.items()},
         "baseline_test": baseline,
         "v1_target_reference": {
@@ -235,6 +241,9 @@ def train_fold_models(
             "feature_set": feature_set,
             "base_feature_count": base_feature_count,
             "new_feature_count": new_feature_count,
+            "operable_v2_feature_count": operable_v2_feature_count,
+            "operable_v3_feature_count": operable_v3_feature_count,
+            "feature_diagnostics": dataset.get("feature_diagnostics"),
             "walk_forward_only": True,
             "fold": int(fold["fold"]),
             "ranges": fold.get("ranges", {}),
@@ -388,6 +397,10 @@ def aggregate_walk_forward_results(
         "feature_count": fold_results[0].get("feature_count") if fold_results else None,
         "base_feature_count": fold_results[0].get("base_feature_count") if fold_results else None,
         "new_feature_count": fold_results[0].get("new_feature_count") if fold_results else None,
+        "operable_v2_feature_count": fold_results[0].get("operable_v2_feature_count") if fold_results else None,
+        "operable_v3_feature_count": fold_results[0].get("operable_v3_feature_count") if fold_results else None,
+        "feature_schema_hash": fold_results[0].get("feature_schema_hash") if fold_results else None,
+        "feature_diagnostics": fold_results[0].get("feature_diagnostics") if fold_results else None,
         "fold_count": int(requested_fold_count),
         "generated_fold_count": int(len(fold_results)),
         "valid_fold_count": int(len(valid)),

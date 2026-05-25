@@ -16,7 +16,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.config import REPO_ROOT  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
-from aegis_alpha.turbo.operable_feature_builder_v2 import apply_feature_set  # noqa: E402
+from aegis_alpha.turbo.operable_feature_builder_v3 import FEATURE_SETS, apply_feature_set  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
 from aegis_alpha.turbo.snapshot_utils import normalize_turbo_symbol  # noqa: E402
 from aegis_alpha.turbo.walk_forward_operable_v2 import (  # noqa: E402
@@ -36,6 +36,9 @@ SUMMARY_COLUMNS = (
     "feature_count",
     "base_feature_count",
     "new_feature_count",
+    "operable_v2_feature_count",
+    "operable_v3_feature_count",
+    "feature_schema_hash",
     "recommendation",
     "fold_count",
     "generated_fold_count",
@@ -205,11 +208,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     model_dir = Path(args.model_dir)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
+    context_markets: dict[str, Any] = {}
+    if args.feature_set in {"operable_v3", "combined_v3"}:
+        context_markets = {
+            value: load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=value)
+            for value in ("BTCUSDT", "ETHUSDT")
+        }
     for symbol in symbols:
         try:
             market = load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=symbol)
             dataset = build_recent_dataset(symbol, int(args.lookback_days), save=False, market=market)["dataset"]
-            dataset = apply_feature_set(dataset, market, args.feature_set)
+            dataset = apply_feature_set(dataset, market, args.feature_set, context_markets=context_markets)
             for side in sides:
                 results.append(run_walk_forward(
                     dataset,
@@ -291,7 +300,7 @@ def main() -> None:
     parser.add_argument("--side", choices=("LONG", "SHORT", "BOTH"), default="SHORT")
     parser.add_argument("--lookback-days", type=int, default=30)
     parser.add_argument("--horizon", type=int, default=12)
-    parser.add_argument("--feature-set", choices=("base", "operable_v2", "combined"), default="base")
+    parser.add_argument("--feature-set", choices=FEATURE_SETS, default="base")
     parser.add_argument("--fold-count", type=int, default=4)
     parser.add_argument("--train-ratio", type=float, default=0.50)
     parser.add_argument("--validation-ratio", type=float, default=0.15)

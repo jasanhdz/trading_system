@@ -18,7 +18,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.config import REPO_ROOT  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
-from aegis_alpha.turbo.operable_feature_builder_v2 import apply_feature_set  # noqa: E402
+from aegis_alpha.turbo.operable_feature_builder_v3 import FEATURE_SETS, apply_feature_set  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
 from aegis_alpha.turbo.walk_forward_operable_v2 import run_walk_forward  # noqa: E402
 
@@ -26,13 +26,18 @@ from aegis_alpha.turbo.walk_forward_operable_v2 import run_walk_forward  # noqa:
 SYMBOL = "ADAUSDT"
 SIDE = "SHORT"
 PRIMARY_FEATURE_SET = "operable_v2"
-FEATURE_SETS = ("operable_v2", "base", "combined")
 DEFAULT_MODEL_DIR = REPO_ROOT / "aegis_alpha" / "models" / "research" / "turbo_v2_ada_matrix"
 SUMMARY_COLUMNS = (
     "rank",
     "symbol",
     "side",
     "feature_set",
+    "feature_count",
+    "base_feature_count",
+    "new_feature_count",
+    "operable_v2_feature_count",
+    "operable_v3_feature_count",
+    "feature_schema_hash",
     "lookback_days",
     "horizon_candles",
     "fold_count",
@@ -339,6 +344,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     model_dir = Path(args.model_dir)
     validate_research_model_dir(model_dir)
     market = load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=SYMBOL)
+    context_markets: dict[str, Any] = {}
+    if any(value in {"operable_v3", "combined_v3"} for value in feature_sets):
+        context_markets = {
+            symbol: load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=symbol)
+            for symbol in ("BTCUSDT", "ETHUSDT")
+        }
     dataset_cache: dict[tuple[int, str], dict[str, Any]] = {}
     result_rows: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -348,7 +359,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             key = (lookback, feature_set)
             if key not in dataset_cache:
                 base = build_recent_dataset(SYMBOL, lookback, save=False, market=market)["dataset"]
-                dataset_cache[key] = apply_feature_set(base, market, feature_set)
+                dataset_cache[key] = apply_feature_set(base, market, feature_set, context_markets=context_markets)
             result = run_walk_forward(
                 dataset_cache[key],
                 symbol=SYMBOL,

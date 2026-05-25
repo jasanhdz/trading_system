@@ -15,7 +15,6 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.config import REPO_ROOT  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.tools.evaluate_ada_short_operable_v2_matrix import (  # noqa: E402
-    FEATURE_SETS,
     enrich_summary,
     finite,
     parse_csv_ints,
@@ -30,7 +29,7 @@ from aegis_alpha.tools.evaluate_short_operable_v2_matrix import (  # noqa: E402
     research_score,
 )
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
-from aegis_alpha.turbo.operable_feature_builder_v2 import apply_feature_set  # noqa: E402
+from aegis_alpha.turbo.operable_feature_builder_v3 import FEATURE_SETS, apply_feature_set  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
 from aegis_alpha.turbo.snapshot_utils import normalize_turbo_symbol  # noqa: E402
 from aegis_alpha.turbo.walk_forward_operable_v2 import run_walk_forward  # noqa: E402
@@ -63,7 +62,7 @@ BEST_STATUS = {
     "SHORT_BAD_RESEARCH": "BAD_BEST",
     "INSUFFICIENT_DATA": "NO_VALID_CONFIG",
 }
-FEATURE_PREFERENCE = {"operable_v2": 0, "combined": 1, "base": 2}
+FEATURE_PREFERENCE = {"operable_v3": 0, "operable_v2": 1, "combined_v3": 2, "combined": 3, "base": 4}
 LOOKBACK_PREFERENCE = {30: 0, 14: 1, 7: 2}
 HORIZON_PREFERENCE = {12: 0, 24: 1}
 OUTPUT_COLUMNS = (
@@ -75,6 +74,12 @@ OUTPUT_COLUMNS = (
     "default_status",
     "promoted_from_default",
     "feature_set",
+    "feature_count",
+    "base_feature_count",
+    "new_feature_count",
+    "operable_v2_feature_count",
+    "operable_v3_feature_count",
+    "feature_schema_hash",
     "lookback_days",
     "horizon_candles",
     "fold_count",
@@ -227,7 +232,7 @@ def select_best_short_config_for_symbol(rows: list[dict[str, Any]]) -> dict[str,
     selected["best_reason"] = (
         f"priority={selected['short_research_status']};"
         f"selection_score={finite(selected.get('selection_score')):.4f};"
-        "tie_preference=operable_v2_then_30d_then_h12"
+        "tie_preference=operable_v3_then_operable_v2_then_30d_then_h12"
     )
     return selected
 
@@ -380,6 +385,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     configurations = build_configurations(symbols, feature_sets, lookbacks, horizons, args.max_configs)
     market_cache: dict[str, Any] = {}
     dataset_cache: dict[tuple[str, int, str], dict[str, Any]] = {}
+    context_markets: dict[str, Any] = {}
     result_rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     seeded_rows: list[dict[str, Any]] = []
@@ -397,7 +403,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             dataset_key = (symbol, lookback, feature_set)
             if dataset_key not in dataset_cache:
                 base = build_recent_dataset(symbol, lookback, save=False, market=market_cache[symbol])["dataset"]
-                dataset_cache[dataset_key] = apply_feature_set(base, market_cache[symbol], feature_set)
+                if feature_set in {"operable_v3", "combined_v3"} and not context_markets:
+                    context_markets.update({
+                        value: load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=value)
+                        for value in ("BTCUSDT", "ETHUSDT")
+                    })
+                dataset_cache[dataset_key] = apply_feature_set(
+                    base,
+                    market_cache[symbol],
+                    feature_set,
+                    context_markets=context_markets,
+                )
             result = run_walk_forward(
                 dataset_cache[dataset_key],
                 symbol=symbol,
@@ -444,17 +460,22 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     token = utc_stamp()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    report_prefix = (
+        "aegis_short_v3_feature_optimization"
+        if any(feature_set in {"operable_v3", "combined_v3"} for feature_set in feature_sets)
+        else "aegis_short_v2_config_optimization"
+    )
     paths = {
-        "md": out_dir / f"aegis_short_v2_config_optimization_{token}.md",
-        "json": out_dir / f"aegis_short_v2_config_optimization_{token}.json",
-        "all_configs_csv": out_dir / f"aegis_short_v2_config_optimization_all_configs_{token}.csv",
-        "best_by_symbol_csv": out_dir / f"aegis_short_v2_config_optimization_best_by_symbol_{token}.csv",
-        "promoted_to_strong_csv": out_dir / f"aegis_short_v2_config_optimization_promoted_to_strong_{token}.csv",
-        "still_mixed_csv": out_dir / f"aegis_short_v2_config_optimization_still_mixed_{token}.csv",
-        "bad_csv": out_dir / f"aegis_short_v2_config_optimization_bad_{token}.csv",
+        "md": out_dir / f"{report_prefix}_{token}.md",
+        "json": out_dir / f"{report_prefix}_{token}.json",
+        "all_configs_csv": out_dir / f"{report_prefix}_all_configs_{token}.csv",
+        "best_by_symbol_csv": out_dir / f"{report_prefix}_best_by_symbol_{token}.csv",
+        "promoted_to_strong_csv": out_dir / f"{report_prefix}_promoted_to_strong_{token}.csv",
+        "still_mixed_csv": out_dir / f"{report_prefix}_still_mixed_{token}.csv",
+        "bad_csv": out_dir / f"{report_prefix}_regressions_{token}.csv",
     }
     report: dict[str, Any] = {
-        "schema_version": "aegis_short_operable_v2_config_optimization_v1",
+        "schema_version": "aegis_short_operable_v3_feature_optimization_v1" if report_prefix.startswith("aegis_short_v3") else "aegis_short_operable_v2_config_optimization_v1",
         "created_at": utc_now().isoformat(),
         "mode": "RESEARCH_ONLY",
         "side": SIDE,
