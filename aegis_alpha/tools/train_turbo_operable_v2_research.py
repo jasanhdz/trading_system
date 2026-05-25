@@ -16,6 +16,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.config import REPO_ROOT  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
+from aegis_alpha.turbo.operable_feature_builder_v2 import apply_feature_set  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
 from aegis_alpha.turbo.snapshot_utils import normalize_turbo_symbol  # noqa: E402
 from aegis_alpha.turbo.train_operable_edge_v2 import MODEL_SCHEMA_VERSION, train_side_models  # noqa: E402
@@ -41,6 +42,10 @@ SUMMARY_COLUMNS = (
     "lookback_days",
     "horizon_candles",
     "research_status",
+    "feature_set",
+    "feature_count",
+    "base_feature_count",
+    "new_feature_count",
     "sample_count",
     "baseline_hit8_rate",
     "baseline_quality",
@@ -104,6 +109,10 @@ def summary_row(result: dict[str, Any]) -> dict[str, Any]:
         "lookback_days": result.get("lookback_days"),
         "horizon_candles": result.get("horizon_candles"),
         "research_status": result.get("research_status"),
+        "feature_set": result.get("feature_set", "base"),
+        "feature_count": result.get("feature_count"),
+        "base_feature_count": result.get("base_feature_count"),
+        "new_feature_count": result.get("new_feature_count"),
         "sample_count": result.get("sample_count"),
         "baseline_hit8_rate": _dig(result, "baseline_test", "hit8_rate"),
         "baseline_quality": _dig(result, "baseline_test", "avg_trade_quality"),
@@ -211,6 +220,7 @@ def write_markdown(path: Path, report: dict[str, Any], rows: list[dict[str, Any]
         "",
         "- Mode: `RESEARCH_ONLY`",
         f"- Save models: `{report['save_models']}`",
+        f"- Feature set: `{report['feature_set']}`",
         f"- Model root: `{report['model_dir']}`",
         "- Live `active/` models and `active_manifest.json` are not modified.",
         "",
@@ -295,6 +305,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             market = load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=symbol)
             for lookback_days in lookbacks:
                 dataset = build_recent_dataset(symbol, int(lookback_days), save=False, market=market)["dataset"]
+                dataset = apply_feature_set(dataset, market, args.feature_set)
                 for side in sides:
                     result = train_side_models(
                         dataset,
@@ -322,6 +333,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "sides": [side.upper() for side in sides],
         "lookback_days": lookbacks,
         "horizon_candles": int(args.horizon),
+        "feature_set": args.feature_set,
         "fast": bool(args.fast),
         "save_models": not args.no_save_models,
         "model_dir": str(model_dir),
@@ -366,6 +378,7 @@ def main() -> None:
     parser.add_argument("--lookback-days", type=int, action="append")
     parser.add_argument("--horizon", type=int, default=12)
     parser.add_argument("--side", choices=("LONG", "SHORT", "BOTH"), default="BOTH")
+    parser.add_argument("--feature-set", choices=("base", "operable_v2", "combined"), default="base")
     parser.add_argument("--out-dir", default="/home/jasan/Develop")
     parser.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR))
     parser.add_argument("--fast", action="store_true")

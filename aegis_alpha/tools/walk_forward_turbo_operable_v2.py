@@ -16,6 +16,7 @@ if __package__ is None or __package__ == "":
 from aegis_alpha.config import REPO_ROOT  # noqa: E402
 from aegis_alpha.signals.common import load_signal_market  # noqa: E402
 from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG  # noqa: E402
+from aegis_alpha.turbo.operable_feature_builder_v2 import apply_feature_set  # noqa: E402
 from aegis_alpha.turbo.recent_dataset import build_recent_dataset  # noqa: E402
 from aegis_alpha.turbo.snapshot_utils import normalize_turbo_symbol  # noqa: E402
 from aegis_alpha.turbo.walk_forward_operable_v2 import (  # noqa: E402
@@ -31,6 +32,10 @@ SUMMARY_COLUMNS = (
     "side",
     "lookback_days",
     "horizon_candles",
+    "feature_set",
+    "feature_count",
+    "base_feature_count",
+    "new_feature_count",
     "recommendation",
     "fold_count",
     "generated_fold_count",
@@ -49,6 +54,11 @@ SUMMARY_COLUMNS = (
     "quality_top_decile_lift_mean",
     "quality_top_decile_lift_min",
     "danger_filter_usefulness_mean",
+    "latest_fold_hit8_lift",
+    "latest_fold_quality_lift",
+    "latest_fold_quality_p90_mae",
+    "latest_fold_baseline_p90_mae",
+    "latest_fold_baseline_danger_rate",
     "stability_score",
     "decay_score",
 )
@@ -155,6 +165,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         "- Mode: `RESEARCH_ONLY`",
         f"- Save fold models: `{report['save_fold_models']}`",
+        f"- Feature set: `{report['feature_set']}`",
         f"- Model root: `{report['model_dir']}`",
         "- No live inference, `active/` model or `active_manifest.json` is modified.",
         "- V1 figures use the held-out V1 outcome target as a reference, not an out-of-sample V1 model prediction.",
@@ -198,6 +209,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         try:
             market = load_signal_market(DEFAULT_TURBO_CONFIG.config_path, symbol_override=symbol)
             dataset = build_recent_dataset(symbol, int(args.lookback_days), save=False, market=market)["dataset"]
+            dataset = apply_feature_set(dataset, market, args.feature_set)
             for side in sides:
                 results.append(run_walk_forward(
                     dataset,
@@ -235,6 +247,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "sides": [side.upper() for side in sides],
         "lookback_days": int(args.lookback_days),
         "horizon_candles": int(args.horizon),
+        "feature_set": args.feature_set,
         "fold_count": int(args.fold_count),
         "fold_configuration": {
             "train_ratio": float(args.train_ratio),
@@ -278,6 +291,7 @@ def main() -> None:
     parser.add_argument("--side", choices=("LONG", "SHORT", "BOTH"), default="SHORT")
     parser.add_argument("--lookback-days", type=int, default=30)
     parser.add_argument("--horizon", type=int, default=12)
+    parser.add_argument("--feature-set", choices=("base", "operable_v2", "combined"), default="base")
     parser.add_argument("--fold-count", type=int, default=4)
     parser.add_argument("--train-ratio", type=float, default=0.50)
     parser.add_argument("--validation-ratio", type=float, default=0.15)

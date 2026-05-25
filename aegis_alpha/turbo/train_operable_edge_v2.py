@@ -339,6 +339,9 @@ def train_side_models(
     x = np.asarray(dataset["X"], dtype=np.float32)
     arrays = _side_arrays(dataset, normalized_side, horizon)
     feature_names = [str(item) for item in dataset["feature_names"].tolist()]
+    feature_set = str(dataset.get("feature_set", "base"))
+    base_feature_count = int(dataset.get("base_feature_count", len(feature_names)))
+    new_feature_count = int(dataset.get("new_feature_count", 0))
     if len(x) < MIN_TRAIN_SAMPLES:
         return {
             "symbol": symbol,
@@ -366,6 +369,11 @@ def train_side_models(
         "horizon_candles": int(horizon),
         "model_status": "trained",
         "sample_count": int(len(x)),
+        "feature_set": feature_set,
+        "feature_count": int(len(feature_names)),
+        "base_feature_count": base_feature_count,
+        "new_feature_count": new_feature_count,
+        "feature_schema_hash": feature_schema_hash(feature_names),
         "split_samples": {name: int(len(indices)) for name, indices in split.items()},
         "target_distributions": distributions,
         "baseline_test": {
@@ -395,6 +403,11 @@ def train_side_models(
             split=split,
             random_state=seed,
         )
+        metadata.update({
+            "feature_set": feature_set,
+            "base_feature_count": base_feature_count,
+            "new_feature_count": new_feature_count,
+        })
         path = research_model_path(run_dir, normalized_side, family, horizon, lookback_days)
         family_result: dict[str, Any] = {
             "model_family": family,

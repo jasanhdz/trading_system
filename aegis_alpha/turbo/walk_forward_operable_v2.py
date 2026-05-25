@@ -170,6 +170,9 @@ def train_fold_models(
     x = np.asarray(dataset["X"], dtype=np.float32)
     arrays = _side_arrays(dataset, normalized_side, horizon)
     feature_names = [str(item) for item in np.asarray(dataset["feature_names"]).tolist()]
+    feature_set = str(dataset.get("feature_set", "base"))
+    base_feature_count = int(dataset.get("base_feature_count", len(feature_names)))
+    new_feature_count = int(dataset.get("new_feature_count", 0))
     test = split["test"]
     baseline = {
         "hit8_rate": finite_float(np.mean(arrays["hit8"][test])),
@@ -196,6 +199,10 @@ def train_fold_models(
         "ranges": fold.get("ranges", {}),
         "model_status": "trained",
         "sample_count": int(len(x)),
+        "feature_set": feature_set,
+        "feature_count": int(len(feature_names)),
+        "base_feature_count": base_feature_count,
+        "new_feature_count": new_feature_count,
         "split_samples": {name: int(len(indices)) for name, indices in split.items()},
         "baseline_test": baseline,
         "v1_target_reference": {
@@ -225,6 +232,9 @@ def train_fold_models(
             random_state=seed,
         )
         metadata.update({
+            "feature_set": feature_set,
+            "base_feature_count": base_feature_count,
+            "new_feature_count": new_feature_count,
             "walk_forward_only": True,
             "fold": int(fold["fold"]),
             "ranges": fold.get("ranges", {}),
@@ -358,6 +368,7 @@ def aggregate_walk_forward_results(
     quality_corr_values = [_family_value(fold, "trade_quality_regressor", "test_metrics", "spearman") for fold in valid]
     danger_auc_values = [_family_value(fold, "mae_danger_classifier", "test_metrics", "roc_auc") for fold in valid]
     usefulness_values = [_family_value(fold, "mae_danger_classifier", "usefulness_as_filter") for fold in valid]
+    latest = valid[-1] if valid else {}
     positive_hit_fraction = _mean([1.0 if float(value or 0.0) > 0 else 0.0 for value in hit_lifts])
     positive_quality_fraction = _mean([1.0 if float(value or 0.0) > 0 else 0.0 for value in quality_lifts])
     positive_actual_quality_fraction = _mean([1.0 if float(value or -1.0) > 0 else 0.0 for value in quality_top_values])
@@ -373,6 +384,10 @@ def aggregate_walk_forward_results(
         "side": side.upper(),
         "lookback_days": int(lookback_days),
         "horizon_candles": int(horizon),
+        "feature_set": str(fold_results[0].get("feature_set", "base")) if fold_results else "base",
+        "feature_count": fold_results[0].get("feature_count") if fold_results else None,
+        "base_feature_count": fold_results[0].get("base_feature_count") if fold_results else None,
+        "new_feature_count": fold_results[0].get("new_feature_count") if fold_results else None,
         "fold_count": int(requested_fold_count),
         "generated_fold_count": int(len(fold_results)),
         "valid_fold_count": int(len(valid)),
@@ -390,6 +405,11 @@ def aggregate_walk_forward_results(
         "quality_top_decile_lift_mean": _mean(quality_lifts),
         "quality_top_decile_lift_min": _minimum(quality_lifts),
         "danger_filter_usefulness_mean": _mean(usefulness_values),
+        "latest_fold_hit8_lift": _family_value(latest, "hit8_classifier", "top_decile", "hit8_lift_vs_baseline"),
+        "latest_fold_quality_lift": _family_value(latest, "trade_quality_regressor", "top_decile", "quality_lift_vs_baseline"),
+        "latest_fold_quality_p90_mae": _family_value(latest, "trade_quality_regressor", "top_decile", "p90_mae"),
+        "latest_fold_baseline_p90_mae": latest.get("baseline_test", {}).get("p90_mae") if latest else None,
+        "latest_fold_baseline_danger_rate": latest.get("baseline_test", {}).get("mae_danger_rate") if latest else None,
         "stability_score": stability,
         "decay_score": (
             finite_float(float(quality_lifts[-1]) - float(quality_lifts[0]))
