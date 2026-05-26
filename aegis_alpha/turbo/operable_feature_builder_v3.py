@@ -310,12 +310,15 @@ def apply_feature_set(
         return apply_feature_set_v2(dataset, market, normalized)
     base_x = np.asarray(dataset["X"], dtype=np.float32)
     base_names = np.asarray(dataset["feature_names"]).astype(str)
-    built_v2 = build_operable_feature_matrix_v2(
-        high=market.high,
-        low=market.low,
-        close=market.close,
-        steps=np.asarray(dataset["step"], dtype=np.int64),
-        base_features=getattr(market, "features", None),
+    built_v2 = (
+        build_operable_feature_matrix_v2(
+            high=market.high,
+            low=market.low,
+            close=market.close,
+            steps=np.asarray(dataset["step"], dtype=np.int64),
+            base_features=getattr(market, "features", None),
+        )
+        if normalized == "combined_v3" else None
     )
     built_v3 = build_operable_feature_matrix_v3(
         high=market.high,
@@ -327,8 +330,8 @@ def apply_feature_set(
         context_markets=context_markets,
         include_market_breadth=include_market_breadth,
     )
-    v2_x = np.asarray(built_v2["X_v2"], dtype=np.float32)
-    v2_names = np.asarray(built_v2["feature_names_v2"]).astype(str)
+    v2_x = np.asarray(built_v2["X_v2"], dtype=np.float32) if built_v2 else np.zeros((len(base_x), 0), dtype=np.float32)
+    v2_names = np.asarray(built_v2["feature_names_v2"]).astype(str) if built_v2 else np.asarray([], dtype=str)
     v3_x = np.asarray(built_v3["X_v3"], dtype=np.float32)
     v3_names = np.asarray(built_v3["feature_names_v3"]).astype(str)
     if normalized == "base":
@@ -350,11 +353,11 @@ def apply_feature_set(
     updated["feature_set"] = normalized
     updated["base_feature_count"] = int(base_x.shape[1])
     updated["new_feature_count"] = int(selected_x.shape[1] - base_x.shape[1]) if normalized.startswith("combined") else int(selected_x.shape[1])
-    updated["operable_v2_feature_count"] = int(v2_x.shape[1])
+    updated["operable_v2_feature_count"] = int(len(OPERABLE_FEATURE_NAMES)) if normalized == "combined_v3" else 0
     updated["operable_v3_feature_count"] = int(v3_x.shape[1])
     updated["feature_schema_hash"] = _feature_hash(selected_names)
     updated["feature_diagnostics"] = {
-        "v2": built_v2["diagnostics"],
+        "v2": built_v2["diagnostics"] if built_v2 else None,
         "v3": built_v3["diagnostics"],
         "feature_set": normalized,
     }
