@@ -318,6 +318,11 @@ def _aegis_shadow_block(symbol: str, request_source: str = "ml-v2-predict") -> d
 def _turbo_shadow_block(symbol: str, aegis_block: dict | None = None) -> dict:
     try:
         turbo = evaluate_turbo_shadow(symbol, market_payload=aegis_block)
+        phase_o_meta = turbo_signal.phase_o_runtime_metadata(symbol)
+        if phase_o_meta:
+            turbo["phase_o"] = phase_o_meta
+            if isinstance(turbo.get("raw"), dict):
+                turbo["raw"]["phase_o"] = phase_o_meta
     except Exception as exc:  # pragma: no cover - endpoint safety
         turbo = build_turbo_signal(symbol=symbol, enabled=False, reason="turbo_error")
         turbo["error"] = repr(exc)

@@ -155,6 +155,43 @@ def _load_model_set(symbol: str) -> dict[str, Any | None]:
     return estimators
 
 
+
+
+def phase_o_runtime_metadata(symbol: str) -> dict[str, Any]:
+    normalized = normalize_turbo_symbol(symbol)
+    manifest_path = turbo_symbol_model_dir(normalized) / "active_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    except Exception:
+        return {}
+    phase_symbols = manifest.get("phase_o_symbols") if isinstance(manifest, dict) else None
+    symbol_meta = phase_symbols.get(normalized, {}) if isinstance(phase_symbols, dict) else {}
+    model_paths = manifest.get("model_paths") if isinstance(manifest.get("model_paths"), dict) else {}
+    phase_o_short_paths = {key: value for key, value in model_paths.items() if str(key).startswith("short_") and "/phase_o_" in str(value)}
+    if not (manifest.get("phase_o_live_enabled") or manifest.get("phase_o_avoid_only") or phase_o_short_paths or symbol_meta):
+        return {}
+    return {
+        "phase_o_live_enabled": bool(manifest.get("phase_o_live_enabled", False)),
+        "phase_o_live_mode": manifest.get("phase_o_live_mode"),
+        "phase_o_artifact_stamp": manifest.get("phase_o_live_artifact_stamp") or manifest.get("phase_o_artifact_stamp"),
+        "phase_o_source_model_paths": phase_o_short_paths,
+        "phase_o_model_family": symbol_meta.get("alpha_family") or symbol_meta.get("shadow_type"),
+        "phase_o_caution_level": symbol_meta.get("caution_level"),
+        "phase_o_link_avoid_only": bool(manifest.get("phase_o_avoid_only", False)),
+        "phase_o_link_entry_enabled": manifest.get("phase_o_link_entry_enabled"),
+        "phase_o_avoid_artifacts": manifest.get("phase_o_avoid_artifacts", []),
+        "phase_o_capital_profile": manifest.get("phase_o_live_capital_profile"),
+    }
+
+
+def _attach_phase_o_metadata(signal: dict[str, Any], symbol: str) -> dict[str, Any]:
+    metadata = phase_o_runtime_metadata(symbol)
+    if metadata:
+        signal["phase_o"] = metadata
+        if isinstance(signal.get("raw"), dict):
+            signal["raw"]["phase_o"] = metadata
+    return signal
+
 def model_cache_keys() -> list[str]:
     return sorted(_MODEL_CACHE.keys())
 
@@ -649,7 +686,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
         if risk_guard_warning:
             signal["risk_guard_warning"] = "history_parse_error_skipped"
             signal["risk_guard_error"] = risk_guard_warning
-        return signal
+        return _attach_phase_o_metadata(signal, symbol)
     if float(freshness["feature_age_seconds"]) > TURBO_MAX_FEATURE_AGE_SECONDS:
         _stale_reason(symbol, freshness)
         reason = "stale_turbo_snapshot"
@@ -704,7 +741,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
         if risk_guard_warning:
             signal["risk_guard_warning"] = "history_parse_error_skipped"
             signal["risk_guard_error"] = risk_guard_warning
-        return signal
+        return _attach_phase_o_metadata(signal, symbol)
     base_scores = {
         "long_7d": None,
         "short_7d": None,
@@ -746,6 +783,39 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
             })
             return signal
         scores, votes = _score_models_cached(x, symbol, timestamp)
+        phase_o_meta = phase_o_runtime_metadata(symbol)
+        if symbol == "LINKUSDT" and phase_o_meta.get("phase_o_link_avoid_only") and phase_o_meta.get("phase_o_link_entry_enabled") is False:
+            raw = {
+                "action": "HOLD",
+                "would_execute": False,
+                "reason": "phase_o_link_avoid_only_no_entry",
+                "turbo_score": 0.0,
+                "confidence": "blocked",
+                "leverage_suggestion": 0.0,
+                "position_fraction": 0.0,
+                "votes": votes,
+                "recent_scores": scores,
+            }
+            gated = _gated_decision(raw, risk_guard, safe_context)
+            signal = build_turbo_signal(
+                symbol=symbol,
+                timestamp=timestamp,
+                reason="phase_o_link_avoid_only_no_entry",
+                votes=votes,
+                recent_scores=scores,
+                safe_context=safe_context,
+                risk_guard=risk_guard,
+                freshness=freshness,
+                raw=raw,
+                gated=gated,
+            )
+            _update_runtime(symbol, {
+                "reason": "phase_o_link_avoid_only_no_entry",
+                "turbo_score": 0.0,
+                "freshness": freshness,
+                "snapshot_path": selected_snapshot.get("path"),
+            })
+            return _attach_phase_o_metadata(signal, symbol)
         if all(value is None for value in scores.values()):
             raw = {
                 "action": "HOLD",
@@ -808,7 +878,7 @@ def evaluate_turbo_shadow(symbol: str, market_payload: dict | None = None) -> di
         if risk_guard_warning:
             signal["risk_guard_warning"] = "history_parse_error_skipped"
             signal["risk_guard_error"] = risk_guard_warning
-        return signal
+        return _attach_phase_o_metadata(signal, symbol)
     except Exception as exc:  # pragma: no cover - endpoint safety
         LOGGER.exception("turbo shadow evaluation failed")
         raw = {
