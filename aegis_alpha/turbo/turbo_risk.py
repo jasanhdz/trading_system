@@ -31,6 +31,15 @@ def _risk_history_glob() -> str:
     return str(DEFAULT_TURBO_CONFIG.log_dir / f"turbo_shadow_{today}.jsonl")
 
 
+def _trade_events_glob() -> str:
+    configured = os.environ.get("AEGIS_TURBO_TRADE_EVENTS_GLOB")
+    if configured:
+        return configured
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    repo_root = Path(__file__).resolve().parents[2]
+    return str(repo_root / "binance-futures-bot-ts" / "logs" / "aegis" / f"turbo_trade_events_{today}.jsonl")
+
+
 def load_turbo_shadow_history(log_glob: str | None = None) -> list[dict[str, Any]]:
     pattern = log_glob or str(DEFAULT_TURBO_CONFIG.log_dir / "turbo_shadow_*.jsonl")
     rows: list[dict[str, Any]] = []
@@ -54,6 +63,17 @@ def load_turbo_shadow_history(log_glob: str | None = None) -> list[dict[str, Any
     return rows
 
 
+def load_turbo_trade_events(log_glob: str | None = None) -> list[dict[str, Any]]:
+    pattern = log_glob or _trade_events_glob()
+    rows: list[dict[str, Any]] = []
+    for item in sorted(glob.glob(pattern)):
+        file_rows, errors = load_jsonl_safe(Path(item))
+        if errors:
+            LOGGER.warning("turbo_trade_event_corrupt_lines_skipped file=%s count=%s", item, len(errors))
+        rows.extend(file_rows)
+    return rows
+
+
 def _today_prefix() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -70,6 +90,24 @@ def count_today_turbo_signals(rows: list[dict[str, Any]] | None = None) -> int:
     )
 
 
+def count_today_turbo_opened_trades(rows: list[dict[str, Any]] | None = None) -> int:
+    events = rows if rows is not None else load_turbo_trade_events()
+    today = _today_prefix()
+    trade_ids: set[str] = set()
+    fallback_count = 0
+    for row in events:
+        if not str(row.get("timestamp", "")).startswith(today):
+            continue
+        if str(row.get("event", "")) != "POSITION_CONFIRMED":
+            continue
+        trade_id = str(row.get("trade_id") or "").strip()
+        if trade_id:
+            trade_ids.add(trade_id)
+        else:
+            fallback_count += 1
+    return len(trade_ids) + fallback_count
+
+
 def count_recent_losses_if_evaluated(rows: list[dict[str, Any]] | None = None) -> int:
     history = rows if rows is not None else load_turbo_shadow_history()
     losses = 0
@@ -84,19 +122,25 @@ def count_recent_losses_if_evaluated(rows: list[dict[str, Any]] | None = None) -
     return int(losses)
 
 
-def should_block_turbo_today(rows: list[dict[str, Any]] | None = None) -> tuple[bool, str | None]:
+def should_block_turbo_today(
+    rows: list[dict[str, Any]] | None = None,
+    trade_events: list[dict[str, Any]] | None = None,
+) -> tuple[bool, str | None]:
     cfg = get_runtime_turbo_config().risk
     history = rows if rows is not None else load_turbo_shadow_history(_risk_history_glob())
     if cfg.max_turbo_trades_per_day <= 0:
         return False, None
-    if count_today_turbo_signals(history) >= cfg.max_turbo_trades_per_day:
+    if count_today_turbo_opened_trades(trade_events) >= cfg.max_turbo_trades_per_day:
         return True, "max_turbo_trades_per_day"
     if count_recent_losses_if_evaluated(history) >= cfg.max_consecutive_losses:
         return True, "max_consecutive_losses"
     return False, None
 
 
-def build_turbo_risk_status(rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_turbo_risk_status(
+    rows: list[dict[str, Any]] | None = None,
+    trade_events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if rows is None:
         now = time.time()
         cached_status = _RISK_STATUS_CACHE.get("status")
@@ -105,10 +149,15 @@ def build_turbo_risk_status(rows: list[dict[str, Any]] | None = None) -> dict[st
 
     cfg = get_runtime_turbo_config().risk
     history = rows if rows is not None else load_turbo_shadow_history(_risk_history_glob())
-    blocked, reason = should_block_turbo_today(history)
+    events = trade_events if trade_events is not None else load_turbo_trade_events()
+    opened_trade_count = count_today_turbo_opened_trades(events)
+    blocked, reason = should_block_turbo_today(history, events)
     status = {
         "blocked": bool(blocked),
         "reason": reason,
+        "count_source": "position_confirmed",
+        "today_trade_count": opened_trade_count,
+        "current_count": opened_trade_count,
         "today_signal_count": count_today_turbo_signals(history),
         "recent_loss_count": count_recent_losses_if_evaluated(history),
         "max_turbo_trades_per_day": cfg.max_turbo_trades_per_day,
