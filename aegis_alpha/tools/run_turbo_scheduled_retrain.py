@@ -31,6 +31,11 @@ from aegis_alpha.turbo.snapshot_utils import (  # noqa: E402
     turbo_symbol_model_dir,
 )
 from aegis_alpha.turbo.train_recent_edge import MIN_TRAIN_SAMPLES, train_recent_edge_models  # noqa: E402
+from aegis_alpha.turbo.phase_o_overlay import (  # noqa: E402
+    PHASE_O_SYMBOLS,
+    apply_phase_o_overlay_to_active_manifest,
+    validate_phase_o_overlay,
+)
 from aegis_alpha.tools.refresh_turbo_snapshots import refresh_features_only  # noqa: E402
 
 
@@ -287,6 +292,7 @@ def promote_candidate(
     validation: dict[str, Any],
     started_stamp: str,
     report_path: Path,
+    disable_phase_o_overlay: bool = False,
 ) -> dict[str, Any]:
     symbol_dir = turbo_symbol_model_dir(symbol)
     active_dir = symbol_dir / "active"
@@ -327,12 +333,35 @@ def promote_candidate(
         "scheduled_retrain_report_path": str(report_path),
         "validation_status": "passed" if validation.get("passed") else "failed",
     }
+    overlay_applied = False
+    overlay_reason = "disabled_by_cli" if disable_phase_o_overlay else "symbol_not_in_phase_o"
+    overlay_error = None
+    phase_o_model_path = None
+    link_avoid_only = False
+    if not disable_phase_o_overlay and symbol in PHASE_O_SYMBOLS:
+        try:
+            manifest = apply_phase_o_overlay_to_active_manifest(symbol, manifest, symbol_dir.parent)
+            overlay_errors = validate_phase_o_overlay(symbol, manifest, symbol_dir.parent)
+            if overlay_errors:
+                raise ValueError(f"Phase O overlay invalid for {symbol}: {overlay_errors}")
+            overlay_applied = True
+            overlay_reason = "persistent_phase_o_overlay_applied"
+            phase_o_model_path = manifest.get("phase_o_model_path")
+            link_avoid_only = bool(manifest.get("phase_o_avoid_only"))
+        except Exception as exc:
+            overlay_reason = "phase_o_overlay_failed_base_manifest_preserved"
+            overlay_error = repr(exc)
     atomic_write_json(manifest_path, manifest)
     return {
         "active_dir": str(active_dir),
         "backup_dir": str(backup_dir) if backup_dir is not None else None,
         "active_manifest_path": str(manifest_path),
         "active_manifest": manifest,
+        "phase_o_overlay_applied": overlay_applied,
+        "phase_o_overlay_reason": overlay_reason,
+        "phase_o_overlay_error": overlay_error,
+        "phase_o_model_path": phase_o_model_path,
+        "link_avoid_only": link_avoid_only,
     }
 
 
@@ -399,8 +428,11 @@ def run_symbol(symbol: str, args: argparse.Namespace, started_stamp: str, report
                 validation,
                 started_stamp,
                 report_path,
+                disable_phase_o_overlay=args.disable_phase_o_overlay,
             )
             result.update(promotion)
+            if promotion.get("phase_o_overlay_error"):
+                result["errors"].append(f"phase_o_overlay_failed: {promotion['phase_o_overlay_error']}")
             result["promoted"] = True
     except Exception as exc:
         result["errors"].append(repr(exc))
@@ -417,6 +449,8 @@ def write_markdown_report(path: Path, report: dict[str, Any]) -> Path:
         "",
         f"- Mode: `{report['mode']}`",
         f"- Promote if valid: `{report['promote_if_valid']}`",
+        f"- Phase O overlay enabled: `{report.get('phase_o_overlay_enabled')}`",
+        f"- Failed Phase O overlays: `{', '.join(report.get('failed_overlay_symbols', [])) or 'none'}`",
         f"- Duration: `{report.get('duration_seconds')}` seconds",
         f"- Succeeded: `{', '.join(report.get('symbols_succeeded', [])) or 'none'}`",
         f"- Failed: `{', '.join(report.get('symbols_failed', [])) or 'none'}`",
@@ -454,6 +488,8 @@ def build_report(args: argparse.Namespace, symbols: list[str], started_at: str) 
         "mode": args.mode,
         "promote_if_valid": bool(args.promote_if_valid),
         "skip_existing_fresh": bool(args.skip_existing_fresh),
+        "phase_o_overlay_enabled": not bool(args.disable_phase_o_overlay),
+        "failed_overlay_symbols": [],
         "symbols_requested": symbols,
         "symbols_succeeded": [],
         "symbols_failed": [],
@@ -471,6 +507,7 @@ def main() -> None:
     parser.add_argument("--promote-if-valid", action="store_true")
     parser.add_argument("--skip-existing-fresh", type=parse_bool, default=False)
     parser.add_argument("--max-symbols-per-run", type=int)
+    parser.add_argument("--disable-phase-o-overlay", action="store_true", help="Disable persistent Phase O overlay reapplication")
     args = parser.parse_args()
 
     symbols = parse_symbols(args.symbols)
@@ -491,6 +528,8 @@ def main() -> None:
                 report["failed_symbols"].append(symbol)
             if payload.get("promoted"):
                 report["promoted_symbols"].append(symbol)
+            if payload.get("phase_o_overlay_error"):
+                report["failed_overlay_symbols"].append(symbol)
 
         report["finished_at"] = utc_iso()
         report["duration_seconds"] = round(time.time() - started_monotonic, 3)

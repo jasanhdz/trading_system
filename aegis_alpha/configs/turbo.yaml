@@ -5,15 +5,15 @@ enabled: true
 sizing:
   conservative:
     leverage: 15.0
-    position_fraction: 0.01
+    position_fraction: 0.20
   normal:
     leverage: 20.0
-    position_fraction: 0.01
+    position_fraction: 0.35
   premium:
     leverage: 25.0
-    position_fraction: 0.01
+    position_fraction: 0.50
   max_allowed_leverage: 30.0
-  max_allowed_position_fraction: 0.01
+  max_allowed_position_fraction: 0.50
 
 thresholds:
   # 0.0 keeps the conservative bucket disabled, matching the previous behavior.
@@ -26,9 +26,9 @@ thresholds:
 
 risk:
   # 0 disables the daily Turbo count limit.
-  max_turbo_trades_per_day: 3
-  max_consecutive_losses: 2
-  daily_loss_stop_pct: 10.0
+  max_turbo_trades_per_day: 20
+  max_consecutive_losses: 3
+  daily_loss_stop_pct: 30.0
   daily_profit_lock_pct: 25.0
   cooldown_after_loss_steps: 144
   cooldown_after_two_losses_steps: 288
