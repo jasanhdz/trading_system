@@ -13,7 +13,9 @@ from aegis_alpha.tools.walk_forward_long_alpha_family_d import (
     WalkConfig,
     build_expanding_folds,
     classify_d1_symbol,
+    classify_d_symbol,
     configs_from_args,
+    phase_slug,
     score_summary,
     write_reports,
 )
@@ -43,6 +45,7 @@ def main():
         assert len(train) >= prev_train
         prev_train = len(train)
     assert classify_d1_symbol(summary()) == 'LONG_D1_CONFIRMED'
+    assert classify_d_symbol(summary(family='slow_trend_long'), 'slow_trend_long') == 'LONG_D2_CONFIRMED'
     assert classify_d1_symbol(summary(mean_hit_lift=-0.001, latest_fold_hit_lift=0.02, mean_net_quality_lift_after_costs=0.001)) == 'LONG_D1_FAILED'
     assert classify_d1_symbol(summary(mean_hit_lift=0.001, mean_net_quality_lift_after_costs=0.0, latest_fold_net_quality_lift_after_costs=0.001, mean_hit_auc=0.51, mean_hit_top_decile_hit_lift=0.0)) == 'LONG_D1_MIXED'
     assert classify_d1_symbol(summary(mean_net_quality_lift_after_costs=-0.01)) == 'LONG_D1_FAILED'
@@ -64,6 +67,10 @@ def main():
     cfgs = configs_from_args(args)
     assert cfgs == [WalkConfig('ETHUSDT', ALLOWED_FAMILY, 'long_hit3_before_minus2', 24)]
     args.family = 'slow_trend_long'
+    cfgs = configs_from_args(args)
+    assert cfgs == [WalkConfig('ETHUSDT', 'slow_trend_long', 'long_hit3_before_minus2', 24)]
+    assert phase_slug('slow_trend_long') == 'd2_slowtrend'
+    args.family = 'breakout_momentum_long'
     try:
         configs_from_args(args)
         raise AssertionError('expected family restriction')
@@ -77,6 +84,10 @@ def main():
     assert Path(paths['json']).exists()
     assert json.loads(Path(paths['json']).read_text())['schema_version']
     assert Path(paths['folds']).exists()
+    args.family = 'slow_trend_long'
+    s2 = dict(s, family='slow_trend_long', d_status='LONG_D2_CONFIRMED', d1_status=None, d2_status='LONG_D2_CONFIRMED')
+    paths2 = write_reports([s2], [dict(fold, family='slow_trend_long')], [], args)
+    assert 'd2_slowtrend' in paths2['json']
     print('PASS test_walk_forward_long_alpha_family_d')
 
 
