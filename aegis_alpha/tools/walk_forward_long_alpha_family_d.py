@@ -47,7 +47,7 @@ from aegis_alpha.tools.train_long_alpha_candidates_c import (
 
 SCHEMA_VERSION = "aegis_long_walkforward_family_d_v2"
 ALLOWED_FAMILY = "pullback_continuation_long"
-ALLOWED_FAMILIES = ("pullback_continuation_long", "slow_trend_long")
+ALLOWED_FAMILIES = ("pullback_continuation_long", "slow_trend_long", "micro_roe_momentum_long")
 PRIMARY_SYMBOLS = ("AVAXUSDT", "ETHUSDT", "SUIUSDT")
 SECONDARY_CONFIGS = {
     "pullback_continuation_long": {
@@ -64,6 +64,12 @@ SECONDARY_CONFIGS = {
         "SUIUSDT": ("long_hit5_before_minus3", 24),
         "LTCUSDT": ("long_hit8_before_minus5", 24),
     },
+    "micro_roe_momentum_long": {
+        "ETHUSDT": ("long_roe12_before_minus8", 12),
+        "AVAXUSDT": ("long_roe12_before_minus8", 12),
+        "SOLUSDT": ("long_roe10_before_minus6", 6),
+        "XRPUSDT": ("long_roe10_before_minus6", 6),
+    },
 }
 CSV_FOLD_COLUMNS = (
     "symbol", "family", "target", "horizon", "fold_index", "train_start", "train_end",
@@ -75,13 +81,19 @@ CSV_FOLD_COLUMNS = (
     "selected_fraction", "selected_count", "selected_hit_rate", "selected_quality",
     "selected_stop_rate", "selected_p90_mae", "selected_time_to_target_avg",
     "selected_fast_hit_rate", "selected_late_entry_rate", "hit_lift", "stop_rate_delta",
-    "p90_mae_delta", "time_to_target_delta", "trend_persistence_score", "fold_status", "fold_reason",
+    "p90_mae_delta", "time_to_target_delta", "trend_persistence_score", "baseline_fast_hit_rate",
+    "fast_hit_lift", "exhaustion_rate_selected", "late_entry_rate_selected", "overextension_proxy_avg",
+    "upper_wick_risk_avg", "range_expansion_avg", "fold_status", "fold_reason",
 )
 CSV_SUMMARY_COLUMNS = (
-    "symbol", "family", "target", "horizon", "d_status", "d1_status", "d2_status", "score", "valid_folds",
+    "symbol", "family", "target", "horizon", "d_status", "d1_status", "d2_status", "d3_status", "score", "valid_folds",
     "negative_folds", "mean_hit_lift", "latest_fold_hit_lift", "mean_net_quality_lift_after_costs",
     "latest_fold_net_quality_lift_after_costs", "mean_p90_mae_delta", "mean_stop_rate_delta",
-    "mean_selected_fraction", "mean_hit_auc", "mean_hit_top_decile_hit_lift", "trend_persistence_score", "slow_trend_quality_stability", "slow_trend_hit_stability", "recommendation",
+    "mean_selected_fraction", "mean_hit_auc", "mean_hit_top_decile_hit_lift", "trend_persistence_score",
+    "slow_trend_quality_stability", "slow_trend_hit_stability", "mean_time_to_target",
+    "latest_time_to_target", "fast_hit_rate", "fast_hit_lift", "momentum_quality_stability",
+    "momentum_hit_stability", "exhaustion_rate_selected", "late_entry_rate_selected",
+    "overextension_proxy_avg", "upper_wick_risk_avg", "range_expansion_avg", "recommendation",
 )
 
 
@@ -191,6 +203,9 @@ def train_fold(
     exhaustion_lift = None
     if high_exh.any() and low_exh.any():
         exhaustion_lift = (mean(y_quality_test[low_exh]) or 0.0) - (mean(y_quality_test[high_exh]) or 0.0)
+    baseline_fast_hit = mean(labels["fast_hit"][test_idx]) or 0.0
+    selected_fast_hit = mean(labels["fast_hit"][test_idx][selected]) if selected.any() else None
+    selected_frame = frame.iloc[test_idx[selected]] if selected.any() else frame.iloc[[]]
     row = {
         "symbol": config.symbol,
         "family": config.family,
@@ -227,13 +242,20 @@ def train_fold(
         "selected_stop_rate": selected_stop,
         "selected_p90_mae": selected_mae,
         "selected_time_to_target_avg": mean(selected_ttt),
-        "selected_fast_hit_rate": mean(labels["fast_hit"][test_idx][selected]) if selected.any() else None,
+        "selected_fast_hit_rate": selected_fast_hit,
         "selected_late_entry_rate": mean(y_exh_test[selected]) if selected.any() else None,
         "hit_lift": (selected_hit - baseline_hit) if selected_hit is not None else None,
         "stop_rate_delta": (selected_stop - baseline_stop) if selected_stop is not None else None,
         "p90_mae_delta": ((selected_mae - baseline_mae) / max(baseline_mae, 1e-12)) if selected_mae is not None else None,
         "time_to_target_delta": ((mean(selected_ttt) or 0.0) - (mean(baseline_ttt) or 0.0)) if len(selected_ttt) else None,
-        "trend_persistence_score": mean(frame.iloc[test_idx[selected]]["trend_efficiency_24"].to_numpy(dtype=float)) if selected.any() and "trend_efficiency_24" in frame else None,
+        "trend_persistence_score": mean(selected_frame["trend_efficiency_24"].to_numpy(dtype=float)) if selected.any() and "trend_efficiency_24" in frame else None,
+        "baseline_fast_hit_rate": baseline_fast_hit,
+        "fast_hit_lift": (selected_fast_hit - baseline_fast_hit) if selected_fast_hit is not None else None,
+        "exhaustion_rate_selected": mean(y_exh_test[selected]) if selected.any() else None,
+        "late_entry_rate_selected": mean(y_exh_test[selected]) if selected.any() else None,
+        "overextension_proxy_avg": mean(selected_frame["overextension_risk"].to_numpy(dtype=float)) if selected.any() and "overextension_risk" in frame else None,
+        "upper_wick_risk_avg": mean(selected_frame["upper_wick_ratio"].to_numpy(dtype=float)) if selected.any() and "upper_wick_ratio" in frame else None,
+        "range_expansion_avg": mean(selected_frame["range_expansion_12"].to_numpy(dtype=float)) if selected.any() and "range_expansion_12" in frame else None,
     }
     row["fold_status"] = fold_status(row)
     row["fold_reason"] = "positive hit/net/risk" if row["fold_status"] == "POSITIVE" else ("negative hit/net/risk" if row["fold_status"] == "NEGATIVE" else "mixed fold")
@@ -255,6 +277,20 @@ def classify_d_symbol(summary: dict[str, Any], family: str = ALLOWED_FAMILY) -> 
     auc = summary.get("mean_hit_auc")
     top = float(summary.get("mean_hit_top_decile_hit_lift") or 0.0)
     negative = int(summary.get("negative_folds") or 0)
+    if family == "micro_roe_momentum_long":
+        horizon = float(summary.get("horizon") or 1.0)
+        mean_ttt = summary.get("mean_time_to_target")
+        fast_lift = float(summary.get("fast_hit_lift") or 0.0)
+        fast_rate = float(summary.get("fast_hit_rate") or 0.0)
+        time_ok = mean_ttt is not None and float(mean_ttt) <= horizon * 0.65
+        fast_ok = fast_lift > 0 or fast_rate >= 0.05
+        if mean_hit > 0 and latest_hit >= 0 and mean_net > 0 and latest_net >= 0 and p90 <= 0.12 and stop <= 0.06 and 0.05 <= frac <= 0.25 and ((auc is not None and float(auc) >= 0.53) or top > 0.02) and negative <= 1 and time_ok and fast_ok:
+            return "LONG_D3_CONFIRMED"
+        if mean_net < 0 or mean_hit < 0 or p90 > 0.20 or stop > 0.08 or not time_ok or negative >= max(2, int(summary.get("valid_folds") or 0) - 1):
+            return "LONG_D3_FAILED"
+        if mean_hit > 0 or mean_net > 0 or latest_hit > 0 or latest_net > 0 or fast_lift > 0:
+            return "LONG_D3_MIXED"
+        return "LONG_D3_WEAK"
     if mean_hit > 0 and latest_hit >= 0 and mean_net > 0 and latest_net >= 0 and p90 <= 0.10 and stop <= 0.05 and 0.05 <= frac <= 0.25 and ((auc is not None and float(auc) >= 0.53) or top > 0.02) and negative <= 1:
         return f"{status_prefix(family)}_CONFIRMED"
     if mean_net < 0 or mean_hit < 0 or p90 > 0.20 or stop > 0.08 or negative >= max(2, int(summary.get("valid_folds") or 0) - 1):
@@ -263,9 +299,12 @@ def classify_d_symbol(summary: dict[str, Any], family: str = ALLOWED_FAMILY) -> 
         return f"{status_prefix(family)}_MIXED"
     return f"{status_prefix(family)}_WEAK"
 
-
 def status_prefix(family: str) -> str:
-    return "LONG_D2" if family == "slow_trend_long" else "LONG_D1"
+    if family == "slow_trend_long":
+        return "LONG_D2"
+    if family == "micro_roe_momentum_long":
+        return "LONG_D3"
+    return "LONG_D1"
 
 
 def classify_d1_symbol(summary: dict[str, Any]) -> str:
@@ -273,11 +312,19 @@ def classify_d1_symbol(summary: dict[str, Any]) -> str:
 
 
 def phase_slug(family: str) -> str:
-    return "d2_slowtrend" if family == "slow_trend_long" else "d1_pullback"
+    if family == "slow_trend_long":
+        return "d2_slowtrend"
+    if family == "micro_roe_momentum_long":
+        return "d3_micro_roe"
+    return "d1_pullback"
 
 
 def phase_title(family: str) -> str:
-    return "LONG-D2 Slow-trend Walk-forward" if family == "slow_trend_long" else "LONG-D1 Pullback Walk-forward"
+    if family == "slow_trend_long":
+        return "LONG-D2 Slow-trend Walk-forward"
+    if family == "micro_roe_momentum_long":
+        return "LONG-D3 Micro-ROE Momentum Walk-forward"
+    return "LONG-D1 Pullback Walk-forward"
 
 
 def score_summary(summary: dict[str, Any]) -> float:
@@ -288,6 +335,10 @@ def score_summary(summary: dict[str, Any]) -> float:
     stop = max(float(summary.get("mean_stop_rate_delta") or 0.0), 0.0)
     latest_net = float(summary.get("latest_fold_net_quality_lift_after_costs") or 0.0)
     latest_hit = float(summary.get("latest_fold_hit_lift") or 0.0)
+    if summary.get("family") == "micro_roe_momentum_long":
+        fast_lift = float(summary.get("fast_hit_lift") or 0.0)
+        late = float(summary.get("late_entry_rate_selected") or 0.0)
+        return 2.0 * mean_net + 1.5 * mean_hit + 1.0 * mean_top + 0.75 * fast_lift - p90 - stop - 0.5 * late + 0.5 * latest_net + 0.5 * latest_hit
     return 2.0 * mean_net + 1.5 * mean_hit + 1.0 * mean_top - p90 - stop + 0.5 * latest_net + 0.5 * latest_hit
 
 
@@ -318,9 +369,21 @@ def summarize_symbol(config: WalkConfig, folds: list[dict[str, Any]]) -> dict[st
     summary["trend_persistence_score"] = avg("trend_persistence_score")
     summary["slow_trend_quality_stability"] = (sum((finite(f.get("net_quality_lift_after_costs")) or 0.0) >= 0 for f in valid) / len(valid)) if valid else None
     summary["slow_trend_hit_stability"] = (sum((finite(f.get("hit_lift")) or 0.0) >= 0 for f in valid) / len(valid)) if valid else None
+    summary["mean_time_to_target"] = avg("selected_time_to_target_avg")
+    summary["latest_time_to_target"] = latest.get("selected_time_to_target_avg")
+    summary["fast_hit_rate"] = avg("selected_fast_hit_rate")
+    summary["fast_hit_lift"] = avg("fast_hit_lift")
+    summary["momentum_quality_stability"] = (sum((finite(f.get("net_quality_lift_after_costs")) or 0.0) >= 0 for f in valid) / len(valid)) if valid else None
+    summary["momentum_hit_stability"] = (sum((finite(f.get("hit_lift")) or 0.0) >= 0 for f in valid) / len(valid)) if valid else None
+    summary["exhaustion_rate_selected"] = avg("exhaustion_rate_selected")
+    summary["late_entry_rate_selected"] = avg("late_entry_rate_selected")
+    summary["overextension_proxy_avg"] = avg("overextension_proxy_avg")
+    summary["upper_wick_risk_avg"] = avg("upper_wick_risk_avg")
+    summary["range_expansion_avg"] = avg("range_expansion_avg")
     summary["d_status"] = classify_d_symbol(summary, config.family)
     summary["d1_status"] = summary["d_status"] if config.family == "pullback_continuation_long" else None
     summary["d2_status"] = summary["d_status"] if config.family == "slow_trend_long" else None
+    summary["d3_status"] = summary["d_status"] if config.family == "micro_roe_momentum_long" else None
     summary["score"] = score_summary(summary)
     prefix = status_prefix(config.family)
     if summary["d_status"] == f"{prefix}_CONFIRMED":
@@ -379,7 +442,7 @@ def run_config(config: WalkConfig, args: argparse.Namespace) -> tuple[dict[str, 
 
 def configs_from_args(args: argparse.Namespace) -> list[WalkConfig]:
     if args.family not in ALLOWED_FAMILIES:
-        raise SystemExit("LONG-D only allows --family pullback_continuation_long or slow_trend_long")
+        raise SystemExit("LONG-D only allows --family pullback_continuation_long, slow_trend_long, or micro_roe_momentum_long")
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     bad = [s for s in symbols if s not in SYMBOLS]
     if bad:

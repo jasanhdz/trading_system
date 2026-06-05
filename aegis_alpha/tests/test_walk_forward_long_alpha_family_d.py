@@ -46,6 +46,12 @@ def main():
         prev_train = len(train)
     assert classify_d1_symbol(summary()) == 'LONG_D1_CONFIRMED'
     assert classify_d_symbol(summary(family='slow_trend_long'), 'slow_trend_long') == 'LONG_D2_CONFIRMED'
+    micro = summary(family='micro_roe_momentum_long', horizon=6, mean_time_to_target=3.0, fast_hit_lift=0.02, fast_hit_rate=0.08)
+    assert classify_d_symbol(micro, 'micro_roe_momentum_long') == 'LONG_D3_CONFIRMED'
+    slow_micro = dict(micro, mean_time_to_target=5.0)
+    assert classify_d_symbol(slow_micro, 'micro_roe_momentum_long') == 'LONG_D3_FAILED'
+    risky_micro = dict(micro, mean_stop_rate_delta=0.09)
+    assert classify_d_symbol(risky_micro, 'micro_roe_momentum_long') == 'LONG_D3_FAILED'
     assert classify_d1_symbol(summary(mean_hit_lift=-0.001, latest_fold_hit_lift=0.02, mean_net_quality_lift_after_costs=0.001)) == 'LONG_D1_FAILED'
     assert classify_d1_symbol(summary(mean_hit_lift=0.001, mean_net_quality_lift_after_costs=0.0, latest_fold_net_quality_lift_after_costs=0.001, mean_hit_auc=0.51, mean_hit_top_decile_hit_lift=0.0)) == 'LONG_D1_MIXED'
     assert classify_d1_symbol(summary(mean_net_quality_lift_after_costs=-0.01)) == 'LONG_D1_FAILED'
@@ -70,6 +76,10 @@ def main():
     cfgs = configs_from_args(args)
     assert cfgs == [WalkConfig('ETHUSDT', 'slow_trend_long', 'long_hit3_before_minus2', 24)]
     assert phase_slug('slow_trend_long') == 'd2_slowtrend'
+    args.family = 'micro_roe_momentum_long'
+    cfgs = configs_from_args(args)
+    assert cfgs == [WalkConfig('ETHUSDT', 'micro_roe_momentum_long', 'long_hit3_before_minus2', 24)]
+    assert phase_slug('micro_roe_momentum_long') == 'd3_micro_roe'
     args.family = 'breakout_momentum_long'
     try:
         configs_from_args(args)
@@ -88,6 +98,10 @@ def main():
     s2 = dict(s, family='slow_trend_long', d_status='LONG_D2_CONFIRMED', d1_status=None, d2_status='LONG_D2_CONFIRMED')
     paths2 = write_reports([s2], [dict(fold, family='slow_trend_long')], [], args)
     assert 'd2_slowtrend' in paths2['json']
+    args.family = 'micro_roe_momentum_long'
+    s3 = dict(s, family='micro_roe_momentum_long', d_status='LONG_D3_CONFIRMED', d1_status=None, d2_status=None, d3_status='LONG_D3_CONFIRMED', mean_time_to_target=3.0, fast_hit_rate=0.08, fast_hit_lift=0.02, late_entry_rate_selected=0.1)
+    paths3 = write_reports([s3], [dict(fold, family='micro_roe_momentum_long')], [], args)
+    assert 'd3_micro_roe' in paths3['json']
     print('PASS test_walk_forward_long_alpha_family_d')
 
 
