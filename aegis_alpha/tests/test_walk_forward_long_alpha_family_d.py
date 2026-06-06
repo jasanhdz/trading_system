@@ -70,6 +70,8 @@ def main():
     args.target = 'long_hit3_before_minus2'
     args.horizon = 24
     args.include_secondary = False
+    args.use_cache = True
+    args.cache_max_items = 8
     cfgs = configs_from_args(args)
     assert cfgs == [WalkConfig('ETHUSDT', ALLOWED_FAMILY, 'long_hit3_before_minus2', 24)]
     args.family = 'slow_trend_long'
@@ -87,7 +89,7 @@ def main():
     except SystemExit:
         pass
     out = Path(tempfile.mkdtemp())
-    args = type('Args', (), {'out_dir': str(out), 'symbols': 'ETHUSDT', 'family': ALLOWED_FAMILY, 'target': 'long_hit3_before_minus2', 'horizon': 24, 'fold_count': 4, 'lookback_days': 1, 'model_dir': str(out/'models/research'), 'db_path': 'x', 'feature_mode': 'selected_family', 'fast': True, 'save_models': False, 'no_save_models': True, 'min_train_samples': 1, 'min_test_samples': 1, 'include_secondary': False})()
+    args = type('Args', (), {'out_dir': str(out), 'symbols': 'ETHUSDT', 'family': ALLOWED_FAMILY, 'target': 'long_hit3_before_minus2', 'horizon': 24, 'fold_count': 4, 'lookback_days': 1, 'model_dir': str(out/'models/research'), 'db_path': 'x', 'feature_mode': 'selected_family', 'fast': True, 'save_models': False, 'no_save_models': True, 'min_train_samples': 1, 'min_test_samples': 1, 'include_secondary': False, 'use_cache': True, 'cache_max_items': 8})()
     s = summary(d1_status='LONG_D1_CONFIRMED', score=score_summary(summary()), recommendation='pass_to_frozen_confirmation')
     fold = {'symbol':'ETHUSDT','family':ALLOWED_FAMILY,'target':'long_hit3_before_minus2','horizon':24,'fold_index':1,'fold_status':'POSITIVE','hit_lift':0.1,'net_quality_lift_after_costs':0.1,'p90_mae_delta':0,'stop_rate_delta':0,'selected_fraction':0.1}
     paths = write_reports([s], [fold], [], args)

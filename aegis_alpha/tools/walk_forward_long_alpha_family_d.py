@@ -23,6 +23,7 @@ if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from aegis_alpha.tools.profile_long_alpha_families_a import SYMBOLS, add_features, json_safe, mean, quantile, top_fraction_mask
+from aegis_alpha.turbo.long_research_cache import LongResearchCache
 from aegis_alpha.tools.train_long_alpha_candidates_c import (
     DEFAULT_DB_PATH,
     DEFAULT_MODEL_DIR,
@@ -395,14 +396,21 @@ def summarize_symbol(config: WalkConfig, folds: list[dict[str, Any]]) -> dict[st
     return summary
 
 
-def prepare_symbol(config: WalkConfig, db_path: Path, lookback_days: int, feature_mode: str):
-    df = load_candles_research(db_path, config.symbol, lookback_days)
+def _cache_get(cache: LongResearchCache | None, namespace: str, parts: tuple[Any, ...], factory):
+    if cache is None:
+        return factory()
+    return cache.get_or_set(namespace, parts, factory)
+
+
+def prepare_symbol(config: WalkConfig, db_path: Path, lookback_days: int, feature_mode: str, cache: LongResearchCache | None = None):
+    df = _cache_get(cache, "ohlcv", cache.ohlcv_key(config.symbol, lookback_days, db_path) if cache else (), lambda: load_candles_research(db_path, config.symbol, lookback_days))
     if df.empty:
         return None, None, [], [], []
-    btc = load_candles_research(db_path, "BTCUSDT", lookback_days) if config.symbol != "BTCUSDT" else df
-    eth = load_candles_research(db_path, "ETHUSDT", lookback_days) if config.symbol != "ETHUSDT" else df
-    frame = add_long_c_features(add_features(df, btc, eth)).reset_index(drop=True)
-    labels = compute_labels(frame["close"].to_numpy(float), frame["high"].to_numpy(float), frame["low"].to_numpy(float), frame, config.target, config.horizon)
+    btc = df if config.symbol == "BTCUSDT" else _cache_get(cache, "ohlcv", cache.ohlcv_key("BTCUSDT", lookback_days, db_path) if cache else (), lambda: load_candles_research(db_path, "BTCUSDT", lookback_days))
+    eth = df if config.symbol == "ETHUSDT" else _cache_get(cache, "ohlcv", cache.ohlcv_key("ETHUSDT", lookback_days, db_path) if cache else (), lambda: load_candles_research(db_path, "ETHUSDT", lookback_days))
+    base = _cache_get(cache, "feature_base", cache.feature_key(config.symbol, lookback_days, f"base:{feature_mode}", db_path) if cache else (), lambda: add_features(df, btc, eth))
+    frame = _cache_get(cache, "feature_long_c", cache.feature_key(config.symbol, lookback_days, f"long_c:{config.family}:{feature_mode}", db_path) if cache else (), lambda: add_long_c_features(base).reset_index(drop=True))
+    labels = _cache_get(cache, "labels", cache.labels_key(config.symbol, config.target, config.horizon, lookback_days, db_path) if cache else (), lambda: compute_labels(frame["close"].to_numpy(float), frame["high"].to_numpy(float), frame["low"].to_numpy(float), frame, config.target, config.horizon))
     feature_names, missing, proxies = select_long_family_features(frame, config.family, feature_mode)
     valid = frame[["open", "high", "low", "close", "volume"]].notna().all(axis=1).to_numpy().copy()
     valid[:220] = False
@@ -415,11 +423,15 @@ def prepare_symbol(config: WalkConfig, db_path: Path, lookback_days: int, featur
 
 
 def run_config(config: WalkConfig, args: argparse.Namespace) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    frame, labels, features, idx, feature_meta = prepare_symbol(config, Path(args.db_path), args.lookback_days, args.feature_mode)
+    cache = getattr(args, "_long_research_cache", None) if getattr(args, "use_cache", False) else None
+    frame, labels, features, idx, feature_meta = prepare_symbol(config, Path(args.db_path), args.lookback_days, args.feature_mode, cache)
     if frame is None or labels is None or len(features) == 0:
         summary = {"symbol": config.symbol, "family": config.family, "target": config.target, "horizon": config.horizon, "valid_folds": 0, "negative_folds": 0, "d1_status": "INSUFFICIENT_DATA", "score": -999, "recommendation": "no_data"}
         return summary, [], []
-    folds_idx = build_expanding_folds(len(idx), args.fold_count, args.min_train_samples, args.min_test_samples)
+    if cache is not None:
+        folds_idx = cache.get_or_set("folds", cache.folds_key(len(idx), args.fold_count, args.min_train_samples, args.min_test_samples), lambda: build_expanding_folds(len(idx), args.fold_count, args.min_train_samples, args.min_test_samples))
+    else:
+        folds_idx = build_expanding_folds(len(idx), args.fold_count, args.min_train_samples, args.min_test_samples)
     fold_rows: list[dict[str, Any]] = []
     bucket_rows: list[dict[str, Any]] = []
     max_iter = 30 if args.fast else 120
@@ -505,11 +517,12 @@ def write_reports(summaries: list[dict[str, Any]], folds: list[dict[str, Any]], 
         "created_at": datetime.now(timezone.utc).isoformat(),
         "mode": "RESEARCH_ONLY",
         "safety": {"no_live": True, "no_active_manifest": True, "no_yaml": True, "no_pm2": True, "no_orders": True},
-        "args": vars(args),
+        "args": {k: v for k, v in vars(args).items() if not k.startswith("_")},
         "summaries": summaries,
         "folds": folds,
         "buckets": buckets,
         "ranking": ranking,
+        "cache_stats": args._long_research_cache.summary() if getattr(args, "_long_research_cache", None) is not None else {"enabled": False},
     }
     Path(paths["json"]).write_text(json.dumps(json_safe(payload), indent=2, sort_keys=True) + "\n")
     best = ranking[0] if ranking else {}
@@ -557,6 +570,7 @@ def write_reports(summaries: list[dict[str, Any]], folds: list[dict[str, Any]], 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     assert_research_only_path(args.model_dir)
+    args._long_research_cache = LongResearchCache(args.cache_max_items) if getattr(args, "use_cache", False) else None
     configs = configs_from_args(args)
     summaries: list[dict[str, Any]] = []
     folds: list[dict[str, Any]] = []
@@ -583,6 +597,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--feature-mode", choices=("selected_family", "combined_v3_all"), default="selected_family")
     parser.add_argument("--fast", action="store_true")
+    cache_group = parser.add_mutually_exclusive_group()
+    cache_group.add_argument("--use-cache", action="store_true")
+    cache_group.add_argument("--no-cache", action="store_false", dest="use_cache")
+    parser.set_defaults(use_cache=False)
+    parser.add_argument("--cache-max-items", type=int, default=64)
     parser.add_argument("--save-models", action="store_true")
     parser.add_argument("--no-save-models", action="store_true", default=True)
     parser.add_argument("--min-train-samples", type=int, default=1000)
