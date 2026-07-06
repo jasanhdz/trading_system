@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import gc
+import fcntl
 import json
+import os
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -26,6 +30,10 @@ from aegis_alpha.turbo.train_recent_edge import train_recent_edge_models  # noqa
 
 
 BINANCE_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
+LOCK_PATH = DEFAULT_TURBO_CONFIG.log_dir / "turbo_snapshot_refresh.lock"
+DEFAULT_MIN_AVAILABLE_MEM_GB = float(os.getenv("AEGIS_TURBO_REFRESH_MIN_AVAILABLE_MEM_GB", "8"))
+DEFAULT_SLEEP_BETWEEN_SYMBOLS_SECONDS = float(os.getenv("AEGIS_TURBO_REFRESH_SLEEP_BETWEEN_SYMBOLS_SECONDS", "2"))
+LOCKED_REASON = "another_refresh_turbo_snapshots_instance_is_running"
 
 
 def _utc_stamp() -> str:
@@ -42,6 +50,42 @@ def _write_report(report: dict[str, Any]) -> Path:
     path = _report_path()
     path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return path
+
+
+def _mem_available_gb() -> float | None:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1024 / 1024
+    except Exception:
+        return None
+    return None
+
+
+def _ensure_memory_available(min_available_gb: float) -> None:
+    available = _mem_available_gb()
+    if available is None:
+        return
+    if available < min_available_gb:
+        raise RuntimeError(
+            f"insufficient memory for turbo refresh: MemAvailable={available:.2f}GiB "
+            f"< required={min_available_gb:.2f}GiB"
+        )
+
+
+@contextmanager
+def turbo_refresh_lock() -> Any:
+    DEFAULT_TURBO_CONFIG.log_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = LOCK_PATH.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        lock_file.close()
+        raise RuntimeError(LOCKED_REASON) from exc
+    try:
+        yield
+    finally:
+        lock_file.close()
 
 
 def _fetch_binance_klines(params: dict[str, Any]) -> list[list[Any]]:
@@ -229,7 +273,31 @@ def main() -> None:
     parser.add_argument("--symbol", default=DEFAULT_TURBO_CONFIG.symbol)
     parser.add_argument("--symbols", help="Comma-separated symbols, e.g. ETHUSDT,BTCUSDT")
     parser.add_argument("--mode", choices=("features-only", "full"), default="features-only")
+    parser.add_argument("--min-available-mem-gb", type=float, default=DEFAULT_MIN_AVAILABLE_MEM_GB)
+    parser.add_argument("--sleep-between-symbols-seconds", type=float, default=DEFAULT_SLEEP_BETWEEN_SYMBOLS_SECONDS)
     args = parser.parse_args()
+
+    try:
+        lock_context = turbo_refresh_lock()
+        lock_context.__enter__()
+    except RuntimeError as exc:
+        if str(exc) != LOCKED_REASON:
+            raise
+        report = {
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "symbol": None,
+            "symbols_requested": _parse_symbols(args.symbol, args.symbols),
+            "mode": args.mode,
+            "success": False,
+            "partial_success": False,
+            "skipped": True,
+            "reason": LOCKED_REASON,
+        }
+        report_path = _write_report(report)
+        report["report_path"] = str(report_path)
+        print(json.dumps(report, indent=2, sort_keys=True), file=sys.stderr)
+        raise SystemExit(75)
 
     started_at = time.time()
     started_iso = datetime.now(timezone.utc).isoformat()
@@ -248,8 +316,9 @@ def main() -> None:
     }
     try:
         success_count = 0
-        for symbol in symbols:
+        for index, symbol in enumerate(symbols):
             try:
+                _ensure_memory_available(float(args.min_available_mem_gb))
                 payload = refresh_features_only(symbol) if args.mode == "features-only" else refresh_full(symbol)
                 summary = _symbol_summary(payload)
                 report["symbols"][symbol] = summary
@@ -267,6 +336,10 @@ def main() -> None:
                     "files_written": [],
                     "error": repr(exc),
                 }
+            finally:
+                gc.collect()
+                if index < len(symbols) - 1 and args.sleep_between_symbols_seconds > 0:
+                    time.sleep(float(args.sleep_between_symbols_seconds))
         report["success"] = success_count > 0
         report["partial_success"] = 0 < success_count < len(symbols)
     except Exception as exc:
@@ -276,6 +349,7 @@ def main() -> None:
         report["duration_seconds"] = round(time.time() - started_at, 3)
         report_path = _write_report(report)
         report["report_path"] = str(report_path)
+        lock_context.__exit__(None, None, None)
         if report.get("success"):
             print(json.dumps(report, indent=2, sort_keys=True))
         else:

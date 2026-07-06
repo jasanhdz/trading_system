@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from aegis_alpha.config import REPO_ROOT
 
 LOGGER = logging.getLogger(__name__)
 SHADOW_LOG_DIR = REPO_ROOT / "aegis_alpha" / "logs" / "shadow"
+MAX_DAILY_LOG_BYTES = int(os.getenv("AEGIS_SHADOW_MAX_DAILY_LOG_BYTES", str(64 * 1024 * 1024)))
 
 
 def log_shadow_signal(
@@ -47,6 +49,8 @@ def log_shadow_signal(
         "model_versions": model_versions or {},
         "request_source": request_source,
     }
+    if MAX_DAILY_LOG_BYTES > 0 and path.exists() and path.stat().st_size >= MAX_DAILY_LOG_BYTES:
+        return path
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, sort_keys=True) + "\n")
     return path

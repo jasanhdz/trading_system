@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import sys
 from datetime import datetime, timezone
@@ -125,6 +126,9 @@ def train_recent_edge_models(
         dataset_reports.append(built["report"])
         reports.append(_train_one(dataset, "long", int(lookback_days), symbol, resolved_output_dir))
         reports.append(_train_one(dataset, "short", int(lookback_days), symbol, resolved_output_dir))
+        del dataset
+        del built
+        gc.collect()
 
     report = {
         "schema_version": "aegis_turbo_train_report_v1",

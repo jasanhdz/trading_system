@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,8 @@ from aegis_alpha.turbo.config import DEFAULT_TURBO_CONFIG
 
 LOGGER = logging.getLogger(__name__)
 _LOG_LOCK = threading.Lock()
+MAX_DAILY_LOG_BYTES = int(os.getenv("AEGIS_TURBO_MAX_DAILY_LOG_BYTES", str(128 * 1024 * 1024)))
+LOG_FULL_PAYLOAD = os.getenv("AEGIS_TURBO_LOG_FULL_PAYLOAD", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Path:
@@ -102,8 +105,6 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
             "production_allowed": decision_brain.get("production_allowed"),
         } if isinstance(decision_brain, dict) else None,
         "stale": not bool((signal.get("freshness") or {}).get("is_fresh", True)),
-        "raw": raw,
-        "gated": gated,
         "raw_action": raw.get("action"),
         "raw_would_execute": bool(raw.get("would_execute", False)),
         "raw_reason": raw.get("reason"),
@@ -118,8 +119,13 @@ def log_turbo_shadow(signal: dict[str, Any], log_dir: Path | None = None) -> Pat
         "gated_reason": gated.get("reason"),
         "gated_blocked_by": gated.get("blocked_by"),
     }
+    if LOG_FULL_PAYLOAD:
+        row["raw"] = raw
+        row["gated"] = gated
     line = json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n"
     with _LOG_LOCK:
+        if MAX_DAILY_LOG_BYTES > 0 and path.exists() and path.stat().st_size >= MAX_DAILY_LOG_BYTES:
+            return path
         with path.open("a", encoding="utf-8") as f:
             f.write(line)
     return path

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import shutil
@@ -36,13 +37,15 @@ from aegis_alpha.turbo.phase_o_overlay import (  # noqa: E402
     apply_phase_o_overlay_to_active_manifest,
     validate_phase_o_overlay,
 )
-from aegis_alpha.tools.refresh_turbo_snapshots import refresh_features_only  # noqa: E402
+from aegis_alpha.tools.refresh_turbo_snapshots import refresh_features_only, turbo_refresh_lock  # noqa: E402
 
 
 LOCK_PATH = Path("/tmp/aegis_turbo_retrain.lock")
 REPORT_DIR = Path("aegis_alpha/logs/turbo_retrain")
 WINDOWS = (7, 14, 30)
 SIDES = ("long", "short")
+DEFAULT_MAX_SYMBOLS_PER_RUN = int(os.getenv("AEGIS_TURBO_MAX_SYMBOLS_PER_RUN", "1"))
+DEFAULT_MIN_AVAILABLE_MEM_GB = float(os.getenv("AEGIS_TURBO_MIN_AVAILABLE_MEM_GB", "8"))
 
 
 def utc_now() -> datetime:
@@ -71,6 +74,27 @@ def parse_bool(value: str | bool) -> bool:
 def parse_symbols(raw: str) -> list[str]:
     symbols = [normalize_turbo_symbol(item) for item in raw.split(",") if item.strip()]
     return list(dict.fromkeys(symbols))
+
+
+def mem_available_gb() -> float | None:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1024 / 1024
+    except Exception:
+        return None
+    return None
+
+
+def ensure_memory_available(min_available_gb: float) -> None:
+    available = mem_available_gb()
+    if available is None:
+        return
+    if available < min_available_gb:
+        raise RuntimeError(
+            f"insufficient memory for retrain: MemAvailable={available:.2f}GiB "
+            f"< required={min_available_gb:.2f}GiB"
+        )
 
 
 def pid_alive(pid: int) -> bool:
@@ -280,7 +304,7 @@ def active_manifest_is_fresh(symbol: str) -> bool:
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     os.replace(tmp, path)
 
@@ -396,47 +420,50 @@ def run_symbol(symbol: str, args: argparse.Namespace, started_stamp: str, report
         return result
 
     try:
-        candle_report = update_candles(symbol)
-        result["candles_updated"] = True
-        result["candle_update"] = candle_report
-        result["rows"] = candle_report.get("rows")
-        result["last_candle_ts"] = candle_report.get("last_candle_ts")
+        with turbo_refresh_lock():
+            ensure_memory_available(float(args.min_available_mem_gb))
+            candle_report = update_candles(symbol)
+            result["candles_updated"] = True
+            result["candle_update"] = candle_report
+            result["rows"] = candle_report.get("rows")
+            result["last_candle_ts"] = candle_report.get("last_candle_ts")
 
-        train_started = time.time()
-        train_report = train_recent_edge_models(symbol, tuple(WINDOWS), output_dir=candidate_dir)
-        result["training_duration_seconds"] = round(time.time() - train_started, 3)
-        result["train_report_path"] = train_report.get("report_path")
-        result["train_report"] = train_report
+            train_started = time.time()
+            train_report = train_recent_edge_models(symbol, tuple(WINDOWS), output_dir=candidate_dir)
+            result["training_duration_seconds"] = round(time.time() - train_started, 3)
+            result["train_report_path"] = train_report.get("report_path")
+            result["train_report"] = train_report
 
-        validation_passed, validation = validate_candidate_models(symbol, candidate_dir, train_report)
-        result["validation"] = validation
-        result["validation_passed"] = validation_passed
-        result["errors"].extend(validation.get("errors", []))
-        result["warnings"].extend(validation.get("warnings", []))
+            validation_passed, validation = validate_candidate_models(symbol, candidate_dir, train_report)
+            result["validation"] = validation
+            result["validation_passed"] = validation_passed
+            result["errors"].extend(validation.get("errors", []))
+            result["warnings"].extend(validation.get("warnings", []))
 
-        snapshot_validation = validate_snapshot_refresh(symbol)
-        result["snapshot_validation"] = snapshot_validation
-        if not snapshot_validation.get("is_fresh"):
-            result["validation_passed"] = False
-            result["errors"].append("snapshot refresh did not produce fresh snapshots")
+            snapshot_validation = validate_snapshot_refresh(symbol)
+            result["snapshot_validation"] = snapshot_validation
+            if not snapshot_validation.get("is_fresh"):
+                result["validation_passed"] = False
+                result["errors"].append("snapshot refresh did not produce fresh snapshots")
 
-        if result["validation_passed"] and args.promote_if_valid:
-            promotion = promote_candidate(
-                symbol,
-                candidate_dir,
-                train_report.get("report_path"),
-                validation,
-                started_stamp,
-                report_path,
-                disable_phase_o_overlay=args.disable_phase_o_overlay,
-            )
-            result.update(promotion)
-            if promotion.get("phase_o_overlay_error"):
-                result["errors"].append(f"phase_o_overlay_failed: {promotion['phase_o_overlay_error']}")
-            result["promoted"] = True
+            if result["validation_passed"] and args.promote_if_valid:
+                promotion = promote_candidate(
+                    symbol,
+                    candidate_dir,
+                    train_report.get("report_path"),
+                    validation,
+                    started_stamp,
+                    report_path,
+                    disable_phase_o_overlay=args.disable_phase_o_overlay,
+                )
+                result.update(promotion)
+                if promotion.get("phase_o_overlay_error"):
+                    result["errors"].append(f"phase_o_overlay_failed: {promotion['phase_o_overlay_error']}")
+                result["promoted"] = True
     except Exception as exc:
         result["errors"].append(repr(exc))
     finally:
+        gc.collect()
         result["finished_at"] = utc_iso()
         result["duration_seconds"] = round(time.time() - symbol_started, 3)
     return result
@@ -506,7 +533,8 @@ def main() -> None:
     parser.add_argument("--mode", choices=("safe",), default="safe")
     parser.add_argument("--promote-if-valid", action="store_true")
     parser.add_argument("--skip-existing-fresh", type=parse_bool, default=False)
-    parser.add_argument("--max-symbols-per-run", type=int)
+    parser.add_argument("--max-symbols-per-run", type=int, default=DEFAULT_MAX_SYMBOLS_PER_RUN)
+    parser.add_argument("--min-available-mem-gb", type=float, default=DEFAULT_MIN_AVAILABLE_MEM_GB)
     parser.add_argument("--disable-phase-o-overlay", action="store_true", help="Disable persistent Phase O overlay reapplication")
     args = parser.parse_args()
 

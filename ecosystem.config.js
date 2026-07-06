@@ -7,6 +7,7 @@ module.exports = {
             instances: 1,
             exec_mode: "fork",
             autorestart: true,
+            max_memory_restart: "1024M",
             watch: false,
             node_args: "-r dotenv/config",
             env: {
@@ -21,6 +22,7 @@ module.exports = {
             cwd: "/home/jasan/Develop/trading_system",
             instances: 1,
             autorestart: true,
+            max_memory_restart: "4096M",
             restart_delay: 10000,
             max_restarts: 10,
             watch: false,
