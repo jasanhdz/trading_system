@@ -1,1 +1,0 @@
-"""Champion export scaffold."""
