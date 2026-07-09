@@ -64,6 +64,8 @@ CAUSAL_CLOSE_OVERRIDES = (
     "feature.close_below_rolling_low_",
     "feature.lower_wick_close_pct",
     "feature.upper_wick_close_pct",
+    # "slope" contains the substring "sl" (meant for stop-loss); EMA slopes are causal.
+    "feature.ema_slope_",
 )
 ID_SOURCE_COLUMNS = ["symbol", "timestamp", "timeframe", "horizon"]
 TARGET_SOURCE_COLUMNS = [
@@ -141,6 +143,18 @@ REQUESTED_FEATURES = {
 
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def json_default(value: Any) -> Any:
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return str(value)
 
 
 def latest_input_csv(output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path | None:
@@ -518,7 +532,7 @@ def build_dataset(args: argparse.Namespace) -> dict[str, Any]:
             "no_future_or_label_features": True,
         },
     }
-    json_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+    json_path.write_text(json.dumps(result, indent=2, sort_keys=True, default=json_default), encoding="utf-8")
     md_path.write_text(render_markdown(result), encoding="utf-8")
     print(json.dumps({"decision": decision, "reason": reason, "csv": str(csv_path), "md": str(md_path), "json": str(json_path)}, indent=2))
     return result

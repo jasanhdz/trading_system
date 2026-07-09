@@ -64,9 +64,30 @@ def db_symbol(symbol: str) -> str:
     return s[:-4] + "/USDT" if s.endswith("USDT") else s
 
 
-def load_ohlcv_from_sqlite(db_path: Path, symbol: str, timeframe: str, lookback_days: int, limit: int = 5000) -> list[dict[str, Any]]:
+def timeframe_minutes(timeframe: str) -> int:
+    text = str(timeframe).strip().lower()
+    try:
+        if text.endswith("m"):
+            return max(1, int(text[:-1]))
+        if text.endswith("h"):
+            return max(1, int(text[:-1])) * 60
+        if text.endswith("d"):
+            return max(1, int(text[:-1])) * 1440
+    except ValueError:
+        pass
+    return 5
+
+
+def sqlite_row_limit(timeframe: str, lookback_days: int, cap: int = 250_000) -> int:
+    bars_per_day = max(1, 1440 // timeframe_minutes(timeframe))
+    return max(1, min(cap, lookback_days * bars_per_day + 64))
+
+
+def load_ohlcv_from_sqlite(db_path: Path, symbol: str, timeframe: str, lookback_days: int, limit: int | None = None) -> list[dict[str, Any]]:
     if not db_path.exists():
         return []
+    if limit is None:
+        limit = sqlite_row_limit(timeframe, lookback_days)
     sql = """
         select timestamp, open, high, low, close, volume, buy_volume
         from ohlcv_data

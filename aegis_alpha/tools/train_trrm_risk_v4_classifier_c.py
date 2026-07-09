@@ -71,6 +71,18 @@ def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def json_default(value):
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return str(value)
+
+
 def latest_dataset(out_dir: Path = DEFAULT_OUT_DIR) -> Path | None:
     files = sorted(out_dir.glob("aegis_risk_v4_qmae_base_dataset_a_samples_*.csv"))
     return files[-1] if files else None
@@ -452,7 +464,7 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
     }
     json_path = out_dir / f"aegis_phase_c_trrm_classifier_{stamp}.json"
     md_path = out_dir / f"aegis_phase_c_trrm_classifier_{stamp}.md"
-    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=json_default), encoding="utf-8")
     md_path.write_text(render_markdown(payload), encoding="utf-8")
     payload["outputs"] = {"json": str(json_path), "md": str(md_path)}
     print(json.dumps({"decision": decision, "reason": reason, "md": str(md_path), "json": str(json_path)}, indent=2))

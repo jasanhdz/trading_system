@@ -31,6 +31,12 @@ TARGET_MAP = {
     "bad_entry_v4": "target.bad_entry_v4",
     "union_tail_or_bad": "target.union_tail_or_bad",
 }
+# "slope" contains the substring "sl" (meant for stop-loss); EMA slopes are causal.
+CAUSAL_FEATURE_OVERRIDES = ("feature.ema_slope_",)
+# Baselines built from label/future-derived columns; reported as diagnostic ceilings only,
+# never eligible as best model nor as the promotion bar.
+DIAGNOSTIC_BASELINES = {"baseline_simple_label_derived"}
+SPLIT_EMBARGO_MINUTES = 120
 
 
 def utc_stamp() -> str:
@@ -52,6 +58,8 @@ def is_leakage_feature(col: str) -> tuple[bool, str]:
     low = col.lower()
     if not low.startswith("feature."):
         return True, "not_feature_namespace"
+    if any(low.startswith(prefix) for prefix in CAUSAL_FEATURE_OVERRIDES):
+        return False, ""
     for pat in LEAKAGE_PATTERNS:
         if pat in low:
             return True, f"pattern:{pat}"
@@ -103,9 +111,12 @@ class Split:
     method: str
     reliable: bool
     warning: str | None = None
+    embargo_minutes: int = 0
+    embargo_dropped_val: int = 0
+    embargo_dropped_test: int = 0
 
 
-def make_split(df: pd.DataFrame) -> Split:
+def make_split(df: pd.DataFrame, embargo_minutes: int = SPLIT_EMBARGO_MINUTES) -> Split:
     if "id.timestamp" not in df:
         idx = np.arange(len(df))
         return ordered_split(idx, "row_order_fallback", False, "id.timestamp missing")
@@ -115,7 +126,8 @@ def make_split(df: pd.DataFrame) -> Split:
         idx = np.arange(len(df))
         return ordered_split(idx, "row_order_fallback", False, "timestamp parse reliability below 95%")
     ordered = df.assign(_ts=ts).sort_values(["_ts", "id.symbol", "id.horizon"], kind="mergesort").index.to_numpy()
-    return ordered_split(ordered, "global_walk_forward", True, None)
+    split = ordered_split(ordered, "global_walk_forward", True, None)
+    return apply_embargo(split, ts, embargo_minutes)
 
 
 def ordered_split(idx: np.ndarray, method: str, reliable: bool, warning: str | None) -> Split:
@@ -123,6 +135,32 @@ def ordered_split(idx: np.ndarray, method: str, reliable: bool, warning: str | N
     train_end = int(n * 0.60)
     val_end = int(n * 0.80)
     return Split(idx[:train_end], idx[train_end:val_end], idx[val_end:], method, reliable, warning)
+
+
+def apply_embargo(split: Split, ts: pd.Series, embargo_minutes: int) -> Split:
+    """Drop val/test rows whose label window overlaps the previous segment's end.
+
+    Labels look up to `horizon` candles into the future, so rows near a boundary share
+    future candles with the earlier segment; a time embargo removes that contamination.
+    """
+    if embargo_minutes <= 0 or not len(split.train_idx) or not len(split.val_idx) or not len(split.test_idx):
+        return split
+    embargo = pd.Timedelta(minutes=embargo_minutes)
+    train_max = ts.loc[split.train_idx].max()
+    val_max = ts.loc[split.val_idx].max()
+    keep_val = (ts.loc[split.val_idx] > train_max + embargo).to_numpy()
+    keep_test = (ts.loc[split.test_idx] > val_max + embargo).to_numpy()
+    return Split(
+        split.train_idx,
+        split.val_idx[keep_val],
+        split.test_idx[keep_test],
+        split.method,
+        split.reliable,
+        split.warning,
+        embargo_minutes,
+        int((~keep_val).sum()),
+        int((~keep_test).sum()),
+    )
 
 
 class MedianImputer:
@@ -336,6 +374,7 @@ def evaluate_baselines(df: pd.DataFrame, y: pd.Series, split: Split) -> dict[str
             "validation_thresholds": search,
             "test": metrics(y_test, scores[split.test_idx], selected),
             "selected_threshold": selected,
+            "diagnostic_only": name in DIAGNOSTIC_BASELINES,
         }
     baselines["causal_volatility_baseline"]["rule_info"] = causal_info
     return baselines
@@ -379,6 +418,8 @@ def choose_best(result: dict[str, Any]) -> str:
     best_name = ""
     best_tuple = (False, 0.0, -1.0, 0.0)
     for name, data in result["baselines"].items():
+        if name in DIAGNOSTIC_BASELINES:
+            continue
         m = data["test"]
         tup = (m["recall"] >= 0.95, m["precision"], -m["rejection_rate"], m["f1"])
         if tup > best_tuple:
@@ -424,17 +465,21 @@ def decide(payload: dict[str, Any]) -> tuple[str, str, str]:
     if not tail:
         return "DATASET_NOT_USABLE", "no primary target evaluated", "stop and fix dataset"
     best_name = tail["best_model"]
+    if not best_name:
+        return "RESEARCH_NOT_READY", "no eligible model or causal baseline produced usable metrics", "FASE-E2: tune features/thresholds by symbol/horizon"
     best = tail["baselines"][best_name]["test"] if best_name in tail["baselines"] else tail["models"][best_name]["test"]
     causal = tail["baselines"]["causal_volatility_baseline"]["test"]
-    simple = tail["baselines"]["baseline_simple_label_derived"]["test"]
+    # The label-derived baseline is an oracle (built from the same future path as the
+    # target); it is reported as a diagnostic ceiling but is never the bar to beat.
+    prevalence = tail["baselines"]["reject_all"]["test"]["precision"]
     if best["recall"] < 0.95 or best["rejection_rate"] >= 0.85:
         return "RESEARCH_NOT_READY", "no model meets high recall with acceptable rejection rate", "FASE-E2: tune features/thresholds by symbol/horizon"
     if best_name in tail["baselines"]:
-        return "BASELINE_NOT_BEATEN", "best result is still a baseline", "FASE-D2: improve feature engineering/context"
+        return "BASELINE_NOT_BEATEN", "best result is still a causal/trivial baseline", "FASE-D2: improve feature engineering/context"
     if best["precision"] >= causal["precision"] and best["rejection_rate"] <= causal["rejection_rate"]:
-        if best["precision"] >= simple["precision"] * 0.90:
-            return "TRRM_READY_FOR_SHADOW_REVIEW", f"{best_name} improves causal baseline with high recall", "FASE-F: validate TRRM against Phase O live retrospective and forward live trade IDs"
-        return "TRRM_PROMISING_RESEARCH_ONLY", f"{best_name} improves causal baseline but not label-derived baseline", "FASE-E2: tune features/thresholds by symbol/horizon"
+        if best["precision"] >= prevalence * 1.25:
+            return "TRRM_READY_FOR_SHADOW_REVIEW", f"{best_name} improves causal baseline with high recall and real precision lift over prevalence", "FASE-F: validate TRRM against Phase O live retrospective and forward live trade IDs"
+        return "TRRM_PROMISING_RESEARCH_ONLY", f"{best_name} improves causal baseline but precision lift over prevalence is insufficient", "FASE-E2: tune features/thresholds by symbol/horizon"
     return "CAUSAL_BASELINE_NOT_BEATEN", "trained models do not improve causal baseline", "FASE-D2: improve feature engineering/context"
 
 
@@ -470,7 +515,7 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         "horizons": sorted(df.get("id.horizon", pd.Series(dtype=str)).dropna().astype(str).unique().tolist()),
         "timestamp_min": str(df["id.timestamp"].min()) if "id.timestamp" in df else None,
         "timestamp_max": str(df["id.timestamp"].max()) if "id.timestamp" in df else None,
-        "split": {"method": split.method, "reliable": split.reliable, "warning": split.warning, "train_rows": len(split.train_idx), "validation_rows": len(split.val_idx), "test_rows": len(split.test_idx)},
+        "split": {"method": split.method, "reliable": split.reliable, "warning": split.warning, "train_rows": len(split.train_idx), "validation_rows": len(split.val_idx), "test_rows": len(split.test_idx), "embargo_minutes": split.embargo_minutes, "embargo_dropped_val": split.embargo_dropped_val, "embargo_dropped_test": split.embargo_dropped_test},
         "model_research_path": str(model_dir) if parse_bool(args.write_models) else None,
     }
     if len(feature_cols) >= 20 and not leakage:
@@ -597,7 +642,7 @@ def render_markdown(p: dict[str, Any]) -> str:
         f"- FASE-E used {p['feature_count']} causal features from FASE-D.",
         "",
         "## 16. Limitations",
-        "- Baseline simple is label-derived and research-only, not live-usable.",
+        "- Baseline simple is label-derived (oracle): diagnostic ceiling only, never the promotion bar.",
         "- No Phase O trade-ID linkage validation yet.",
         "",
         "## 17. Decision",

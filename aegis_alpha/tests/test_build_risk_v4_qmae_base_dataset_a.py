@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from aegis_alpha.tools.build_risk_v4_qmae_base_dataset_a import build_samples, run_builder
+from aegis_alpha.tools.build_risk_v4_qmae_base_dataset_a import build_samples, run_builder, sqlite_row_limit, timeframe_minutes
 
 
 def fixture_candles(n: int = 80) -> list[dict]:
@@ -64,9 +64,21 @@ def test_no_train() -> None:
         assert result["no_train"] is True
 
 
+def test_lookback_days_drives_sqlite_limit() -> None:
+    assert timeframe_minutes("5m") == 5
+    assert timeframe_minutes("15m") == 15
+    assert timeframe_minutes("1h") == 60
+    # 365 days of 5m candles is ~105k rows, far beyond the old fixed 5000 limit.
+    assert sqlite_row_limit("5m", 365) == 365 * 288 + 64
+    assert sqlite_row_limit("5m", 17) == 17 * 288 + 64
+    assert sqlite_row_limit("5m", 10_000) == 250_000  # capped
+    assert sqlite_row_limit("15m", 30) == 30 * 96 + 64
+
+
 if __name__ == "__main__":
     test_no_db_status()
     test_fixture_labels()
     test_sqlite_builder_serializes()
     test_no_train()
+    test_lookback_days_drives_sqlite_limit()
     print("test_build_risk_v4_qmae_base_dataset_a: OK")

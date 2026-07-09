@@ -14,7 +14,9 @@ import pandas as pd
 from aegis_alpha.tools.train_trrm_risk_v4_classifier_e import (
     baseline_simple_scores,
     build_targets,
+    choose_best,
     fit_preprocessors,
+    is_leakage_feature,
     make_split,
     run_training,
     select_features,
@@ -108,6 +110,42 @@ def test_threshold_and_baselines() -> None:
     assert "recall_095" in search
 
 
+def test_ema_slope_is_causal_not_leakage() -> None:
+    leak, reason = is_leakage_feature("feature.ema_slope_12")
+    assert leak is False, f"ema_slope wrongly flagged: {reason}"
+    assert is_leakage_feature("feature.sl_price")[0] is True
+    assert is_leakage_feature("target.tail_risk_v4")[0] is True
+
+
+def test_choose_best_ignores_diagnostic_oracle_baseline() -> None:
+    perfect = {"recall": 1.0, "precision": 0.99, "rejection_rate": 0.5, "f1": 0.99}
+    weaker = {"recall": 0.96, "precision": 0.60, "rejection_rate": 0.70, "f1": 0.74}
+    result = {
+        "baselines": {
+            "baseline_simple_label_derived": {"test": perfect},
+            "causal_volatility_baseline": {"test": {"recall": 0.40, "precision": 0.55, "rejection_rate": 0.35, "f1": 0.46}},
+            "reject_all": {"test": {"recall": 1.0, "precision": 0.48, "rejection_rate": 1.0, "f1": 0.65}},
+        },
+        "models": {"gradient_boosting": {"test": weaker}},
+    }
+    assert choose_best(result) == "gradient_boosting"
+
+
+def test_split_embargo_drops_boundary_rows() -> None:
+    df = pd.DataFrame(rows())
+    split_no_embargo = make_split(df, embargo_minutes=0)
+    split_embargo = make_split(df, embargo_minutes=120)
+    assert split_embargo.embargo_minutes == 120
+    assert len(split_embargo.val_idx) < len(split_no_embargo.val_idx)
+    assert len(split_embargo.test_idx) < len(split_no_embargo.test_idx)
+    assert split_embargo.embargo_dropped_val >= 1
+    assert split_embargo.embargo_dropped_test >= 1
+    assert len(set(split_embargo.train_idx) & set(split_embargo.val_idx)) == 0
+    ts = pd.to_datetime(df["id.timestamp"], utc=True)
+    train_max = ts.loc[split_embargo.train_idx].max()
+    assert (ts.loc[split_embargo.val_idx] > train_max + pd.Timedelta(minutes=120)).all()
+
+
 def test_script_runs_and_outputs() -> None:
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "dataset.csv"
@@ -128,5 +166,8 @@ if __name__ == "__main__":
     test_temporal_split_order()
     test_train_only_preprocessing()
     test_threshold_and_baselines()
+    test_ema_slope_is_causal_not_leakage()
+    test_choose_best_ignores_diagnostic_oracle_baseline()
+    test_split_embargo_drops_boundary_rows()
     test_script_runs_and_outputs()
     print("test_train_trrm_risk_v4_classifier_e: OK")

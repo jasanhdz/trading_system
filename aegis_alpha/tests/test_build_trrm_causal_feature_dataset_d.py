@@ -107,6 +107,10 @@ def test_leakage_rules_and_close_override() -> None:
     assert is_leakage_column("feature.future_mae_roe_proxy")[0] is True
     assert is_leakage_column("feature.close_vs_ema_12")[0] is False
     assert is_leakage_column("feature.close_position_in_range")[0] is False
+    # "slope" contains the substring "sl"; EMA slopes are causal and must survive.
+    for span in (6, 12, 24, 48):
+        assert is_leakage_column(f"feature.ema_slope_{span}")[0] is False
+    assert is_leakage_column("feature.sl_distance")[0] is True
 
 
 def test_compute_features_no_negative_shift_shape() -> None:
