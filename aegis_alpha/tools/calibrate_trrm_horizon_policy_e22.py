@@ -657,7 +657,13 @@ def opened_lockbox_diagnostic(
         "not_independent": True,
         "not_sufficient_for_promotion": True,
         "static_threshold_original": static_metrics,
-        "global_e21_reference": {"metrics": global_metrics, "horizon_balance": global_horizon, "meta": gmeta},
+        "global_e21_reference": {
+            "metrics": global_metrics,
+            "horizon_balance": global_horizon,
+            "meta": gmeta,
+            "engine": "e22_day_batched",
+            "note": "Re-implementation of the E2.1 policy with the E2.2 day-batched engine; numbers differ slightly from the E2.1 report, which uses a per-row rolling engine.",
+        },
         "selected_e22_policy": {"metrics": selected_metrics, "horizon_balance": selected_horizon, "meta": meta},
         "contradicts_internal_evidence": selected_metrics["lift"] < 1.0 or selected_metrics["realized_rejection_rate"] > 0.70,
     }
@@ -803,11 +809,26 @@ def run_e22(args: argparse.Namespace) -> dict[str, Any]:
     opened, opened_pred = opened_lockbox_diagnostic(strided, strided_score, selected, global_ref, args) if selected else ({}, pd.DataFrame())
     dec, reason, next_phase = decision(selected, global_ref, opened)
     selected_horizon = []
+    selected_horizon_fold_mean = []
     selected_predictions = None
     if selected and selected.get("_predictions") is not None:
         selected_predictions = selected["_predictions"]
         final_fold = selected["folds"][-1]
         selected_horizon = final_fold.get("horizon_metrics", [])
+        good_folds = [f for f in selected["folds"] if not f.get("skipped")]
+        for horizon in HORIZONS:
+            rows_h = [hr for f in good_folds for hr in f.get("horizon_metrics", []) if hr["horizon"] == horizon]
+            if rows_h:
+                selected_horizon_fold_mean.append(
+                    {
+                        "horizon": horizon,
+                        "scope": "unweighted_mean_over_all_usable_folds",
+                        "realized_rejection_rate": float(np.mean([r["realized_rejection_rate"] for r in rows_h])),
+                        "tail_capture_rate": float(np.mean([r["tail_capture_rate"] for r in rows_h])),
+                        "residual_tail_rate": float(np.mean([r["residual_tail_rate"] for r in rows_h])),
+                        "lift": float(np.mean([r["lift"] for r in rows_h])),
+                    }
+                )
     complexity_comparison = [
         {
             "method": r["method"],
@@ -854,6 +875,10 @@ def run_e22(args: argparse.Namespace) -> dict[str, Any]:
         "selected_policy": {k: v for k, v in (selected or {}).items() if k != "_predictions"},
         "selected_ready_criteria": ready_criteria(selected) if selected else {},
         "selected_horizon_balance": selected_horizon,
+        "selected_horizon_balance_scope": "last_pre_lockbox_fold_only",
+        "selected_horizon_balance_fold_mean": selected_horizon_fold_mean,
+        "aggregate_scope": "unweighted_mean_over_all_usable_folds",
+        "policy_engine": "e22_day_batched",
         "comparison_against_e21": comparison,
         "drift_by_horizon": drift_by_horizon(dense, dense_score, selected_predictions),
         "fallback_behavior": {
