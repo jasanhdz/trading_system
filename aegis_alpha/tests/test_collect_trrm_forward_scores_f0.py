@@ -34,6 +34,25 @@ def write_signal(path: Path, signal_id: str, ts: str, symbol: str = "SOLUSDT", r
     path.write_text(json.dumps(row) + "\n")
 
 
+def append_signal(path: Path, signal_id: str, ts: str, symbol: str = "SOLUSDT", reason: str = "candidate") -> None:
+    row = {
+        "timestamp": ts,
+        "signal_id": signal_id,
+        "symbol": symbol,
+        "strategy": "AEGIS_TURBO",
+        "mode": "AEGIS_TURBO_MICRO_LIVE",
+        "raw_action": "SHORT",
+        "gated_action": "SHORT",
+        "final_action": "SHORT",
+        "reason": reason,
+        "turbo_score": 0.7,
+        "gate_allowed": True,
+        "executed": False,
+    }
+    with path.open("a") as f:
+        f.write(json.dumps(row) + "\n")
+
+
 def frozen_candidate(root: Path) -> tuple[Path, Path]:
     art = make_artifacts(root)
     common.EXPECTED_FEATURE_HASH = art["feature_hash"]
@@ -134,10 +153,12 @@ def test_source_mutation_detected() -> None:
         cdir, signal = frozen_candidate(root)
         args = collect_args(["--candidate-dir", str(cdir), "--source-path", str(signal), "--since", "2026-07-10T20:00:00Z", "--until", "2026-07-10T20:30:00Z"])
         run_collect(args)
-        write_signal(signal, "SIG-1", "2026-07-10T20:10:00Z", reason="mutated")
-        payload = run_collect(args)
-        assert payload["source_conflicts"]
-        assert payload["opportunities_appended"] == 0
+        append_signal(signal, "SIG-1", "2026-07-10T20:10:00Z", reason="mutated")
+        try:
+            run_collect(args)
+            raise AssertionError("expected mutation")
+        except ValueError as exc:
+            assert "SOURCE_MUTATION_DETECTED" in str(exc)
 
 
 def test_dry_run_does_not_append_or_touch_yaml() -> None:
@@ -166,9 +187,74 @@ def test_dry_run_does_not_append_or_touch_yaml() -> None:
         assert not (cdir / "active_manifest.json").exists()
 
 
+def test_rotating_inputs_glob_directory_and_multi_file_idempotent() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cdir, signal = frozen_candidate(root)
+        day2 = root / "turbo_signals_2026-07-11.jsonl"
+        append_signal(day2, "SIG-3", "2026-07-10T20:25:00Z")
+        append_signal(day2, "SIG-2", "2026-07-10T20:20:00Z")
+        payload = run_collect(
+            collect_args(
+                [
+                    "--candidate-dir",
+                    str(cdir),
+                    "--source-path",
+                    str(signal),
+                    str(day2),
+                    "--since",
+                    "2026-07-10T20:00:00Z",
+                    "--until",
+                    "2026-07-10T20:30:00Z",
+                ]
+            )
+        )
+        assert payload["decision"] == "F0_COLLECTION_STARTED"
+        assert payload["opportunities_appended"] == 3
+        assert payload["files_scanned"] == 2
+        state = json.loads((cdir / "collection_state.json").read_text())
+        assert len(state["source_files"]) == 2
+        rows = [json.loads(x) for x in (cdir / "opportunity_scores.jsonl").read_text().splitlines() if x.strip()]
+        assert [r["source_event_id"] for r in rows] == ["SIG-1", "SIG-2", "SIG-3"]
+        again = run_collect(
+            collect_args(
+                [
+                    "--candidate-dir",
+                    str(cdir),
+                    "--source-glob",
+                    str(root / "turbo_signals_*.jsonl"),
+                    "--since",
+                    "2026-07-10T20:00:00Z",
+                    "--until",
+                    "2026-07-10T20:30:00Z",
+                ]
+            )
+        )
+        assert again["opportunities_appended"] == 0
+        assert again["duplicates_skipped"] == 3
+        directory = run_collect(
+            collect_args(
+                [
+                    "--candidate-dir",
+                    str(cdir),
+                    "--source-dir",
+                    str(root),
+                    "--source-pattern",
+                    "turbo_signals_*.jsonl",
+                    "--since",
+                    "2026-07-10T21:00:00Z",
+                    "--until",
+                    "2026-07-10T22:00:00Z",
+                ]
+            )
+        )
+        assert directory["decision"] == "F0_FROZEN_NO_NEW_OPPORTUNITIES"
+
+
 if __name__ == "__main__":
     test_no_new_opportunities_status()
     test_collect_append_idempotent_and_no_decision()
     test_source_mutation_detected()
     test_dry_run_does_not_append_or_touch_yaml()
+    test_rotating_inputs_glob_directory_and_multi_file_idempotent()
     print("test_collect_trrm_forward_scores_f0: OK")

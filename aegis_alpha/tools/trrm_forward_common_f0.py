@@ -13,7 +13,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -155,6 +155,240 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
             if line.strip():
                 rows.append(json.loads(line))
     return rows
+
+
+def source_paths_from_args(
+    source_path: str | Sequence[str] | None = None,
+    source_glob: str | None = None,
+    source_dir: str | None = None,
+    source_pattern: str = "turbo_signals_*.jsonl",
+) -> list[Path]:
+    paths: list[Path] = []
+    explicit = bool(source_path or source_glob or source_dir)
+    if source_path:
+        raw_paths = [source_path] if isinstance(source_path, str) else list(source_path)
+        for raw in raw_paths:
+            if not raw:
+                continue
+            matches = glob.glob(str(raw))
+            if matches:
+                paths.extend(Path(p) for p in matches)
+            else:
+                paths.append(Path(raw))
+    if source_glob:
+        paths.extend(Path(p) for p in glob.glob(str(source_glob)))
+    if source_dir:
+        paths.extend(Path(p) for p in Path(source_dir).glob(source_pattern or "turbo_signals_*.jsonl"))
+    if not paths and not explicit:
+        paths.extend(Path(p) for p in glob.glob(DEFAULT_SIGNAL_GLOB))
+    resolved: dict[str, Path] = {}
+    for path in paths:
+        try:
+            key = str(path.resolve())
+        except FileNotFoundError:
+            key = str(path.absolute())
+        resolved[key] = Path(key)
+    return [resolved[k] for k in sorted(resolved)]
+
+
+def _event_sort_key(row: dict[str, Any]) -> tuple[str, str, str, int]:
+    ts = parse_dt(str(row.get("timestamp")))
+    ts_key = ts.isoformat() if ts is not None else ""
+    return (ts_key, str(row.get("signal_id") or ""), str(row.get("_source_path") or ""), int(row.get("_source_line") or 0))
+
+
+def turbo_signal_file_date(path: Path) -> pd.Timestamp | None:
+    match = re.search(r"turbo_signals_(\d{4}-\d{2}-\d{2})\.jsonl$", path.name)
+    if not match:
+        return None
+    return pd.Timestamp(match.group(1), tz="UTC")
+
+
+def read_turbo_signal_file(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    incomplete = 0
+    malformed = 0
+    last_complete = 0
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return [], {
+            "absolute_path": str(path),
+            "readable": False,
+            "exists": False,
+            "empty": True,
+            "events": 0,
+            "incomplete_trailing_lines": 0,
+            "malformed_lines": 0,
+        }
+    with path.open("rb") as f:
+        line_no = 0
+        while True:
+            offset = f.tell()
+            raw = f.readline()
+            if not raw:
+                break
+            line_no += 1
+            if not raw.strip():
+                last_complete = f.tell()
+                continue
+            has_newline = raw.endswith(b"\n")
+            try:
+                text = raw.decode("utf-8")
+                row = json.loads(text)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                if not has_newline:
+                    incomplete += 1
+                    break
+                malformed += 1
+                continue
+            row["_source_path"] = str(path)
+            row["_source_line"] = line_no
+            row["_source_offset"] = offset
+            row["_source_event_hash"] = sha256_json(row)
+            rows.append(row)
+            last_complete = f.tell()
+    try:
+        stat_after = path.stat()
+    except FileNotFoundError:
+        stat_after = stat
+    size_after = int(getattr(stat_after, "st_size", stat.st_size))
+    last_complete = min(last_complete, size_after)
+    timestamps = [parse_dt(str(r.get("timestamp"))) for r in rows]
+    timestamps = [t for t in timestamps if t is not None]
+    prefix_sha = None
+    if last_complete:
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            remaining = last_complete
+            while remaining > 0:
+                chunk = f.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                h.update(chunk)
+        prefix_sha = h.hexdigest()
+    meta = {
+        "absolute_path": str(path),
+        "readable": True,
+        "exists": True,
+        "empty": size_after == 0,
+        "inode": getattr(stat_after, "st_ino", getattr(stat, "st_ino", None)),
+        "size_bytes": size_after,
+        "last_read_offset": size_after,
+        "last_complete_line_offset": last_complete,
+        "last_event_timestamp": str(max(timestamps)) if timestamps else None,
+        "first_event_timestamp": str(min(timestamps)) if timestamps else None,
+        "sha256_prefix_processed": prefix_sha,
+        "events": len(rows),
+        "incomplete_trailing_lines": incomplete,
+        "malformed_lines": malformed,
+        "rotation_detected": False,
+        "truncation_detected": False,
+    }
+    return rows, meta
+
+
+def load_rotating_signal_events(
+    source_path: str | Sequence[str] | None = None,
+    source_glob: str | None = None,
+    source_dir: str | None = None,
+    source_pattern: str = "turbo_signals_*.jsonl",
+    since: str | None = None,
+    until: str | None = None,
+    previous_state: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    paths = source_paths_from_args(source_path, source_glob, source_dir, source_pattern)
+    since_ts = parse_dt(since)
+    until_ts = parse_dt(until) if until else None
+    all_rows: list[dict[str, Any]] = []
+    file_meta: list[dict[str, Any]] = []
+    previous_files = {
+        str(item.get("absolute_path")): item
+        for item in (previous_state or {}).get("source_files", [])
+        if item.get("absolute_path")
+    }
+    for path in paths:
+        file_day = turbo_signal_file_date(path)
+        if file_day is not None and since_ts is not None and file_day < since_ts.normalize() - pd.Timedelta(days=1):
+            file_meta.append({
+                "absolute_path": str(path),
+                "readable": False,
+                "exists": path.exists(),
+                "empty": False,
+                "events": 0,
+                "skipped_by_date_filter": True,
+                "rotation_detected": False,
+                "truncation_detected": False,
+            })
+            continue
+        if file_day is not None and until_ts is not None and file_day > until_ts.normalize() + pd.Timedelta(days=1):
+            file_meta.append({
+                "absolute_path": str(path),
+                "readable": False,
+                "exists": path.exists(),
+                "empty": False,
+                "events": 0,
+                "skipped_by_date_filter": True,
+                "rotation_detected": False,
+                "truncation_detected": False,
+            })
+            continue
+        rows, meta = read_turbo_signal_file(path)
+        old = previous_files.get(meta.get("absolute_path"))
+        if old:
+            old_size = int(old.get("size_bytes") or 0)
+            new_size = int(meta.get("size_bytes") or 0)
+            meta["truncation_detected"] = new_size < old_size
+            meta["rotation_detected"] = old.get("inode") is not None and meta.get("inode") is not None and old.get("inode") != meta.get("inode")
+        file_meta.append(meta)
+        for row in rows:
+            ts = parse_dt(str(row.get("timestamp")))
+            if ts is None:
+                continue
+            if since_ts is not None and ts < since_ts:
+                continue
+            if until_ts is not None and ts > until_ts:
+                continue
+            all_rows.append(row)
+    all_rows.sort(key=_event_sort_key)
+    ids: dict[str, str] = {}
+    duplicates = 0
+    mutations: list[dict[str, Any]] = []
+    unique_rows: list[dict[str, Any]] = []
+    for row in all_rows:
+        sid = str(row.get("signal_id") or deterministic_id([row.get("timestamp"), row.get("symbol"), row.get("_source_path"), row.get("_source_line")]))
+        fp = source_event_fingerprint(row)
+        if sid in ids:
+            if ids[sid] == fp:
+                duplicates += 1
+                continue
+            mutations.append({"source_event_id": sid, "source_reference": f"{row.get('_source_path')}:{row.get('_source_line')}"})
+            continue
+        ids[sid] = fp
+        unique_rows.append(row)
+    timestamps = [parse_dt(str(r.get("timestamp"))) for r in unique_rows]
+    timestamps = [t for t in timestamps if t is not None]
+    post_freeze_files = sorted({str(r.get("_source_path")) for r in unique_rows})
+    report = {
+        "files_matched": len(paths),
+        "files_readable": sum(1 for m in file_meta if m.get("readable")),
+        "files_empty": sum(1 for m in file_meta if m.get("empty")),
+        "files": file_meta,
+        "incomplete_trailing_lines": sum(int(m.get("incomplete_trailing_lines") or 0) for m in file_meta),
+        "malformed_lines": sum(int(m.get("malformed_lines") or 0) for m in file_meta),
+        "earliest_event": str(min(timestamps)) if timestamps else None,
+        "latest_event": str(max(timestamps)) if timestamps else None,
+        "total_events": len(unique_rows),
+        "unique_source_event_ids": len(ids),
+        "duplicates": duplicates,
+        "mutations": mutations,
+        "post_freeze_files": post_freeze_files,
+        "rotation_detected": any(bool(m.get("rotation_detected")) for m in file_meta),
+        "truncation_detected": any(bool(m.get("truncation_detected")) for m in file_meta),
+        "readiness": "SOURCE_MUTATION_DETECTED" if mutations else "SOURCE_TRUNCATION_DETECTED" if any(bool(m.get("truncation_detected")) for m in file_meta) else "ROTATING_SOURCE_READY" if unique_rows or paths else "ROTATING_SOURCE_EMPTY",
+    }
+    return unique_rows, report
 
 
 def existing_by_id(path: Path, key: str) -> dict[str, dict[str, Any]]:
@@ -315,9 +549,18 @@ def threshold_from_history(history_rows: list[dict[str, Any]], now_ts: pd.Timest
     }
 
 
-def inspect_turbo_signal_source(source_path: str | None = None) -> dict[str, Any]:
-    pattern = source_path or DEFAULT_SIGNAL_GLOB
-    paths = sorted(Path(p) for p in glob.glob(pattern))
+def source_event_fingerprint(event: dict[str, Any]) -> str:
+    clean = {k: v for k, v in event.items() if not str(k).startswith("_")}
+    return sha256_json(clean)
+
+
+def inspect_turbo_signal_source(
+    source_path: str | Sequence[str] | None = None,
+    source_glob: str | None = None,
+    source_dir: str | None = None,
+    source_pattern: str = "turbo_signals_*.jsonl",
+) -> dict[str, Any]:
+    paths = source_paths_from_args(source_path, source_glob, source_dir, source_pattern)
     sample: dict[str, Any] | None = None
     for path in reversed(paths):
         with path.open("r", encoding="utf-8") as f:
@@ -331,7 +574,7 @@ def inspect_turbo_signal_source(source_path: str | None = None) -> dict[str, Any
     return {
         "decision": "OPPORTUNITY_SOURCE_READY" if ready else "OPPORTUNITY_SEMANTICS_NOT_READY",
         "source_kind": "turbo_signals_jsonl",
-        "path_pattern": pattern,
+        "path_pattern": source_glob or (str(Path(source_dir) / source_pattern) if source_dir else str(source_path or DEFAULT_SIGNAL_GLOB)),
         "files": [str(p) for p in paths[-5:]],
         "schema_keys": sorted(sample.keys()) if sample else [],
         "id_field": "signal_id",
@@ -348,32 +591,8 @@ def inspect_turbo_signal_source(source_path: str | None = None) -> dict[str, Any
 
 
 def iter_turbo_signal_events(pattern: str, since: str | None, until: str | None, max_rows: int | None = None) -> list[dict[str, Any]]:
-    since_ts = parse_dt(since)
-    until_ts = parse_dt(until) if until else pd.Timestamp.now(tz="UTC")
-    rows = []
-    for path in sorted(Path(p) for p in glob.glob(pattern)):
-        with path.open("r", encoding="utf-8") as f:
-            for line_no, line in enumerate(f, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                ts = parse_dt(str(row.get("timestamp")))
-                if ts is None:
-                    continue
-                if since_ts is not None and ts < since_ts:
-                    continue
-                if until_ts is not None and ts > until_ts:
-                    continue
-                row["_source_path"] = str(path)
-                row["_source_line"] = line_no
-                rows.append(row)
-                if max_rows and len(rows) >= max_rows:
-                    return rows
-    rows.sort(key=lambda r: str(r.get("timestamp")))
-    return rows
+    rows, _ = load_rotating_signal_events(source_glob=pattern, since=since, until=until)
+    return rows[:max_rows] if max_rows else rows
 
 
 def opportunity_id_from_event(event: dict[str, Any], source_name: str) -> str:

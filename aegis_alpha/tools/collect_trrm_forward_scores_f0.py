@@ -37,6 +37,7 @@ from aegis_alpha.tools.trrm_forward_common_f0 import (
     inspect_turbo_signal_source,
     iter_turbo_signal_events,
     load_json,
+    load_rotating_signal_events,
     opportunity_id_from_event,
     parse_dt,
     read_jsonl,
@@ -52,7 +53,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Collect passive F0 TRRM forward scores")
     p.add_argument("--candidate-dir", required=True)
     p.add_argument("--source-kind", default="turbo_signals_jsonl")
-    p.add_argument("--source-path", default=DEFAULT_SIGNAL_GLOB)
+    p.add_argument("--source-path", nargs="*", default=None)
+    p.add_argument("--source-glob", default="")
+    p.add_argument("--source-dir", default="")
+    p.add_argument("--source-pattern", default="turbo_signals_*.jsonl")
     p.add_argument("--source-query", default="")
     p.add_argument("--since", default="")
     p.add_argument("--until", default="")
@@ -74,6 +78,16 @@ def parse_bool(value: str | bool) -> bool:
 def source_fingerprint(event: dict[str, Any]) -> str:
     clean = {k: v for k, v in event.items() if not str(k).startswith("_")}
     return sha256_json(clean)
+
+
+def source_label(args: argparse.Namespace) -> str:
+    if args.source_glob:
+        return args.source_glob
+    if args.source_dir:
+        return str(Path(args.source_dir) / args.source_pattern)
+    if args.source_path:
+        return ",".join(str(x) for x in args.source_path)
+    return DEFAULT_SIGNAL_GLOB
 
 
 def event_side(event: dict[str, Any]) -> str:
@@ -232,12 +246,26 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_json(candidate_dir / "candidate_manifest.json")
     if manifest.get("enforcement_enabled") or manifest.get("labels_enabled"):
         raise ValueError("ENFORCEMENT_PATH_DETECTED")
-    source = inspect_turbo_signal_source(args.source_path)
+    state_path = candidate_dir / "collection_state.json"
+    previous_state = load_json(state_path) if state_path.exists() else {}
+    source = inspect_turbo_signal_source(args.source_path, args.source_glob or None, args.source_dir or None, args.source_pattern)
     if source["decision"] != "OPPORTUNITY_SOURCE_READY":
         raise ValueError("OPPORTUNITY_SEMANTICS_NOT_READY")
     since = args.since or manifest["frozen_at_utc"]
     until = args.until or utc_now()
-    source_events = iter_turbo_signal_events(args.source_path, since, until, None)
+    source_events, source_rotation = load_rotating_signal_events(
+        args.source_path,
+        args.source_glob or None,
+        args.source_dir or None,
+        args.source_pattern,
+        since,
+        until,
+        previous_state,
+    )
+    if source_rotation["readiness"] == "SOURCE_MUTATION_DETECTED":
+        raise ValueError("SOURCE_MUTATION_DETECTED")
+    if source_rotation["readiness"] == "SOURCE_TRUNCATION_DETECTED":
+        raise ValueError("SOURCE_TRUNCATION_DETECTED")
     events = [event for event in source_events if is_candidate_event(event)]
     if args.max_opportunities:
         events = events[: args.max_opportunities]
@@ -246,6 +274,7 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
     opportunity_path = candidate_dir / "opportunity_scores.jsonl"
     monitor_path = candidate_dir / "model_monitor_scores.jsonl"
     existing = existing_by_id(opportunity_path, "opportunity_id")
+    seen_this_run: dict[str, str] = {}
     new_rows: list[dict[str, Any]] = []
     monitor_rows: list[dict[str, Any]] = []
     duplicates = 0
@@ -255,6 +284,13 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("FORWARD_LABEL_COLUMN_DETECTED")
         opp_id = opportunity_id_from_event(event, manifest.get("source_type", "turbo_signals_jsonl"))
         fp = source_fingerprint(event)
+        if opp_id in seen_this_run:
+            if seen_this_run[opp_id] != fp:
+                conflicts.append({"opportunity_id": opp_id, "reason": "SOURCE_EVENT_MUTATION_DETECTED"})
+            else:
+                duplicates += 1
+            continue
+        seen_this_run[opp_id] = fp
         if opp_id in existing:
             if existing[opp_id].get("source_event_hash") != fp:
                 conflicts.append({"opportunity_id": opp_id, "reason": "SOURCE_EVENT_MUTATION_DETECTED"})
@@ -287,6 +323,9 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
             "last_status": status,
             "updated_at_utc": recorded_at,
             "total_existing_before_run": len(existing),
+            "source_mode": "glob" if args.source_glob else "directory" if args.source_dir else "path",
+            "source_reference": source_label(args),
+            "source_files": source_rotation.get("files", []),
         }
         write_json(candidate_dir / "collection_state.json", state)
     run_stamp = compact_utc_stamp()
@@ -296,8 +335,11 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
         "decision": "F0_COLLECTION_STARTED" if status == "COLLECTION_STARTED" else "F0_FROZEN_NO_NEW_OPPORTUNITIES" if status in {"STARTED_NO_NEW_OPPORTUNITIES", "NO_NEW_UNIQUE_OPPORTUNITIES"} else "RESEARCH_NOT_READY",
         "collection_status": status,
         "source_inspection": source,
+        "source_rotation": source_rotation,
         "since": since,
         "until": until,
+        "files_scanned": source_rotation.get("files_matched", 0),
+        "incomplete_lines_ignored": source_rotation.get("incomplete_trailing_lines", 0),
         "source_events_seen": len(source_events),
         "events_found": len(events),
         "opportunities_appended": len(new_rows) if parse_bool(args.append) and not parse_bool(args.dry_run) and not conflicts else 0,
@@ -356,6 +398,10 @@ def main(argv: list[str] | None = None) -> int:
             decision = "OPPORTUNITY_SEMANTICS_NOT_READY"
         elif "ENFORCEMENT_PATH_DETECTED" in msg:
             decision = "ENFORCEMENT_PATH_DETECTED"
+        elif "SOURCE_EVENT_MUTATION_DETECTED" in msg:
+            decision = "SOURCE_MUTATION_DETECTED"
+        elif "SOURCE_TRUNCATION_DETECTED" in msg:
+            decision = "SOURCE_TRUNCATION_DETECTED"
         print(json.dumps({"decision": decision, "reason": msg}))
         return 2 if decision != "RESEARCH_NOT_READY" else 1
 
