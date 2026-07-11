@@ -37,11 +37,13 @@ from aegis_alpha.tools.trrm_forward_common_f0 import (
     inspect_turbo_signal_source,
     iter_turbo_signal_events,
     load_json,
+    load_pipeline_checked,
     load_rotating_signal_events,
     opportunity_id_from_event,
     parse_dt,
     read_jsonl,
     safe_research_path,
+    score_frame,
     sha256_json,
     threshold_from_history,
     utc_now,
@@ -115,6 +117,48 @@ def extract_scores(event: dict[str, Any]) -> dict[int, float | None]:
     return out
 
 
+def load_feature_store(manifest: dict[str, Any]) -> tuple[pd.DataFrame | None, Any | None]:
+    path = manifest.get("feature_store_csv")
+    model_path = manifest.get("model_path")
+    if not path or not model_path:
+        return None, None
+    df = pd.read_csv(path)
+    if "id.timestamp" not in df.columns:
+        raise ValueError("FEATURE_STORE_SCHEMA_ERROR")
+    df["_feature_ts"] = pd.to_datetime(df["id.timestamp"], errors="coerce", utc=True)
+    df = df.dropna(subset=["_feature_ts"]).sort_values(["_feature_ts", "id.symbol", "id.horizon"]).reset_index(drop=True)
+    pipeline = load_pipeline_checked(Path(model_path))
+    return df, pipeline
+
+
+def attach_feature_scores(event: dict[str, Any], feature_store: pd.DataFrame | None, pipeline: Any | None, max_gap_minutes: int = 10) -> dict[str, Any]:
+    if feature_store is None or pipeline is None:
+        return event
+    ts = parse_dt(str(event.get("timestamp")))
+    symbol = str(event.get("symbol") or "").upper().replace("/", "")
+    if ts is None or not symbol:
+        event["_no_decision_reason"] = "SOURCE_ALIGNMENT_ERROR"
+        return event
+    part = feature_store[(feature_store["id.symbol"].astype(str) == symbol) & (feature_store["_feature_ts"] <= ts)]
+    if part.empty:
+        event["_no_decision_reason"] = "SOURCE_ALIGNMENT_ERROR"
+        return event
+    feature_ts = part["_feature_ts"].max()
+    gap_minutes = float((ts - feature_ts).total_seconds() / 60.0)
+    if gap_minutes < 0 or gap_minutes > max_gap_minutes:
+        event["_no_decision_reason"] = "SOURCE_ALIGNMENT_ERROR"
+        event["_feature_gap_minutes"] = gap_minutes
+        return event
+    rows = part[part["_feature_ts"] == feature_ts].copy()
+    scores = score_frame(rows.drop(columns=["_feature_ts"], errors="ignore"), pipeline)
+    for i, (_, row) in enumerate(rows.iterrows()):
+        horizon = int(row.get("id.horizon"))
+        event[f"score_h{horizon}"] = float(scores[i])
+    event["_feature_timestamp"] = str(feature_ts)
+    event["_feature_gap_minutes"] = gap_minutes
+    return event
+
+
 def make_opportunity_record(
     manifest: dict[str, Any],
     event: dict[str, Any],
@@ -126,7 +170,7 @@ def make_opportunity_record(
     score_h12 = scores[12]
     if score_h12 is None:
         decision = "NO_DECISION"
-        reason = "MISSING_H12_FEATURES"
+        reason = str(event.get("_no_decision_reason") or "MISSING_H12_FEATURES")
     elif threshold is None:
         decision = "NO_DECISION"
         reason = "INSUFFICIENT_HISTORY"
@@ -169,6 +213,8 @@ def make_opportunity_record(
         "model_hash": manifest["model_hash"],
         "source_reference": source_ref,
         "source_event_hash": source_fingerprint(event),
+        "feature_timestamp": event.get("_feature_timestamp"),
+        "feature_gap_minutes": event.get("_feature_gap_minutes"),
         "enforcement_action": "NONE",
         "labels_resolved": False,
     }
@@ -271,6 +317,7 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
         events = events[: args.max_opportunities]
     recorded_at = utc_now()
     history = read_jsonl(candidate_dir / "history_seed.jsonl")
+    feature_store, pipeline = load_feature_store(manifest)
     opportunity_path = candidate_dir / "opportunity_scores.jsonl"
     monitor_path = candidate_dir / "model_monitor_scores.jsonl"
     existing = existing_by_id(opportunity_path, "opportunity_id")
@@ -282,6 +329,7 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
     for event in events:
         if contains_label_columns(event):
             raise ValueError("FORWARD_LABEL_COLUMN_DETECTED")
+        event = attach_feature_scores(event, feature_store, pipeline, int(manifest.get("feature_alignment", {}).get("max_gap_minutes", 10)))
         opp_id = opportunity_id_from_event(event, manifest.get("source_type", "turbo_signals_jsonl"))
         fp = source_fingerprint(event)
         if opp_id in seen_this_run:
@@ -408,3 +456,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+    score_frame,
