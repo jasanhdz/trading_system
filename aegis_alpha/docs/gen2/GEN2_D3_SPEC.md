@@ -1,10 +1,20 @@
 # GEN2-D3 — Canonical Market Data & Dataset Specification
 
-**Status:** PROPOSED (pending owner approval — becomes FROZEN on approval; any later change requires a new spec version)
-**Spec version:** d3-spec-v1.0
+**Status:** FROZEN (approved by owner 2026-07-11; any change requires a new spec version)
+**Spec version:** d3-spec-v1.1
 **Author:** Fable (Principal Architect, Gen2)
 **Date:** 2026-07-11
 **Supersedes:** D2 dataset lineage (SQLite-sourced) — invalidated by partial-candle sensor defect (see `aegis_candle_finality_f03_*.md`)
+
+## Amendments v1.1 (owner-approval conditions, binding)
+
+**A1 — Frozen contract during D3.** Quedan congelados: builder de features, lista y orden de features, feature hash esperado, definición de labels, target `tail_risk_roe_030`, sampling, horizons, símbolos, splits conceptuales y parámetros del builder. Ninguna mejora de features ni de modelado dentro de D3. Si el feature hash Gen1 no es reproducible sobre datos canónicos, PROHIBIDO cambiar el contrato en silencio: la corrida se detiene y emite `D3_FEATURE_CONTRACT_BROKEN` con diagnóstico explícito de cuál de estas tres causas aplica: (a) el builder Gen1 dependía de datos/columnas no reproducibles; (b) el hash debe versionarse como d3-v2 (decisión del owner); (c) bug real en el builder.
+
+**A2 — Lockbox Gen2 pre-registrado.** Antes de cualquier modelado debe existir `GEN2_LOCKBOX_MANIFEST.json` (§5.1) con: periodos de desarrollo/train/validation, ventana de confirmación histórica semi-ciega, inicio del forward lockbox intocado, embargo, presupuesto de consultas, contador actual (=0), mecanismo de registro de cada apertura, condiciones de desbloqueo y usos prohibidos. El manifest NO contiene labels agregados, prevalencias ni métricas del periodo forward. D3 puede recolectar datos forward pero no inspeccionar sus labels.
+
+**A3 — ECON1 no se aprueba solo por profit factor.** El gate ECON1 del roadmap queda ampliado (ver GEN2_ROADMAP.md §ECON1): expectativa neta positiva por trade con fees+slippage pesimista+funding, drawdown dentro de límite pre-registrado, estabilidad multi-fold/multi-periodo, tamaño muestral suficiente, prueba de concentración (ningún trade explica fracción desproporcionada del PnL), superioridad vs random y vs dos baselines de reglas al mismo presupuesto, sensibilidad a costos, bootstrap/intervalos, y resultados por símbolo/mes/régimen. PF ≥ 1.5 es orientativo, no suficiente, y no se optimiza directamente.
+
+**A4 — Formato de series canónicas.** El entorno de referencia (`venv_rocm62`) no incluye `pyarrow` y la regla "no instalar dependencias" prevalece sobre la preferencia de formato: las series canónicas se almacenan en **CSV con dtypes y formato de flotantes fijados** (repr de doble precisión completa), hasheadas sobre bytes. Si pyarrow se añade al entorno en el futuro, migrar exige spec v1.2.
 
 ---
 
@@ -138,6 +148,11 @@ Añade a lo anterior: snapshot(s) de origen, resultados de cada gate (§6) con n
 - **Lockbox histórico Gen2:** `2026-04-27 → T_cut`, recomputado sobre velas canónicas. **Declaración honesta obligatoria en todo reporte:** esta ventana fue abierta por la Gen1 (E2/E2.1/E2.2); para Gen2 se degrada a **confirmación semi-ciega** — sirve para detectar regresiones graves, NO como evidencia primaria de aprobación.
 - **Evidencia primaria Gen2 = forward:** todo dato posterior a la aprobación de esta spec es virgen por construcción y se acumula mientras se construyen TRRM V2/EQM V1. La promoción a freeze/shadow se juzga principalmente ahí.
 - **Presupuesto de consultas:** el lockbox histórico admite **una** consulta por candidato final (TRRM V2 una, QMAE V2 una, EQM V1 una). Toda consulta se registra en el manifest del candidato. Consulta no registrada = candidato descalificado.
+
+### 5.1 GEN2_LOCKBOX_MANIFEST.json (obligatorio antes de modelar — Amendment A2)
+
+Ubicación: `/home/jasan/Develop/aegis_gen2/GEN2_LOCKBOX_MANIFEST.json`. Campos mínimos:
+`schema`, `created_at_utc`, `historical_development_period` (train+validation, con sub-rangos), `semi_blind_historical_confirmation` (2026-04-27 → T_cut, declarada quemada por Gen1), `untouched_forward_start` (= aprobación de esta spec), `embargo_minutes` (120), `allowed_query_count` (por candidato), `current_query_count` (0), `query_log` (lista append-only: quién/cuándo/candidato/hash), `unlock_conditions` (candidato completo congelado por hash), `forbidden_uses` (selección de algoritmo, thresholds, calibración, features, sampling, ECON1 development). El forward lockbox permanece intocado durante D3, TRRM V2, QMAE V2, EQM V1, selección de algoritmos, calibración, thresholds y desarrollo de ECON1.
 
 ---
 

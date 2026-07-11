@@ -1,6 +1,6 @@
 # GEN2 — Roadmap maestro
 
-**Status:** PROPOSED (se congela junto con GEN2_D3_SPEC.md)
+**Status:** FROZEN (aprobado por el owner 2026-07-11, junto con GEN2_D3_SPEC.md v1.1)
 **Regla del proceso:** cada fase recibe su propia especificación completa (como GEN2_D3_SPEC) ANTES de implementarse. Este roadmap fija el orden y los gates entre fases; no sustituye a las specs. Ninguna fase arranca sin la decisión de aceptación de la anterior emitida por su auditor.
 
 ```
@@ -32,7 +32,7 @@ GEN2-LIVE-CANDIDATE  capital mínimo, kill-switch, auto-pausa por PnL real
 
 - **RV2 antes que EQM1:** el veto define la población sobre la que EQM se evalúa; evaluar EQM sin veto mide un sistema que nunca existirá. Además TRRM V2/QMAE V2 comparten dataset, gauntlet y tooling E2 ya probado → fase corta que valida D3 en el camino.
 - **TRRM V2 y QMAE V2 juntos:** mismo insumo, mismos folds, mismos reportes; separarlos duplica burocracia sin ganancia de control. QMAE aporta el quantile q90 conformal que la política de veto y el sizing futuro consumen.
-- **ECON1 como fase propia (no un apéndice de EQM):** la conversión de métricas de label a dinero (fees + slippage pesimista + funding + distribución de drawdown + baselines de reglas con el mismo presupuesto de trades) es donde mueren la mayoría de los sistemas. Merece gate propio: PF ≥ 1.5 sin gestión, expectancy positiva neta, max loss acotado, y **superar dos baselines simples de reglas**. Si EQM no supera al baseline de reglas, el candidato pasa a ser "reglas + veto TRRM V2" y EQM vuelve a research (el roadmap no se detiene: cambia de vehículo).
+- **ECON1 como fase propia (no un apéndice de EQM):** la conversión de métricas de label a dinero es donde mueren la mayoría de los sistemas. Gate ampliado por el owner (Amendment A3, vinculante): expectativa neta positiva por operación con fees incluidas, slippage pesimista y funding cuando corresponda; drawdown máximo dentro del límite pre-registrado; estabilidad en varios folds y periodos; tamaño muestral suficiente para que el resultado no dependa de pocas observaciones; prueba de concentración de retornos (ninguna operación individual explica una fracción desproporcionada del PnL); superioridad frente a baseline aleatorio y frente a **dos baselines simples de reglas** con el mismo presupuesto de trades; análisis de sensibilidad a costos; bootstrap o intervalos de incertidumbre; resultados desagregados por símbolo, mes y régimen. PF >= 1.5 se conserva como criterio orientativo, no suficiente, y queda prohibido optimizar directamente para PF. Si EQM no supera al baseline de reglas, el candidato pasa a ser "reglas + veto TRRM V2" y EQM vuelve a research (el roadmap no se detiene: cambia de vehículo).
 - **F1 antes de SHADOW:** forward pasivo acumula la evidencia virgen (la primaria de Gen2, dado que el lockbox histórico está degradado); shadow añade el contraste operacional contra el sistema actual.
 - **Evidencia mínima pre-registrada para F1:** ≥50 eventos de cola (ideal 100) y ≥8 semanas cruzando ≥2 regímenes; bandas de rechazo y calibración definidas en el freeze. Sin cumplirse, no hay SHADOW aunque los números "se vean bien".
 
