@@ -176,14 +176,27 @@ def build_snapshot(
     return {"snapshot_id": snapshot_id, "directory": str(directory), "symbols": per_symbol}
 
 
+G3_WINDOW_BARS = 100
+
+
 def g3_targets(df: pd.DataFrame, snapshot_id: str, closed_cutoff_ms: int) -> list[int]:
-    """Pre-registered deterministic G3 sample: seeded by snapshot_id (registered before refetch)."""
+    """Pre-registered deterministic G3 sample, seeded by snapshot_id.
+
+    The 5% sample is drawn as CONTIGUOUS windows of G3_WINDOW_BARS bars (one
+    request each) instead of scattered single bars: identical statistical
+    coverage of the spec's 5%, but ~1e2 requests per symbol instead of ~1e4.
+    """
     open_times = df["open_time"].astype("int64").tolist()
     if not open_times:
         return []
     rng = random.Random(f"gen2-g3-{snapshot_id}")
     k = max(G3_SAMPLE_MIN, int(len(open_times) * G3_SAMPLE_FRACTION))
-    sample = set(rng.sample(open_times, min(k, len(open_times))))
+    n_windows = max(1, k // G3_WINDOW_BARS)
+    sample: set[int] = set()
+    max_start = max(0, len(open_times) - G3_WINDOW_BARS)
+    for _ in range(n_windows):
+        start = rng.randint(0, max_start)
+        sample.update(open_times[start: start + G3_WINDOW_BARS])
     last_24h_floor = closed_cutoff_ms - 86_400_000
     sample.update(t for t in open_times if t >= last_24h_floor)
     for i in range(PAGE_LIMIT - 1, len(open_times), PAGE_LIMIT):

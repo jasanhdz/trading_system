@@ -97,7 +97,7 @@ def test_g3_identical_refetch_passes() -> None:
 def test_g3_mutated_bar_fails() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         market_keys = sorted(make_market(2000))
-        mutate = set(market_keys[100:220])  # enough to intersect the sample
+        mutate = set(market_keys)  # every refetched closed bar differs
         d, fetch, market = _snapshot_for_g3(Path(tmp), mutate=mutate)
         result = snap.refetch_check(d, fetch_fn=fetch, min_wait_minutes=15, spacing=0)
         assert result["mismatch_count"] > 0
