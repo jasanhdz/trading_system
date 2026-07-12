@@ -40,14 +40,20 @@ def opportunity(**overrides):
         "side": "SHORT",
         "primary_horizon": 12,
         "final_candle": True,
-        "leverage": 5,
+        "leverage": 20,
+        "margin_type": "ISOLATED",
     }
     base.update(overrides)
     return base
 
 
 def filters(symbol: str = "ADAUSDT", min_notional: float = 5.0) -> ex.SymbolFilters:
-    return ex.SymbolFilters(symbol, min_notional=min_notional, step_size=1.0, tick_size=0.0001)
+    return ex.SymbolFilters(symbol, min_notional=min_notional, step_size=1.0, tick_size=0.0001, min_qty=1.0, max_leverage=20)
+
+
+def write_v2_token() -> None:
+    token = ex.create_arm_token_v2(CID, 24, 16.24)
+    (core.canary_dir(CID) / "ARM_TOKEN_V2.json").write_text(json.dumps(token))
 
 
 def test_order_id_is_deterministic() -> None:
@@ -75,7 +81,7 @@ def test_valid_token_still_blocks_invalid_inputs_and_min_notional() -> None:
     with tempfile.TemporaryDirectory() as t:
         setup(Path(t))
         ex.phase_o_new_entries_paused = lambda ts_repo=None: (True, "PHASE_O_NEW_ENTRIES_PAUSED")
-        core.create_arm_token(CID, 15.0, 72, ["ADAUSDT", "DOGEUSDT"], 5)
+        write_v2_token()
         adapter = ex.CanaryExecutionAdapter(CID)
         assert adapter.validate(opportunity(symbol="BTCUSDT"), filters(), 0.7, 16.24)[1] == "SYMBOL_NOT_ALLOWED"
         assert adapter.validate(opportunity(side="LONG"), filters(), 0.7, 16.24)[1] == "ONLY_SHORT_ALLOWED"
@@ -84,14 +90,14 @@ def test_valid_token_still_blocks_invalid_inputs_and_min_notional() -> None:
         ok, reason, sizing = adapter.validate(opportunity(), filters(min_notional=5000), 0.7, 16.24)
         assert ok is False
         assert reason == "MIN_NOTIONAL_NOT_MET"
-        assert sizing["notional"] < 5000
+        assert sizing["actual_notional"] < 5000
 
 
 def test_dry_run_never_submits_and_logs_attempt() -> None:
     with tempfile.TemporaryDirectory() as t:
         setup(Path(t))
         ex.phase_o_new_entries_paused = lambda ts_repo=None: (True, "PHASE_O_NEW_ENTRIES_PAUSED")
-        core.create_arm_token(CID, 15.0, 72, ["ADAUSDT"], 5)
+        write_v2_token()
         adapter = ex.CanaryExecutionAdapter(CID)
         record = adapter.submit(opportunity(), filters(), 0.7, 16.24, dry_run=True)
         assert record["order_action"] == "NO_ORDER"
@@ -122,9 +128,9 @@ def test_capital_feasibility_and_yaml_phase_o_parser() -> None:
         (ts / "regime_config.live.yaml").write_text("aegis:\n  phase_o_short_live:\n    enabled: true\n    allow_orders: false\n")
         assert ex.phase_o_new_entries_paused(ts) == (True, "PHASE_O_NEW_ENTRIES_PAUSED")
         feasible = ex.capital_feasibility("ADAUSDT", filters(), 0.7)
-        assert feasible.min_executable_notional >= 5.0
-        assert feasible.required_isolated_margin <= feasible.min_executable_notional
-        assert feasible.decision in {"CANARY_CAPITAL_SUFFICIENT", "CANARY_CAPITAL_INSUFFICIENT"}
+        assert feasible.actual_notional >= 5.0
+        assert feasible.required_isolated_margin <= feasible.allocated_margin
+        assert feasible.decision in {"CANARY_CAPITAL_SUFFICIENT", "NO_TRADE"}
 
 
 def test_dry_run_report_has_zero_orders_and_no_outcomes() -> None:
