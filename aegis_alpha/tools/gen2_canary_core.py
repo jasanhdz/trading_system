@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -157,22 +158,42 @@ def record_trade_result(candidate_id: str, pnl: float) -> None:
 
 
 # ---------------------------------------------------------- Phase O coexistence
+def phase_o_new_entries_paused() -> tuple[bool, str]:
+    yaml_path = REPO / "binance-futures-bot-ts" / "regime_config.live.yaml"
+    if not yaml_path.exists():
+        return False, "PHASE_O_CONFIG_NOT_FOUND"
+    text = yaml_path.read_text(encoding="utf-8")
+    m = re.search(r"phase_o_short_live:\n(?P<body>(?:[ \t]+[^\n]*\n)+)", text)
+    if not m:
+        return False, "PHASE_O_CONFIG_NOT_FOUND"
+    body = m.group("body")
+    enabled = re.search(r"^\s*enabled:\s*true\s*$", body, re.MULTILINE) is not None
+    paused = re.search(r"^\s*allow_orders:\s*false\s*$", body, re.MULTILINE) is not None
+    return enabled and paused, "PHASE_O_NEW_ENTRIES_PAUSED" if enabled and paused else "PHASE_O_NEW_ENTRIES_NOT_PAUSED"
+
+
 def phase_o_conflict_audit() -> dict[str, Any]:
-    """Read-only: Phase O still trading from the same single wallet -> conflict."""
+    """Read-only: conflict only if Phase O can open entries or exposure remains."""
     log_dir = REPO / "binance-futures-bot-ts" / "logs" / "aegis"
     recent = sorted(log_dir.glob("turbo_trades_2026-*.jsonl"))[-3:]
     recent_trades = sum(1 for f in recent for _ in f.open())
     snaps = sorted(log_dir.glob("account_snapshots_2026-*.jsonl"))
     balance = None
+    open_position = None
     if snaps:
         last = snaps[-1].read_text().strip().splitlines()
         if last:
-            balance = json.loads(last[-1]).get("available_balance")
-    conflict = recent_trades > 0  # Phase O opened trades in recent days on the shared wallet
+            row = json.loads(last[-1])
+            balance = row.get("available_balance", row.get("availableBalance"))
+            open_position = bool(row.get("position_open", row.get("positionOpen", False)))
+    phase_paused, phase_reason = phase_o_new_entries_paused()
+    conflict = (not phase_paused) or bool(open_position)
     return {"phase_o_recent_trades": recent_trades, "shared_wallet": True,
+            "phase_o_new_entries_paused": phase_paused, "phase_o_pause_reason": phase_reason,
+            "open_position": open_position,
             "available_balance": balance, "isolated_limits_possible": not conflict,
             "conflict": conflict,
-            "resolution": "separate operational task: pause Phase O new entries (no automatic position closing); fund/segregate experimental wallet"}
+            "resolution": "pause Phase O new entries and wait for existing exposure to close normally; no automatic position closing"}
 
 
 # ---------------------------------------------------------------- dual streams
