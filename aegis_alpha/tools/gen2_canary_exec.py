@@ -314,6 +314,22 @@ class BinancePrivateReadOnlyAdapter:
     def leverage_bracket(self, symbol: str) -> Any:
         return self._signed_get("/fapi/v1/leverageBracket", {"symbol": symbol})
 
+    def private_snapshot(self, symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS) -> dict[str, Any]:
+        if not self.available:
+            return {"private_read_ready": False, "reason": "PRIVATE_CREDENTIALS_NOT_AVAILABLE"}
+        account = self.account()
+        positions = {s: self.position_risk(s) for s in symbols}
+        open_orders = {s: self.open_orders(s) for s in symbols}
+        brackets = {s: self.leverage_bracket(s) for s in symbols}
+        return {
+            "private_read_ready": True,
+            "account_equity": account.get("totalWalletBalance"),
+            "available_balance": account.get("availableBalance"),
+            "positions": positions,
+            "open_orders": open_orders,
+            "leverage_brackets": brackets,
+        }
+
     def place_entry(self, *_: Any, **__: Any) -> None:
         if not REAL_ORDER_SUBMISSION_ENABLED:
             raise RuntimeError("REAL_ORDER_SUBMISSION_DISABLED")
@@ -554,7 +570,7 @@ class Reconciler:
         return record
 
 
-def dry_run(candidate_id: str, use_public: bool = False) -> dict[str, Any]:
+def dry_run(candidate_id: str, use_public: bool = False, private_read: bool = False) -> dict[str, Any]:
     core.init_canary(candidate_id)
     cdir = core.canary_dir(candidate_id)
     filters = {
@@ -570,6 +586,21 @@ def dry_run(candidate_id: str, use_public: bool = False) -> dict[str, Any]:
         except Exception as exc:  # public connectivity is diagnostic only
             public_error = repr(exc)
     account = load_account_snapshot_from_logs()
+    private_snapshot: dict[str, Any] | None = None
+    if private_read:
+        private_snapshot = BinancePrivateReadOnlyAdapter().private_snapshot()
+        if private_snapshot.get("private_read_ready"):
+            account = {
+                "available_balance": float(private_snapshot.get("available_balance")),
+                "wallet_balance": float(private_snapshot.get("account_equity")),
+                "account_equity": float(private_snapshot.get("account_equity")),
+                "source": "binance_private_read_only",
+                "open_position": any(
+                    abs(float(pos.get("positionAmt", 0))) > 0
+                    for rows in private_snapshot.get("positions", {}).values()
+                    for pos in rows
+                ),
+            }
     available = account.get("available_balance")
     if available is None:
         available = 16.24
@@ -582,7 +613,7 @@ def dry_run(candidate_id: str, use_public: bool = False) -> dict[str, Any]:
     attempts = []
     for opp in opportunities:
         symbol = opp["symbol"]
-        attempts.append(adapter.submit(opp, filters.get(symbol, filters["ADAUSDT"]), prices.get(symbol, prices["ADAUSDT"]), available, dry_run=True))
+        attempts.append(adapter.submit(opp, filters.get(symbol, filters["ADAUSDT"]), prices.get(symbol, prices["ADAUSDT"]), available, account.get("account_equity") or available, dry_run=True))
     brackets = BracketManager(candidate_id).confirm({"client_order_id": "mock-fill", "filled_qty": 1.0}, True, True, 3.0)
     bracket_fail = BracketManager(candidate_id).confirm({"client_order_id": "mock-fill-fail", "filled_qty": 0.0}, False, False, 61.0)
     reconciliation = Reconciler(candidate_id).reconcile({"open_orders": []}, {"open_orders": [], "exposure": 0})
@@ -598,6 +629,7 @@ def dry_run(candidate_id: str, use_public: bool = False) -> dict[str, Any]:
         "reconciliation": reconciliation,
         "capital_feasibility": [json.loads(x) for x in feasibility],
         "account_snapshot": account,
+        "private_snapshot_status": private_snapshot,
         "public_market_data_error": public_error,
         "FORWARD_OUTCOMES_NOT_EVALUATED": True,
     }
@@ -610,11 +642,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=["dry-run", "capital-audit"], default="dry-run")
     parser.add_argument("--candidate-id", default=DEFAULT_CANDIDATE_ID)
     parser.add_argument("--public-market-data", action="store_true")
+    parser.add_argument("--private-read", action="store_true")
     args = parser.parse_args(argv)
     if args.mode == "capital-audit":
-        payload = dry_run(args.candidate_id, use_public=args.public_market_data)["capital_feasibility"]
+        payload = dry_run(args.candidate_id, use_public=args.public_market_data, private_read=args.private_read)["capital_feasibility"]
     else:
-        payload = dry_run(args.candidate_id, use_public=args.public_market_data)
+        payload = dry_run(args.candidate_id, use_public=args.public_market_data, private_read=args.private_read)
     print(json.dumps(payload, indent=2, default=json_default))
     return 0
 
