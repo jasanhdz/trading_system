@@ -2,6 +2,8 @@
 
 **Status:** FROZEN — opmodes-spec-v1.0 (2026-07-12). Supersede el Capital Contract V2 (rechazado en revisión de arquitectura) y unifica TODOS los contratos de riesgo en una sola fuente de verdad.
 
+**Implementation status (2026-07-14):** COMPLETO. `DEFAULT_LIMITS`, `operational_manifest_v2`, arm tokens v1/v2 y `CanaryExecutionAdapter` eliminados del código; sizing unificado porta el buffer de liquidación/fees del V2; sunset EXPERIMENTAL (≥20 órdenes técnicamente validadas o 60 días) se aplica en `risk_gate`; Phase O check único en core. Ejecución exclusivamente vía bridge TS (`src/gen2/` en binance-futures-bot-ts).
+
 ## Principio
 Los modelos científicos (D3, TRRM V2, QMAE V2, EQM1, hashes, thresholds, feature store, candidate `gen2-20260711T202935Z`) están CONGELADOS e **idénticos en ambos modos**. Un cambio de modo cambia únicamente parámetros de ejecución operativa. Cambiar cualquier componente científico invalida el candidate y exige nueva generación.
 
