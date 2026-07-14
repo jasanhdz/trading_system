@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ from aegis_alpha.tools.gen2_d3_common import utc_now  # noqa: E402
 
 DEFAULT_CANDIDATE_ID = "gen2-20260711T202935Z"
 STOP_DISTANCE_PCT = 0.015
+FEE_RATE_ROUND_TRIP = 0.0016
+MAINTENANCE_MARGIN_RATE = 0.004
+MINIMUM_LIQUIDATION_BUFFER_PCT = 0.010
 MODES: dict[str, dict[str, Any]] = {
     "SAFE": {
         "mode": "SAFE",
@@ -205,6 +209,9 @@ def risk_gate(candidate_id: str) -> tuple[bool, str]:
         return False, "CANARY_PAUSED"
     if core.kill_switch_engaged(candidate_id):
         return False, "KILL_SWITCH_ENGAGED"
+    sunset_ok, sunset_reason = experimental_sunset_check(contract, candidate_id)
+    if not sunset_ok:
+        return False, sunset_reason
     equity0 = contract["initial_equity"]
     if state["daily_loss"] >= contract["daily_loss_pct"] * equity0:
         return False, "DAILY_LOSS_CAP"
@@ -218,29 +225,85 @@ def risk_gate(candidate_id: str) -> tuple[bool, str]:
     return True, "RISK_OK"
 
 
-def compute_sizing(contract: dict[str, Any], price: float, available_balance: float, step_size: float, min_notional: float, min_qty: float = 0.0) -> dict[str, Any]:
+def estimate_short_liquidation_price(entry_price: float, leverage: int, maintenance_margin_rate: float = MAINTENANCE_MARGIN_RATE) -> float:
+    return entry_price * (1.0 + (1.0 / leverage) - maintenance_margin_rate)
+
+
+def compute_sizing(contract: dict[str, Any], price: float, available_balance: float, step_size: float, min_notional: float, min_qty: float = 0.0,
+                   minimum_liquidation_buffer_pct: float = MINIMUM_LIQUIDATION_BUFFER_PCT) -> dict[str, Any]:
+    """Unified sizing for both modes, with the V2-era liquidation/fee safety kept."""
     lev = int(contract["default_leverage"])
     if contract["sizing_kind"] == "FIXED_NOTIONAL_USD":
         target_notional = float(contract["fixed_notional_usd"])
     else:
         target_notional = available_balance * float(contract["balance_fraction"]) * lev
-    import math
-
     qty = math.floor((target_notional / price) / step_size) * step_size if step_size > 0 else target_notional / price
     qty = round(qty, 12)
     notional = qty * price
     margin = notional / lev
+    fees = notional * FEE_RATE_ROUND_TRIP
+    stop_price = price * (1 + STOP_DISTANCE_PCT)
+    liquidation_price = estimate_short_liquidation_price(price, lev)
+    liq_buffer_pct = (liquidation_price - stop_price) / stop_price if stop_price > 0 else 0.0
     result = {"quantity": qty, "leverage": lev, "notional": notional, "required_margin": margin,
-              "stop_price": price * (1 + STOP_DISTANCE_PCT), "per_stop_loss": notional * STOP_DISTANCE_PCT}
+              "estimated_fees": fees, "stop_price": stop_price, "liquidation_price": liquidation_price,
+              "liquidation_buffer_pct": liq_buffer_pct,
+              "per_stop_loss": notional * STOP_DISTANCE_PCT + fees}
     if qty <= 0 or qty < min_qty:
         result["decision"], result["reason"] = "NO_TRADE", "MIN_QTY_NOT_MET"
     elif notional < min_notional:
         result["decision"], result["reason"] = "NO_TRADE", "MIN_NOTIONAL_NOT_MET"
-    elif margin > available_balance + 1e-9:
+    elif margin + fees > available_balance + 1e-9:
         result["decision"], result["reason"] = "NO_TRADE", "INSUFFICIENT_BALANCE"
+    elif not (price < stop_price < liquidation_price):
+        result["decision"], result["reason"] = "NO_TRADE", "STOP_LIQUIDATION_ORDER_INVALID"
+    elif liq_buffer_pct < minimum_liquidation_buffer_pct:
+        result["decision"], result["reason"] = "NO_TRADE", "LIQUIDATION_BUFFER_INSUFFICIENT"
     else:
         result["decision"], result["reason"] = "SIZED", "OK"
     return result
+
+
+def check_equity_floor(candidate_id: str, current_equity: float) -> tuple[bool, str, dict[str, Any]]:
+    """Real-equity floor check against THE contract; engages the kill switch on breach."""
+    contract = load_contract(candidate_id)
+    floor = float(contract["equity_floor"])
+    if current_equity <= floor:
+        core.engage_kill_switch(candidate_id, "EQUITY_FLOOR_REACHED")
+        return False, "EQUITY_FLOOR_REACHED", {"current_equity": current_equity, "equity_floor": floor}
+    return True, "EQUITY_FLOOR_OK", {"current_equity": current_equity, "equity_floor": floor}
+
+
+def _count_technically_validated_orders(candidate_id: str) -> int:
+    """Clean live orders = confirmed brackets (BRACKET_CONFIRMED events or ok=true rows)."""
+    path = core.canary_dir(candidate_id) / "brackets.jsonl"
+    if not path.exists():
+        return 0
+    count = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("ok") is True or row.get("type") == "BRACKET_CONFIRMED":
+            count += 1
+    return count
+
+
+def experimental_sunset_check(contract: dict[str, Any], candidate_id: str) -> tuple[bool, str]:
+    """EXPERIMENTAL expires at >=N technically validated orders or max_days, whichever first."""
+    if contract["mode"] != "EXPERIMENTAL":
+        return True, "NOT_EXPERIMENTAL"
+    sunset = contract.get("sunset")
+    if not sunset:
+        return False, "EXPERIMENTAL_WITHOUT_SUNSET_CLAUSE"
+    from datetime import datetime, timedelta
+
+    created = datetime.fromisoformat(contract["created_at_utc"])
+    if utc_now() >= created + timedelta(days=int(sunset["max_days"])):
+        return False, "EXPERIMENTAL_SUNSET_MAX_DAYS_REACHED"
+    if _count_technically_validated_orders(candidate_id) >= int(sunset["technically_validated_orders"]):
+        return False, "EXPERIMENTAL_SUNSET_TECHNICALLY_VALIDATED"
+    return True, "SUNSET_OK"
 
 
 def main(argv: list[str] | None = None) -> int:

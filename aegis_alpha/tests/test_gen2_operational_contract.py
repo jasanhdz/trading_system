@@ -88,9 +88,32 @@ def test_sizing_by_mode_and_token_consumption() -> None:
         assert oc.verify_arm_token(CID)[1] == "TOKEN_MAX_ORDERS_EXHAUSTED"  # first_arm_max_orders=1
 
 
+def test_experimental_sunset_max_days_and_validated_orders() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        oc.write_contract(CID, "experimental", 200.0)
+        assert oc.risk_gate(CID) == (True, "RISK_OK")
+        # >=20 technically validated orders (confirmed brackets) -> sunset
+        d = core.canary_dir(CID)
+        with (d / "brackets.jsonl").open("a") as f:
+            for i in range(20):
+                f.write(json.dumps({"ok": True, "client_order_id": f"GEN2-{i}"}) + "\n")
+        assert oc.risk_gate(CID) == (False, "EXPERIMENTAL_SUNSET_TECHNICALLY_VALIDATED")
+        # 60-day expiry, whichever comes first
+        (d / "brackets.jsonl").write_text("")
+        contract = json.loads(oc.contract_path(CID).read_text())
+        contract["created_at_utc"] = "2020-01-01T00:00:00+00:00"
+        core.atomic_write(oc.contract_path(CID), json.dumps(contract))
+        assert oc.risk_gate(CID) == (False, "EXPERIMENTAL_SUNSET_MAX_DAYS_REACHED")
+        # SAFE (production contract) has no sunset
+        oc.write_contract(CID, "safe", 200.0, force=True)
+        assert oc.risk_gate(CID) == (True, "RISK_OK")
+
+
 if __name__ == "__main__":
     test_modes_coherent_and_switch_requires_new_token()
     test_incoherent_contract_refused()
     test_risk_gate_uses_single_contract()
     test_sizing_by_mode_and_token_consumption()
+    test_experimental_sunset_max_days_and_validated_orders()
     print("test_gen2_operational_contract: OK")
