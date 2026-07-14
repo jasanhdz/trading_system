@@ -15,6 +15,7 @@ import argparse
 import json
 import pickle
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -258,12 +259,19 @@ def ingest_events(candidate_id: str, events: list[dict[str, Any]]) -> dict[str, 
         kind = ev.get("type")
         target = {"FILL": "fills.jsonl", "BRACKET_CONFIRMED": "brackets.jsonl", "BRACKET_FAILED": "brackets.jsonl",
                   "POSITION_CLOSED": "fills.jsonl", "ORDER_REJECTED": "live_orders.jsonl",
+                  "TIME_EXIT_EXECUTED": "fills.jsonl", "TIME_EXIT_SKIPPED_NO_POSITION": "fills.jsonl",
                   "RECONCILIATION": "reconciliations.jsonl", "INCIDENT": "incidents/incidents.jsonl"}.get(kind, "live_orders.jsonl")
         core.append_jsonl(cdir / target, ev)
         if kind == "BRACKET_FAILED":
             core.engage_kill_switch(candidate_id, "CRITICAL_EXECUTION_FAILURE_BRACKET")
-        if kind == "POSITION_CLOSED" and ev.get("payload", {}).get("realized_pnl") is not None:
-            core.record_trade_result(candidate_id, float(ev["payload"]["realized_pnl"]))
+        if kind == "POSITION_CLOSED":
+            pnl = ev.get("payload", {}).get("realized_pnl")
+            if pnl is not None:
+                core.record_trade_result(candidate_id, float(pnl))
+            else:
+                # never guess PnL: unknown result requires the operator (runbook §3.5)
+                core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
+                                  {"type": "POSITION_CLOSED_UNKNOWN_PNL_REQUIRES_OPERATOR", "event": ev})
         ingested += 1
     core.atomic_write(seen_path, json.dumps(sorted(seen)))
     return {"ingested": ingested, "total_seen": len(seen)}
@@ -291,18 +299,91 @@ def pull_events(candidate_id: str, fetch_fn: Any = None) -> dict[str, Any]:
     return {"pulled": len(events), **result, "last_sequence": ckpt["last_sequence"]}
 
 
+# Scientific-integrity failures must stop the runner cold; anything else is an
+# operational incident the watcher records and survives (fail-closed per cycle).
+HARD_STOP_MARKERS = ("TRRM_HASH_MISMATCH_VS_FREEZE", "EQM_HASH_MISMATCH_VS_FREEZE", "CANDIDATE_MISMATCH")
+
+
+def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float = 300.0,
+              max_cycles: int | None = None, live_enabled: bool = False,
+              cycle_fn: Any = None, pull_fn: Any = None, resolve_fn: Any = None,
+              sleep_fn: Any = time.sleep) -> dict[str, Any]:
+    """Autonomous forward-evidence runner: events -> decisions -> outcomes -> heartbeat.
+
+    Paper evidence collection never stops for live-path problems: the kill
+    switch / risk gates silently block submissions while decisions and
+    outcomes keep accruing. Only a scientific-integrity failure (hash or
+    candidate mismatch) aborts the watcher.
+    """
+    cdir = core.canary_dir(candidate_id)
+    counters = {"cycles": 0, "cycle_errors": 0, "resolve_errors": 0, "decisions": 0,
+                "orders_submitted": 0, "outcomes_resolved": 0, "events_ingested": 0}
+    heartbeat: dict[str, Any] = {}
+    while max_cycles is None or counters["cycles"] < max_cycles:
+        cycle_started = utc_now().isoformat()
+        if live_enabled:
+            ev = (pull_fn or pull_events)(candidate_id)
+            counters["events_ingested"] += int(ev.get("ingested", 0))
+        try:
+            summary = (cycle_fn or run_cycle)(candidate_id, live_enabled=live_enabled)
+            counters["decisions"] += int(summary.get("decisions", 0))
+            counters["orders_submitted"] += int(summary.get("orders_submitted", 0))
+        except Exception as exc:
+            if any(m in str(exc) for m in HARD_STOP_MARKERS):
+                core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
+                                  {"type": "WATCH_HARD_STOP_INTEGRITY", "error": repr(exc)})
+                raise
+            counters["cycle_errors"] += 1
+            core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
+                              {"type": "WATCH_CYCLE_FAILED", "error": repr(exc)})
+        try:
+            if resolve_fn is None:
+                import aegis_alpha.tools.gen2_forward_outcome_resolver as resolver
+
+                resolve_fn_actual = resolver.resolve
+            else:
+                resolve_fn_actual = resolve_fn
+            res = resolve_fn_actual(candidate_id)
+            counters["outcomes_resolved"] += int(res.get("resolved_new", 0))
+        except Exception as exc:
+            counters["resolve_errors"] += 1
+            core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
+                              {"type": "WATCH_RESOLVE_FAILED", "error": repr(exc)})
+        counters["cycles"] += 1
+        heartbeat = {
+            "schema": "gen2_watch_heartbeat_v1",
+            "candidate_id": candidate_id,
+            "live_enabled": live_enabled,
+            "interval_seconds": interval_seconds,
+            "cycle_started_utc": cycle_started,
+            "cycle_finished_utc": utc_now().isoformat(),
+            "kill_switch": core.kill_switch_engaged(candidate_id),
+            **counters,
+        }
+        core.atomic_write(cdir / "heartbeat.json", json.dumps(heartbeat, indent=2, default=json_default))
+        if max_cycles is None or counters["cycles"] < max_cycles:
+            sleep_fn(interval_seconds)
+    return heartbeat
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="GEN2 decision loop (manual; no PM2)")
     p.add_argument("--candidate-id", default=DEFAULT_CANDIDATE_ID)
     p.add_argument("--live", action="store_true", help="enable TS bridge submission path (still gated by token/contract/kill)")
     p.add_argument("--pull-events", action="store_true", help="drain bridge execution events before the cycle")
     p.add_argument("--events-only", action="store_true", help="only drain bridge events; skip the decision cycle")
+    p.add_argument("--watch", action="store_true", help="autonomous runner: events -> cycle -> outcomes -> heartbeat, repeat")
+    p.add_argument("--interval-seconds", type=float, default=300.0)
+    p.add_argument("--max-cycles", type=int, default=None, help="stop after N cycles (default: run until interrupted)")
     args = p.parse_args(argv)
-    out: dict[str, Any] = {}
-    if args.pull_events or args.events_only:
-        out["events"] = pull_events(args.candidate_id)
-    if not args.events_only:
-        out["cycle"] = run_cycle(args.candidate_id, live_enabled=args.live)
+    if args.watch:
+        out: dict[str, Any] = {"watch": run_watch(args.candidate_id, args.interval_seconds, args.max_cycles, live_enabled=args.live)}
+    else:
+        out = {}
+        if args.pull_events or args.events_only:
+            out["events"] = pull_events(args.candidate_id)
+        if not args.events_only:
+            out["cycle"] = run_cycle(args.candidate_id, live_enabled=args.live)
     print(json.dumps(out, indent=2, default=json_default)[:4000])
     return 0
 
