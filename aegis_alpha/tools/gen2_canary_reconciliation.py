@@ -16,6 +16,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 import aegis_alpha.tools.gen2_canary_core as core  # noqa: E402
+import aegis_alpha.tools.gen2_operational_contract as oc  # noqa: E402
 from aegis_alpha.tools.audit_tail_risk_targets_d2 import json_default  # noqa: E402
 from aegis_alpha.tools.gen2_d3_common import validate_gen2_path  # noqa: E402
 
@@ -70,10 +71,13 @@ def build_daily_report(candidate_id: str) -> dict[str, Any]:
     candidate_dir = core.canary_dir(candidate_id)
     validate_gen2_path(candidate_dir)
     phase = core.phase_o_conflict_audit()
+    armed, arm_reason, token = oc.verify_arm_token(candidate_id)
     payload = {
-        "schema": "gen2_canary_daily_reconciliation_v1",
+        "schema": "gen2_canary_daily_reconciliation_v2",
         "candidate_id": candidate_id,
-        "armed": core.verify_arm_token(candidate_id)[0],
+        "armed": armed,
+        "arm_reason": arm_reason,
+        "operational_mode": token.get("mode") if token else None,
         "kill_switch": core.kill_switch_engaged(candidate_id),
         "phase_o_conflict": phase,
         "live_orders": live_order_summary(candidate_dir),

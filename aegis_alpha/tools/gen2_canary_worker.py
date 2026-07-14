@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Manual Gen2 canary worker.
+"""Manual Gen2 canary worker (parity heartbeat).
 
-Not installed in PM2. It starts disarmed, records paper/live parity metadata,
-and delegates execution attempts to gen2_canary_exec with dry-run default.
+Not installed in PM2. SUPERSEDED as signal driver by gen2_decision_loop.py —
+this worker only records paper/live parity metadata and a heartbeat against
+the unified operational contract. It never submits orders.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ sys.path.insert(0, str(REPO))
 
 import aegis_alpha.tools.gen2_canary_core as core  # noqa: E402
 import aegis_alpha.tools.gen2_canary_exec as execv2  # noqa: E402
+import aegis_alpha.tools.gen2_operational_contract as oc  # noqa: E402
 from aegis_alpha.tools.audit_tail_risk_targets_d2 import json_default  # noqa: E402
 from aegis_alpha.tools.gen2_d3_common import utc_now, validate_gen2_path  # noqa: E402
 
@@ -52,14 +54,14 @@ def build_paper_record(opportunity: dict[str, Any]) -> dict[str, Any]:
 def run_once(candidate_id: str, opportunity: dict[str, Any] | None = None, dry_run: bool = True) -> dict[str, Any]:
     core.init_canary(candidate_id)
     cdir = core.canary_dir(candidate_id)
-    armed, arm_reason, _ = execv2.verify_arm_token_v2(candidate_id)
+    armed, arm_reason, _ = oc.verify_arm_token(candidate_id)
     heartbeat = {
-        "schema": "gen2_canary_worker_heartbeat_v1",
+        "schema": "gen2_canary_worker_heartbeat_v2",
         "candidate_id": candidate_id,
         "armed": armed,
         "arm_reason": arm_reason,
         "dry_run": dry_run,
-        "real_order_submission_enabled": execv2.REAL_ORDER_SUBMISSION_ENABLED,
+        "real_order_submission_enabled": execv2.PYTHON_SUBMITS_ORDERS,
         "recorded_at_utc": utc_now().isoformat(),
     }
     if opportunity is None:

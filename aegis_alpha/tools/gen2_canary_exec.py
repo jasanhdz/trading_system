@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Gen2 live-canary execution adapter and safety dry-run.
+"""Gen2 canary execution-side helpers — reconciliation second opinion + emergency kill.
 
-The module is deliberately fail-closed. It never submits exchange orders unless
-an injected adapter implements that behavior and all gates pass. The CLI dry-run
-uses local/read-only state plus optional public exchange metadata and reports
-`orders_submitted=0`.
+Architecture (approved review, GEN2_OPERATIONAL_MODES_SPEC.md): Aegis is the
+brain, the TypeScript bridge is the ONLY order-submission path. This module
+contains NO order submission. What lives here:
+
+- market metadata (public exchangeInfo/prices) for sizing previews and the
+  decision loop's symbol filters,
+- the private READ-ONLY Binance adapter used exclusively for second-opinion
+  reconciliation against the bridge's local streams and for engaging the
+  emergency kill switch,
+- BracketManager / Reconciler stream writers (fail-closed, kill on incident),
+- a dry-run report wired to the single operational contract.
+
+Risk limits, sizing and the arm token live ONLY in gen2_operational_contract.py.
 """
 from __future__ import annotations
 
@@ -14,11 +23,9 @@ import hashlib
 import json
 import math
 import os
-import re
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -28,22 +35,15 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 import aegis_alpha.tools.gen2_canary_core as core  # noqa: E402
+import aegis_alpha.tools.gen2_operational_contract as oc  # noqa: E402
 from aegis_alpha.tools.audit_tail_risk_targets_d2 import json_default  # noqa: E402
-from aegis_alpha.tools.gen2_d3_common import GEN2_ROOT, sha256_file, utc_now, validate_gen2_path  # noqa: E402
+from aegis_alpha.tools.gen2_canary_core import phase_o_new_entries_paused  # noqa: E402,F401  (single implementation lives in core)
+from aegis_alpha.tools.gen2_d3_common import utc_now, validate_gen2_path  # noqa: E402
 
 DEFAULT_CANDIDATE_ID = "gen2-20260711T202935Z"
 DEFAULT_ALLOWED_SYMBOLS = ("ADAUSDT", "DOGEUSDT")
-MARGIN_ALLOCATION_FRACTION = 0.50
-ALLOWED_LEVERAGE = (15, 20)
-DEFAULT_LEVERAGE = 20
-EQUITY_STOP_FRACTION = 0.50
-MAX_CONCURRENT_POSITIONS = 1
-FIRST_ARM_MAX_ORDERS = 1
-MINIMUM_LIQUIDATION_BUFFER_PCT = 0.010
-DEFAULT_STOP_DISTANCE_PCT = 0.015
-FEE_RATE_ROUND_TRIP = 0.0016
-REAL_ORDER_SUBMISSION_ENABLED = False
 BINANCE_FAPI = "https://fapi.binance.com"
+PYTHON_SUBMITS_ORDERS = False  # architectural invariant: only the TS bridge executes
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:
@@ -65,24 +65,11 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         f.write(json.dumps(payload, sort_keys=True, default=json_default) + "\n")
 
 
-def load_freeze(path: Path = core.FREEZE_PATH) -> dict[str, Any]:
-    freeze = json.loads(path.read_text(encoding="utf-8"))
+def load_freeze(path: Path | None = None) -> dict[str, Any]:
+    freeze = json.loads((path or core.FREEZE_PATH).read_text(encoding="utf-8"))
     if freeze.get("candidate_id") != DEFAULT_CANDIDATE_ID:
         raise ValueError(f"unexpected candidate_id {freeze.get('candidate_id')}")
     return freeze
-
-
-def phase_o_new_entries_paused(ts_repo: Path | None = None) -> tuple[bool, str]:
-    ts_repo = ts_repo or (REPO / "binance-futures-bot-ts")
-    yaml_path = ts_repo / "regime_config.live.yaml"
-    text = yaml_path.read_text(encoding="utf-8")
-    m = re.search(r"phase_o_short_live:\n(?P<body>(?:[ \t]+[^\n]*\n)+)", text)
-    if not m:
-        return False, "PHASE_O_CONFIG_NOT_FOUND"
-    body = m.group("body")
-    if re.search(r"^\s*enabled:\s*true\s*$", body, re.MULTILINE) and re.search(r"^\s*allow_orders:\s*false\s*$", body, re.MULTILINE):
-        return True, "PHASE_O_NEW_ENTRIES_PAUSED"
-    return False, "PHASE_O_NEW_ENTRIES_NOT_PAUSED"
 
 
 def deterministic_client_order_id(candidate_id: str, signal_id: str, symbol: str, side: str) -> str:
@@ -103,106 +90,7 @@ class SymbolFilters:
     step_size: float
     tick_size: float
     min_qty: float = 0.0
-    max_leverage: int = DEFAULT_LEVERAGE
-
-
-@dataclass(frozen=True)
-class SizingDecision:
-    symbol: str
-    available_balance: float
-    allocated_margin: float
-    leverage: int
-    price: float
-    quantity: float
-    target_notional: float
-    actual_notional: float
-    required_isolated_margin: float
-    estimated_fees: float
-    stop_price: float
-    liquidation_price: float
-    liquidation_buffer_pct: float
-    worst_case_loss: float
-    equity_after_worst_case: float
-    decision: str
-    reason: str
-
-
-def estimate_short_liquidation_price(entry_price: float, leverage: int, maintenance_margin_rate: float = 0.004) -> float:
-    return entry_price * (1.0 + (1.0 / leverage) - maintenance_margin_rate)
-
-
-def stop_price_for_short(entry_price: float, stop_distance_pct: float = DEFAULT_STOP_DISTANCE_PCT) -> float:
-    return entry_price * (1.0 + stop_distance_pct)
-
-
-def liquidation_buffer_pct(stop_price: float, liquidation_price: float) -> float:
-    if stop_price <= 0:
-        return 0.0
-    return (liquidation_price - stop_price) / stop_price
-
-
-def compute_sizing_v2(symbol: str, filters: SymbolFilters, price: float, available_balance: float,
-                      leverage: int = DEFAULT_LEVERAGE, current_equity: float | None = None,
-                      minimum_liquidation_buffer_pct: float = MINIMUM_LIQUIDATION_BUFFER_PCT) -> SizingDecision:
-    if leverage not in ALLOWED_LEVERAGE:
-        return SizingDecision(symbol, available_balance, 0.0, leverage, price, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "NO_TRADE", "LEVERAGE_NOT_ALLOWED")
-    if leverage > filters.max_leverage:
-        return SizingDecision(symbol, available_balance, 0.0, leverage, price, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "NO_TRADE", "LEVERAGE_NOT_SUPPORTED_BY_SYMBOL")
-    allocated_margin = available_balance * MARGIN_ALLOCATION_FRACTION
-    target_notional = allocated_margin * leverage
-    quantity = round_down_step(target_notional / price, filters.step_size)
-    quantity = round(quantity, 12)
-    actual_notional = quantity * price
-    required_margin = actual_notional / leverage if leverage > 0 else float("inf")
-    fees = actual_notional * FEE_RATE_ROUND_TRIP
-    while quantity > 0 and required_margin + fees > allocated_margin + 1e-9:
-        quantity = round(quantity - filters.step_size, 12)
-        actual_notional = quantity * price
-        required_margin = actual_notional / leverage if leverage > 0 else float("inf")
-        fees = actual_notional * FEE_RATE_ROUND_TRIP
-    stop_price = stop_price_for_short(price)
-    liquidation_price = estimate_short_liquidation_price(price, leverage)
-    buffer_pct = liquidation_buffer_pct(stop_price, liquidation_price)
-    worst_loss = actual_notional * DEFAULT_STOP_DISTANCE_PCT + fees
-    equity = available_balance if current_equity is None else current_equity
-    equity_after = equity - worst_loss
-    if quantity <= 0 or quantity < filters.min_qty:
-        reason = "MIN_QTY_NOT_MET"
-    elif actual_notional > target_notional + 1e-9:
-        reason = "NOTIONAL_EXCEEDS_TARGET"
-    elif actual_notional < filters.min_notional:
-        reason = "MIN_NOTIONAL_NOT_MET"
-    elif required_margin > allocated_margin + 1e-9:
-        reason = "ALLOCATED_MARGIN_EXCEEDED"
-    elif allocated_margin + 1e-9 < required_margin + fees:
-        reason = "FEES_EXCEED_MARGIN_REMAINDER"
-    elif not (price < stop_price < liquidation_price):
-        reason = "STOP_LIQUIDATION_ORDER_INVALID"
-    elif buffer_pct < minimum_liquidation_buffer_pct:
-        reason = "LIQUIDATION_BUFFER_INSUFFICIENT"
-    else:
-        reason = "CAPITAL_OK"
-    decision = "CANARY_CAPITAL_SUFFICIENT" if reason == "CAPITAL_OK" else "NO_TRADE"
-    return SizingDecision(symbol, available_balance, allocated_margin, leverage, price, quantity, target_notional,
-                          actual_notional, required_margin, fees, stop_price, liquidation_price, buffer_pct,
-                          worst_loss, equity_after, decision, reason)
-
-
-def select_sizing_v2(symbol: str, filters: SymbolFilters, price: float, available_balance: float,
-                     current_equity: float | None = None) -> SizingDecision:
-    first = compute_sizing_v2(symbol, filters, price, available_balance, DEFAULT_LEVERAGE, current_equity)
-    if first.decision == "CANARY_CAPITAL_SUFFICIENT":
-        return first
-    if first.reason == "LIQUIDATION_BUFFER_INSUFFICIENT":
-        second = compute_sizing_v2(symbol, filters, price, available_balance, 15, current_equity)
-        if second.decision == "CANARY_CAPITAL_SUFFICIENT":
-            return second
-    return first
-
-
-def capital_feasibility(symbol: str, filters: SymbolFilters, price: float, capital_cap: float | None = None,
-                        leverage: int = DEFAULT_LEVERAGE, **_: Any) -> SizingDecision:
-    return compute_sizing_v2(symbol, filters, price, capital_cap if capital_cap is not None else 16.24, leverage)
+    max_leverage: int = 20
 
 
 def load_public_exchange_info(symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS, timeout: float = 8.0) -> dict[str, SymbolFilters]:
@@ -224,7 +112,6 @@ def load_public_exchange_info(symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS
             step_size=float(lot.get("stepSize", 1.0)),
             tick_size=float(price.get("tickSize", 0.0001)),
             min_qty=float(lot.get("minQty", 0.0)),
-            max_leverage=DEFAULT_LEVERAGE,
         )
     return out
 
@@ -268,11 +155,11 @@ def redact_secret_text(text: str) -> str:
 
 
 class BinancePrivateReadOnlyAdapter:
-    """USD-M Futures private read adapter.
+    """USD-M Futures private READ adapter — second-opinion reconciliation only.
 
-    It signs read/account requests if credentials are present in environment.
-    Order methods are present for interface completeness but hard-blocked while
-    REAL_ORDER_SUBMISSION_ENABLED is false.
+    Signs read/account requests if credentials are present in the environment.
+    It has NO order methods by design: Python never submits Binance orders.
+    Its only write-shaped power is engaging the local+bridge kill switch.
     """
 
     def __init__(self, timeout: float = 8.0) -> None:
@@ -330,194 +217,64 @@ class BinancePrivateReadOnlyAdapter:
             "leverage_brackets": brackets,
         }
 
-    def place_entry(self, *_: Any, **__: Any) -> None:
-        if not REAL_ORDER_SUBMISSION_ENABLED:
-            raise RuntimeError("REAL_ORDER_SUBMISSION_DISABLED")
-        raise RuntimeError("ORDER_SUBMISSION_NOT_IMPLEMENTED_IN_DRY_RUN")
+    def emergency_kill(self, candidate_id: str, reason: str) -> dict[str, Any]:
+        """Engage local kill switch and (best effort) the TS bridge kill. No order calls."""
+        core.engage_kill_switch(candidate_id, f"EMERGENCY:{reason}")
+        bridge_ack: dict[str, Any] | None = None
+        try:
+            import aegis_alpha.tools.gen2_bridge_client as bridge
+
+            bridge_ack = bridge.post_kill(candidate_id, reason)
+        except Exception as exc:
+            bridge_ack = {"status": "BRIDGE_KILL_UNREACHABLE", "reason": redact_secret_text(repr(exc))}
+        return {"local_kill": True, "bridge_kill_ack": bridge_ack}
 
 
-def init_operational_manifest_v2(candidate_id: str, account: dict[str, Any]) -> dict[str, Any]:
+def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateReadOnlyAdapter | None = None,
+                                  symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS) -> dict[str, Any]:
+    """Compare exchange truth (private read) vs local live_orders/fills streams.
+
+    Fail-closed: any orphan/mismatch with exposure engages the kill switch.
+    """
+    adapter = adapter or BinancePrivateReadOnlyAdapter()
     cdir = core.canary_dir(candidate_id)
-    path = cdir / "operational_manifest_v2.json"
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    initial_equity = float(account.get("account_equity") or account.get("wallet_balance") or account.get("available_balance"))
-    manifest = {
-        "schema": "gen2_canary_operational_manifest_v2",
-        "operational_revision": "GEN2_F1_CANARY_CAPITAL_V2",
-        "candidate_id": candidate_id,
-        "created_at_utc": utc_now().isoformat(),
-        "changed_component": "OPERATIONAL_CAPITAL_CONTRACT",
-        "unchanged_components": ["MODEL_AND_POLICY_FREEZE"],
-        "initial_canary_equity": initial_equity,
-        "equity_floor": initial_equity * EQUITY_STOP_FRACTION,
-        "margin_allocation_fraction": MARGIN_ALLOCATION_FRACTION,
-        "allowed_leverage": list(ALLOWED_LEVERAGE),
-        "default_leverage": DEFAULT_LEVERAGE,
-        "max_concurrent_positions": MAX_CONCURRENT_POSITIONS,
-        "first_arm_max_orders": FIRST_ARM_MAX_ORDERS,
-        "equity_stop_fraction": EQUITY_STOP_FRACTION,
-        "martingale": False,
-        "averaging_down": False,
-        "pyramiding": False,
-        "automatic_compounding": True,
-        "real_order_submission_enabled": REAL_ORDER_SUBMISSION_ENABLED,
-    }
-    atomic_write(path, manifest)
-    return manifest
-
-
-def check_equity_floor(candidate_id: str, current_equity: float) -> tuple[bool, str, dict[str, Any]]:
-    manifest = json.loads((core.canary_dir(candidate_id) / "operational_manifest_v2.json").read_text(encoding="utf-8"))
-    floor = float(manifest["equity_floor"])
-    if current_equity <= floor:
-        core.engage_kill_switch(candidate_id, "CANARY_EQUITY_FLOOR_REACHED")
-        return False, "CANARY_EQUITY_FLOOR_REACHED", {"current_equity": current_equity, "equity_floor": floor}
-    return True, "EQUITY_FLOOR_OK", {"current_equity": current_equity, "equity_floor": floor}
-
-
-def create_arm_token_v2(candidate_id: str, expiry_hours: int, initial_equity: float,
-                        allowed_symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS) -> dict[str, Any]:
-    body = {
-        "schema": "gen2_canary_arm_token_v2",
-        "candidate_id": candidate_id,
-        "operational_revision": "GEN2_F1_CANARY_CAPITAL_V2",
-        "initial_equity": initial_equity,
-        "margin_allocation_fraction": MARGIN_ALLOCATION_FRACTION,
-        "allowed_leverage": list(ALLOWED_LEVERAGE),
-        "default_leverage": DEFAULT_LEVERAGE,
-        "allowed_symbols": sorted(allowed_symbols),
-        "max_orders": FIRST_ARM_MAX_ORDERS,
-        "max_concurrent_positions": MAX_CONCURRENT_POSITIONS,
-        "expires_at": (utc_now().timestamp() + expiry_hours * 3600),
-        "equity_stop_fraction": EQUITY_STOP_FRACTION,
-        "consumed": False,
-    }
-    signed = {k: body[k] for k in sorted(body) if k != "checksum"}
-    body["checksum"] = hashlib.sha256(json.dumps(signed, sort_keys=True).encode()).hexdigest()
-    return body
-
-
-def verify_arm_token_v2(candidate_id: str) -> tuple[bool, str, dict[str, Any]]:
-    path = core.canary_dir(candidate_id) / "ARM_TOKEN_V2.json"
-    if not path.exists():
-        return False, "CANARY_UNARMED", {}
-    token = json.loads(path.read_text(encoding="utf-8"))
-    if token.get("schema") != "gen2_canary_arm_token_v2":
-        return False, "TOKEN_V1_INCOMPATIBLE_WITH_SPEC_V2", {}
-    checksum = token.get("checksum")
-    signed = {k: token[k] for k in sorted(token) if k != "checksum"}
-    expected = hashlib.sha256(json.dumps(signed, sort_keys=True).encode()).hexdigest()
-    if checksum != expected:
-        return False, "TOKEN_CHECKSUM_INVALID", {}
-    if token.get("candidate_id") != candidate_id:
-        return False, "TOKEN_WRONG_CANDIDATE", {}
-    if token.get("operational_revision") != "GEN2_F1_CANARY_CAPITAL_V2":
-        return False, "TOKEN_WRONG_OPERATIONAL_REVISION", {}
-    if token.get("margin_allocation_fraction") != MARGIN_ALLOCATION_FRACTION:
-        return False, "TOKEN_MARGIN_FRACTION_MISMATCH", {}
-    if token.get("allowed_leverage") != list(ALLOWED_LEVERAGE):
-        return False, "TOKEN_LEVERAGE_MISMATCH", {}
-    if token.get("max_orders") != FIRST_ARM_MAX_ORDERS:
-        return False, "TOKEN_MAX_ORDERS_MISMATCH", {}
-    if token.get("consumed") is True:
-        return False, "TOKEN_CONSUMED", {}
-    if float(token.get("expires_at", 0)) < utc_now().timestamp():
-        return False, "TOKEN_EXPIRED", {}
-    return True, "TOKEN_V2_VALID", token
-
-
-class CanaryExecutionAdapter:
-    def __init__(self, candidate_id: str = DEFAULT_CANDIDATE_ID, candidate_dir: Path | None = None,
-                 allowed_symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS) -> None:
-        self.candidate_id = candidate_id
-        self.candidate_dir = candidate_dir or core.canary_dir(candidate_id)
-        self.allowed_symbols = tuple(s.upper() for s in allowed_symbols)
-        self.orders_submitted = 0
-        self.state_path = self.candidate_dir / "execution_state.json"
-        if not self.state_path.exists():
-            atomic_write(self.state_path, {"processed_signal_ids": [], "open_client_order_ids": [], "orders_submitted": 0})
-
-    def _state(self) -> dict[str, Any]:
-        return json.loads(self.state_path.read_text(encoding="utf-8"))
-
-    def _save_state(self, state: dict[str, Any]) -> None:
-        atomic_write(self.state_path, state)
-
-    def validate(self, opportunity: dict[str, Any], filters: SymbolFilters, price: float, available_balance: float | None,
-                 current_equity: float | None = None,
-                 now: datetime | None = None) -> tuple[bool, str, dict[str, Any]]:
-        now = now or utc_now()
-        freeze = load_freeze()
-        if opportunity.get("candidate_id") != self.candidate_id or freeze.get("candidate_id") != self.candidate_id:
-            return False, "WRONG_CANDIDATE", {}
-        symbol = str(opportunity.get("symbol", "")).upper()
-        if symbol not in self.allowed_symbols:
-            return False, "SYMBOL_NOT_ALLOWED", {}
-        if str(opportunity.get("side", "")).upper() != "SHORT":
-            return False, "ONLY_SHORT_ALLOWED", {}
-        if int(opportunity.get("primary_horizon", 0)) != 12:
-            return False, "PRIMARY_H12_REQUIRED", {}
-        if opportunity.get("final_candle") is not True:
-            return False, "PARTIAL_CANDLE", {}
-        signal_id = str(opportunity.get("signal_id", ""))
-        state = self._state()
-        if signal_id in state.get("processed_signal_ids", []):
-            return False, "DUPLICATE_SIGNAL", {}
-        if deterministic_client_order_id(self.candidate_id, signal_id, symbol, "SHORT") in state.get("open_client_order_ids", []):
-            return False, "DUPLICATE_CLIENT_ORDER_ID", {}
-        if state.get("position_open") is True or int(opportunity.get("open_positions", 0)) >= MAX_CONCURRENT_POSITIONS:
-            return False, "MAX_CONCURRENT_POSITIONS_REACHED", {}
-        phase_paused, phase_reason = phase_o_new_entries_paused()
-        if not phase_paused:
-            return False, phase_reason, {}
-        risk_ok, risk_reason = core.risk_gate(self.candidate_id)
-        if not risk_ok:
-            return False, risk_reason, {}
-        token_ok, token_reason, _token = verify_arm_token_v2(self.candidate_id)
-        if not token_ok:
-            return False, token_reason, {}
-        leverage = int(opportunity.get("leverage", DEFAULT_LEVERAGE))
-        if leverage not in ALLOWED_LEVERAGE:
-            return False, "LEVERAGE_NOT_ALLOWED", {}
-        if str(opportunity.get("margin_type", "ISOLATED")).upper() != "ISOLATED":
-            return False, "ISOLATED_MARGIN_NOT_CONFIRMED", {}
-        if available_balance is None or available_balance <= 0:
-            return False, "BALANCE_UNKNOWN", {}
-        equity = current_equity if current_equity is not None else available_balance
-        if not (core.canary_dir(self.candidate_id) / "operational_manifest_v2.json").exists():
-            init_operational_manifest_v2(self.candidate_id, {"available_balance": available_balance, "account_equity": equity})
-        floor_ok, floor_reason, floor_meta = check_equity_floor(self.candidate_id, equity)
-        if not floor_ok:
-            return False, floor_reason, floor_meta
-        sizing = compute_sizing_v2(symbol, filters, price, available_balance, leverage, equity)
-        if sizing.decision != "CANARY_CAPITAL_SUFFICIENT":
-            return False, sizing.reason, sizing.__dict__
-        client_order_id = deterministic_client_order_id(self.candidate_id, signal_id, symbol, "SHORT")
-        return True, "READY", {**sizing.__dict__, "client_order_id": client_order_id}
-
-    def submit(self, opportunity: dict[str, Any], filters: SymbolFilters, price: float, available_balance: float | None,
-               current_equity: float | None = None, dry_run: bool = True) -> dict[str, Any]:
-        ok, reason, sizing = self.validate(opportunity, filters, price, available_balance, current_equity)
-        record = {
-            "schema": "gen2_live_order_attempt_v1",
-            "candidate_id": self.candidate_id,
-            "signal_id": opportunity.get("signal_id"),
-            "symbol": opportunity.get("symbol"),
-            "side": opportunity.get("side"),
-            "accepted": ok,
-            "reason": reason,
-            "dry_run": dry_run,
-            "order_action": "NO_ORDER" if dry_run or not ok else "SUBMIT_ORDER",
-            "enforcement_action": "NONE" if dry_run or not ok else "LIVE_ORDER",
-            "real_order_submission_enabled": REAL_ORDER_SUBMISSION_ENABLED,
-            "sizing": sizing,
-            "recorded_at_utc": utc_now().isoformat(),
-        }
-        if dry_run or not ok:
-            append_jsonl(self.candidate_dir / "live_orders.jsonl", record)
-            return record
-        raise RuntimeError("LIVE_ORDER_SUBMISSION_DISABLED_IN_CODEX_TASK")
+    local_orders = []
+    lo = cdir / "live_orders.jsonl"
+    if lo.exists():
+        for line in lo.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                local_orders.append(json.loads(line))
+    local_ids = {r.get("order", {}).get("client_order_id") for r in local_orders if r.get("order")}
+    local_ids |= {r.get("client_order_id") for r in local_orders if r.get("client_order_id")}
+    local_ids.discard(None)
+    if not adapter.available:
+        record = {"schema": "gen2_second_opinion_v1", "candidate_id": candidate_id,
+                  "status": "PRIVATE_READ_UNAVAILABLE", "local_order_ids": sorted(local_ids),
+                  "recorded_at_utc": utc_now().isoformat()}
+        append_jsonl(cdir / "reconciliations.jsonl", record)
+        return record
+    snapshot = adapter.private_snapshot(symbols)
+    exchange_orders = {o.get("clientOrderId") for rows in snapshot.get("open_orders", {}).values() for o in rows}
+    exchange_positions = [
+        pos for rows in snapshot.get("positions", {}).values() for pos in rows
+        if abs(float(pos.get("positionAmt", 0) or 0)) > 0
+    ]
+    gen2_exchange_orders = {o for o in exchange_orders if o and o.startswith("GEN2-")}
+    orphan_orders = sorted(gen2_exchange_orders - local_ids)
+    incidents: list[str] = []
+    if orphan_orders:
+        incidents.append("ORPHAN_ORDER_ON_EXCHANGE")
+    if exchange_positions and not local_ids:
+        incidents.append("POSITION_WITHOUT_LOCAL_ORDER")
+    status = "RECONCILED" if not incidents else "RECONCILIATION_FAIL_CLOSED"
+    record = {"schema": "gen2_second_opinion_v1", "candidate_id": candidate_id, "status": status,
+              "incidents": incidents, "orphan_orders": orphan_orders,
+              "open_position_count": len(exchange_positions),
+              "local_order_ids": sorted(local_ids), "recorded_at_utc": utc_now().isoformat()}
+    append_jsonl(cdir / "reconciliations.jsonl", record)
+    if incidents and exchange_positions:
+        core.engage_kill_switch(candidate_id, "SECOND_OPINION_MISMATCH_WITH_EXPOSURE")
+    return record
 
 
 class BracketManager:
@@ -571,6 +328,7 @@ class Reconciler:
 
 
 def dry_run(candidate_id: str, use_public: bool = False, private_read: bool = False) -> dict[str, Any]:
+    """Read-only architecture rehearsal against the unified operational contract."""
     core.init_canary(candidate_id)
     cdir = core.canary_dir(candidate_id)
     filters = {
@@ -602,32 +360,36 @@ def dry_run(candidate_id: str, use_public: bool = False, private_read: bool = Fa
                 ),
             }
     available = account.get("available_balance")
-    if available is None:
-        available = 16.24
-    adapter = CanaryExecutionAdapter(candidate_id)
-    opportunities = [
-        {"candidate_id": candidate_id, "signal_id": "eligible-1", "symbol": "ADAUSDT", "side": "SHORT", "primary_horizon": 12, "final_candle": True, "leverage": 5},
-        {"candidate_id": candidate_id, "signal_id": "not-eligible-1", "symbol": "BTCUSDT", "side": "SHORT", "primary_horizon": 12, "final_candle": True, "leverage": 5},
-        {"candidate_id": candidate_id, "signal_id": "partial-1", "symbol": "DOGEUSDT", "side": "SHORT", "primary_horizon": 12, "final_candle": False, "leverage": 5},
-    ]
-    attempts = []
-    for opp in opportunities:
-        symbol = opp["symbol"]
-        attempts.append(adapter.submit(opp, filters.get(symbol, filters["ADAUSDT"]), prices.get(symbol, prices["ADAUSDT"]), available, account.get("account_equity") or available, dry_run=True))
+    contract: dict[str, Any] | None = None
+    contract_error: str | None = None
+    try:
+        contract = oc.load_contract(candidate_id)
+    except Exception as exc:
+        contract_error = repr(exc)
+    sizing_preview: dict[str, Any] = {}
+    if contract is not None and available is not None:
+        for symbol in DEFAULT_ALLOWED_SYMBOLS:
+            f = filters[symbol]
+            sizing_preview[symbol] = oc.compute_sizing(contract, prices[symbol], float(available), f.step_size, f.min_notional, f.min_qty)
+    armed, arm_reason, _token = oc.verify_arm_token(candidate_id)
+    risk_ok, risk_reason = oc.risk_gate(candidate_id)
     brackets = BracketManager(candidate_id).confirm({"client_order_id": "mock-fill", "filled_qty": 1.0}, True, True, 3.0)
     bracket_fail = BracketManager(candidate_id).confirm({"client_order_id": "mock-fill-fail", "filled_qty": 0.0}, False, False, 61.0)
     reconciliation = Reconciler(candidate_id).reconcile({"open_orders": []}, {"open_orders": [], "exposure": 0})
-    feasibility = [_json_dumps(capital_feasibility(s, filters[s], prices[s]).__dict__) for s in DEFAULT_ALLOWED_SYMBOLS]
     report = {
         "candidate_id": candidate_id,
-        "armed": core.verify_arm_token(candidate_id)[0],
+        "armed": armed,
+        "arm_reason": arm_reason,
+        "risk_gate": risk_reason if not risk_ok else "RISK_OK",
+        "operational_mode": contract.get("mode") if contract else None,
+        "operational_contract_error": contract_error,
         "phase_o": phase_o_new_entries_paused()[1],
-        "orders_submitted": adapter.orders_submitted,
-        "attempts": attempts,
+        "python_submits_orders": PYTHON_SUBMITS_ORDERS,
+        "orders_submitted": 0,
+        "sizing_preview": sizing_preview,
         "bracket_success": brackets,
         "bracket_failure_mock": bracket_fail,
         "reconciliation": reconciliation,
-        "capital_feasibility": [json.loads(x) for x in feasibility],
         "account_snapshot": account,
         "private_snapshot_status": private_snapshot,
         "public_market_data_error": public_error,
@@ -638,14 +400,14 @@ def dry_run(candidate_id: str, use_public: bool = False, private_read: bool = Fa
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Gen2 canary execution safety adapter")
-    parser.add_argument("--mode", choices=["dry-run", "capital-audit"], default="dry-run")
+    parser = argparse.ArgumentParser(description="Gen2 canary reconciliation/second-opinion helpers (no order submission)")
+    parser.add_argument("--mode", choices=["dry-run", "second-opinion"], default="dry-run")
     parser.add_argument("--candidate-id", default=DEFAULT_CANDIDATE_ID)
     parser.add_argument("--public-market-data", action="store_true")
     parser.add_argument("--private-read", action="store_true")
     args = parser.parse_args(argv)
-    if args.mode == "capital-audit":
-        payload = dry_run(args.candidate_id, use_public=args.public_market_data, private_read=args.private_read)["capital_feasibility"]
+    if args.mode == "second-opinion":
+        payload = second_opinion_reconciliation(args.candidate_id)
     else:
         payload = dry_run(args.candidate_id, use_public=args.public_market_data, private_read=args.private_read)
     print(json.dumps(payload, indent=2, default=json_default))

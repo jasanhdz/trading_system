@@ -35,17 +35,15 @@ def test_secret_redaction() -> None:
         os.environ.pop("BINANCE_API_SECRET", None)
 
 
-def test_order_methods_are_blocked() -> None:
+def test_adapter_has_no_order_surface_at_all() -> None:
     adapter = ex.BinancePrivateReadOnlyAdapter()
-    try:
-        adapter.place_entry({})
-        raise AssertionError("order submission must be blocked")
-    except RuntimeError as err:
-        assert "REAL_ORDER_SUBMISSION_DISABLED" in str(err)
+    forbidden = [name for name in dir(adapter) if any(w in name.lower() for w in ("order", "entry", "submit", "place", "close_position", "cancel")) and callable(getattr(adapter, name)) and not name.startswith("_") and name != "open_orders"]
+    assert forbidden == [], f"private adapter must be read-only + kill only, found: {forbidden}"
+    assert ex.PYTHON_SUBMITS_ORDERS is False
 
 
 if __name__ == "__main__":
     test_private_adapter_reports_missing_runtime_credentials_without_env_file()
     test_secret_redaction()
-    test_order_methods_are_blocked()
+    test_adapter_has_no_order_surface_at_all()
     print("test_gen2_canary_private_adapter: OK")

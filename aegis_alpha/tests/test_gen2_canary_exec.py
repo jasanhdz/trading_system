@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import aegis_alpha.tools.gen2_canary_core as core
 import aegis_alpha.tools.gen2_canary_exec as ex
 import aegis_alpha.tools.gen2_canary_reconciliation as rec
+import aegis_alpha.tools.gen2_operational_contract as oc
 
 CID = "gen2-20260711T202935Z"
 
@@ -20,7 +21,7 @@ def setup(tmp: Path) -> None:
     core.FREEZE_PATH = tmp / "GEN2_SYSTEM_FREEZE.json"
     ex.core.CANARY_ROOT = core.CANARY_ROOT
     ex.core.FREEZE_PATH = core.FREEZE_PATH
-    ex.load_account_snapshot_from_logs = lambda ts_repo=None: {"available_balance": 16.24, "source": "test"}
+    ex.load_account_snapshot_from_logs = lambda ts_repo=None: {"available_balance": 116.24, "account_equity": 116.24, "source": "test"}
     core.FREEZE_PATH.write_text(json.dumps({
         "candidate_id": CID,
         "trrm_v2_sha256": "trrm",
@@ -32,28 +33,8 @@ def setup(tmp: Path) -> None:
     core.init_canary(CID)
 
 
-def opportunity(**overrides):
-    base = {
-        "candidate_id": CID,
-        "signal_id": "sig-1",
-        "symbol": "ADAUSDT",
-        "side": "SHORT",
-        "primary_horizon": 12,
-        "final_candle": True,
-        "leverage": 20,
-        "margin_type": "ISOLATED",
-    }
-    base.update(overrides)
-    return base
-
-
 def filters(symbol: str = "ADAUSDT", min_notional: float = 5.0) -> ex.SymbolFilters:
-    return ex.SymbolFilters(symbol, min_notional=min_notional, step_size=1.0, tick_size=0.0001, min_qty=1.0, max_leverage=20)
-
-
-def write_v2_token() -> None:
-    token = ex.create_arm_token_v2(CID, 24, 16.24)
-    (core.canary_dir(CID) / "ARM_TOKEN_V2.json").write_text(json.dumps(token))
+    return ex.SymbolFilters(symbol, min_notional=min_notional, step_size=1.0, tick_size=0.0001, min_qty=1.0)
 
 
 def test_order_id_is_deterministic() -> None:
@@ -65,45 +46,11 @@ def test_order_id_is_deterministic() -> None:
     assert a.startswith("GEN2-")
 
 
-def test_unarmed_and_phase_o_gates_fail_closed() -> None:
-    with tempfile.TemporaryDirectory() as t:
-        setup(Path(t))
-        ex.phase_o_new_entries_paused = lambda ts_repo=None: (False, "PHASE_O_NEW_ENTRIES_NOT_PAUSED")
-        adapter = ex.CanaryExecutionAdapter(CID)
-        ok, reason, _ = adapter.validate(opportunity(), filters(), 0.7, 16.24)
-        assert (ok, reason) == (False, "PHASE_O_NEW_ENTRIES_NOT_PAUSED")
-        ex.phase_o_new_entries_paused = lambda ts_repo=None: (True, "PHASE_O_NEW_ENTRIES_PAUSED")
-        ok, reason, _ = adapter.validate(opportunity(), filters(), 0.7, 16.24)
-        assert (ok, reason) == (False, "CANARY_UNARMED")
-
-
-def test_valid_token_still_blocks_invalid_inputs_and_min_notional() -> None:
-    with tempfile.TemporaryDirectory() as t:
-        setup(Path(t))
-        ex.phase_o_new_entries_paused = lambda ts_repo=None: (True, "PHASE_O_NEW_ENTRIES_PAUSED")
-        write_v2_token()
-        adapter = ex.CanaryExecutionAdapter(CID)
-        assert adapter.validate(opportunity(symbol="BTCUSDT"), filters(), 0.7, 16.24)[1] == "SYMBOL_NOT_ALLOWED"
-        assert adapter.validate(opportunity(side="LONG"), filters(), 0.7, 16.24)[1] == "ONLY_SHORT_ALLOWED"
-        assert adapter.validate(opportunity(primary_horizon=6), filters(), 0.7, 16.24)[1] == "PRIMARY_H12_REQUIRED"
-        assert adapter.validate(opportunity(final_candle=False), filters(), 0.7, 16.24)[1] == "PARTIAL_CANDLE"
-        ok, reason, sizing = adapter.validate(opportunity(), filters(min_notional=5000), 0.7, 16.24)
-        assert ok is False
-        assert reason == "MIN_NOTIONAL_NOT_MET"
-        assert sizing["actual_notional"] < 5000
-
-
-def test_dry_run_never_submits_and_logs_attempt() -> None:
-    with tempfile.TemporaryDirectory() as t:
-        setup(Path(t))
-        ex.phase_o_new_entries_paused = lambda ts_repo=None: (True, "PHASE_O_NEW_ENTRIES_PAUSED")
-        write_v2_token()
-        adapter = ex.CanaryExecutionAdapter(CID)
-        record = adapter.submit(opportunity(), filters(), 0.7, 16.24, dry_run=True)
-        assert record["order_action"] == "NO_ORDER"
-        assert record["enforcement_action"] == "NONE"
-        assert adapter.orders_submitted == 0
-        assert (core.canary_dir(CID) / "live_orders.jsonl").exists()
+def test_module_has_no_order_submission_surface() -> None:
+    assert ex.PYTHON_SUBMITS_ORDERS is False
+    src = Path(ex.__file__).read_text(encoding="utf-8")
+    for endpoint in ("/fapi/v1/order", "futuresOrder", "newOrder"):
+        assert endpoint not in src, f"order endpoint {endpoint} must not exist in the python side"
 
 
 def test_bracket_failure_and_reconciliation_fail_closed() -> None:
@@ -115,44 +62,87 @@ def test_bracket_failure_and_reconciliation_fail_closed() -> None:
         fail = bm.confirm({"client_order_id": "b", "filled_qty": 1.0}, True, False, 61.0)
         assert fail["ok"] is False
         assert core.kill_switch_engaged(CID) is True
-        rec = ex.Reconciler(CID).reconcile({}, {"orphan_position": True, "exposure": 0})
-        assert rec["status"] == "RECONCILIATION_FAIL_CLOSED"
-        assert "ORPHAN_POSITION" in rec["incidents"]
+        r = ex.Reconciler(CID).reconcile({}, {"orphan_position": True, "exposure": 0})
+        assert r["status"] == "RECONCILIATION_FAIL_CLOSED"
+        assert "ORPHAN_POSITION" in r["incidents"]
 
 
-def test_capital_feasibility_and_yaml_phase_o_parser() -> None:
+class FakePrivateAdapter:
+    def __init__(self, open_orders: dict | None = None, positions: dict | None = None, ready: bool = True) -> None:
+        self._open_orders = open_orders or {}
+        self._positions = positions or {}
+        self.available = ready
+
+    def private_snapshot(self, symbols=("ADAUSDT",)):
+        return {"private_read_ready": True, "open_orders": self._open_orders, "positions": self._positions,
+                "available_balance": 100.0, "account_equity": 100.0}
+
+
+def test_second_opinion_flags_orphans_and_kills_on_exposure() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        # clean exchange -> reconciled
+        r = ex.second_opinion_reconciliation(CID, FakePrivateAdapter())
+        assert r["status"] == "RECONCILED"
+        # orphan GEN2 order on exchange not present locally, plus exposure -> kill
+        adapter = FakePrivateAdapter(
+            open_orders={"ADAUSDT": [{"clientOrderId": "GEN2-deadbeef"}]},
+            positions={"ADAUSDT": [{"positionAmt": "-12"}]},
+        )
+        r2 = ex.second_opinion_reconciliation(CID, adapter)
+        assert r2["status"] == "RECONCILIATION_FAIL_CLOSED"
+        assert "ORPHAN_ORDER_ON_EXCHANGE" in r2["incidents"]
+        assert core.kill_switch_engaged(CID) is True
+
+
+def test_second_opinion_without_credentials_is_recorded_not_silent() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        r = ex.second_opinion_reconciliation(CID, FakePrivateAdapter(ready=False))
+        assert r["status"] == "PRIVATE_READ_UNAVAILABLE"
+        rows = (core.canary_dir(CID) / "reconciliations.jsonl").read_text().splitlines()
+        assert len(rows) == 1
+
+
+def test_dry_run_uses_unified_contract_and_submits_nothing() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        ex.phase_o_new_entries_paused = lambda ts_repo=None: (True, "PHASE_O_NEW_ENTRIES_PAUSED")
+        # without contract: fail-closed, reported, zero orders
+        report = ex.dry_run(CID, use_public=False)
+        assert report["orders_submitted"] == 0
+        assert report["armed"] is False
+        assert report["operational_mode"] is None
+        assert report["risk_gate"] == "OPERATIONAL_CONTRACT_MISSING"
+        # with SAFE contract: sizing preview comes from THE contract
+        oc.write_contract(CID, "safe", 116.24)
+        report2 = ex.dry_run(CID, use_public=False)
+        assert report2["operational_mode"] == "SAFE"
+        assert report2["orders_submitted"] == 0
+        assert report2["FORWARD_OUTCOMES_NOT_EVALUATED"] is True
+        ada = report2["sizing_preview"]["ADAUSDT"]
+        assert ada["leverage"] == 3 and abs(ada["notional"] - 25.0) <= 0.8
+        daily = rec.build_daily_report(CID)
+        assert daily["orders_submitted"] == 0
+        assert daily["FORWARD_OUTCOMES_NOT_EVALUATED"] is True
+        assert daily["brackets"]["rows"] >= 4
+
+
+def test_phase_o_yaml_parser_single_source() -> None:
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
         ts = tmp / "binance-futures-bot-ts"
         ts.mkdir()
         (ts / "regime_config.live.yaml").write_text("aegis:\n  phase_o_short_live:\n    enabled: true\n    allow_orders: false\n")
-        assert ex.phase_o_new_entries_paused(ts) == (True, "PHASE_O_NEW_ENTRIES_PAUSED")
-        feasible = ex.capital_feasibility("ADAUSDT", filters(), 0.7)
-        assert feasible.actual_notional >= 5.0
-        assert feasible.required_isolated_margin <= feasible.allocated_margin
-        assert feasible.decision in {"CANARY_CAPITAL_SUFFICIENT", "NO_TRADE"}
-
-
-def test_dry_run_report_has_zero_orders_and_no_outcomes() -> None:
-    with tempfile.TemporaryDirectory() as t:
-        setup(Path(t))
-        ex.phase_o_new_entries_paused = lambda ts_repo=None: (True, "PHASE_O_NEW_ENTRIES_PAUSED")
-        report = ex.dry_run(CID, use_public=False)
-        assert report["orders_submitted"] == 0
-        assert report["FORWARD_OUTCOMES_NOT_EVALUATED"] is True
-        assert report["armed"] is False
-        daily = rec.build_daily_report(CID)
-        assert daily["orders_submitted"] == 0
-        assert daily["FORWARD_OUTCOMES_NOT_EVALUATED"] is True
-        assert daily["brackets"]["rows"] >= 2
+        assert core.phase_o_new_entries_paused(ts) == (True, "PHASE_O_NEW_ENTRIES_PAUSED")
 
 
 if __name__ == "__main__":
     test_order_id_is_deterministic()
-    test_unarmed_and_phase_o_gates_fail_closed()
-    test_valid_token_still_blocks_invalid_inputs_and_min_notional()
-    test_dry_run_never_submits_and_logs_attempt()
+    test_module_has_no_order_submission_surface()
     test_bracket_failure_and_reconciliation_fail_closed()
-    test_capital_feasibility_and_yaml_phase_o_parser()
-    test_dry_run_report_has_zero_orders_and_no_outcomes()
+    test_second_opinion_flags_orphans_and_kills_on_exposure()
+    test_second_opinion_without_credentials_is_recorded_not_silent()
+    test_dry_run_uses_unified_contract_and_submits_nothing()
+    test_phase_o_yaml_parser_single_source()
     print("test_gen2_canary_exec: OK")

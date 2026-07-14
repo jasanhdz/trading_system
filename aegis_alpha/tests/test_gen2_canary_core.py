@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import aegis_alpha.tools.gen2_canary_core as cc
+import aegis_alpha.tools.gen2_operational_contract as oc
 
 CID = "gen2-test"
 
@@ -32,33 +33,36 @@ def test_gauntlet_fail_closed_chain() -> None:
         original = cc.phase_o_conflict_audit
         try:
             cc.phase_o_conflict_audit = lambda: no_conflict
+            # 0) no contract -> risk gate fail-closed
+            assert cc.risk_gate(CID)[1] == "OPERATIONAL_CONTRACT_MISSING"
+            oc.write_contract(CID, "safe", 200.0)
             # 1) unarmed by default
             ok, r = cc.canary_eligibility(CID, good_decision())
             assert (ok, r) == (False, "CANARY_UNARMED_NO_TOKEN")
-            # 2) armed -> eligible
-            cc.create_arm_token(CID, 15.0, 72, ["ADAUSDT"], 5)
+            # 2) armed -> eligible (single token schema from the operational contract)
+            oc.create_arm_token(CID, 72, ["ADAUSDT"])
             assert cc.canary_eligibility(CID, good_decision()) == (True, "ELIGIBLE")
-            # 3) wrong candidate token
+            # 3) tampered token candidate -> checksum fails
             tok = json.loads((cc.canary_dir(CID) / "ARM_TOKEN.json").read_text())
             tok["candidate_id"] = "other"
             (cc.canary_dir(CID) / "ARM_TOKEN.json").write_text(json.dumps(tok))
             assert cc.verify_arm_token(CID)[1] == "TOKEN_CHECKSUM_INVALID"
-            cc.create_arm_token(CID, 15.0, 72, ["ADAUSDT"], 5)
-            # 4) expired token
+            oc.create_arm_token(CID, 72, ["ADAUSDT"])
+            # 4) expired token (expiry is covered by checksum -> tampering also fails)
             tok = json.loads((cc.canary_dir(CID) / "ARM_TOKEN.json").read_text())
-            # NOT_A trivially-forgeable expiry: checksum covers expires_at, so tampering fails checksum
-            tok["expires_at"] = "2020-01-01T00:00:00+00:00"
+            tok["expires_at_epoch"] = 0
             (cc.canary_dir(CID) / "ARM_TOKEN.json").write_text(json.dumps(tok))
             assert cc.verify_arm_token(CID)[1] == "TOKEN_CHECKSUM_INVALID"
-            assert cc.create_arm_token(CID, 15.0, -1, ["ADAUSDT"], 5) and cc.verify_arm_token(CID)[1] == "TOKEN_EXPIRED"
-            cc.create_arm_token(CID, 15.0, 72, ["ADAUSDT"], 1)
+            oc.create_arm_token(CID, -1, ["ADAUSDT"])
+            assert cc.verify_arm_token(CID)[1] == "TOKEN_EXPIRED"
+            oc.create_arm_token(CID, 72, ["ADAUSDT"])
             # 5) consecutive loss cap pauses entries
             for _ in range(3):
                 cc.record_trade_result(CID, -0.01)
             assert cc.risk_gate(CID)[1] == "CONSECUTIVE_LOSS_CAP"
             cc.record_trade_result(CID, +0.05)  # win resets streak
             assert cc.risk_gate(CID)[0] is True
-            # 6) total loss cap
+            # 6) big loss trips daily/total caps (SAFE: daily 2%, total 5% of 200)
             cc.record_trade_result(CID, -10.0)
             assert cc.risk_gate(CID)[1] in {"DAILY_LOSS_CAP", "TOTAL_LOSS_CAP"}
             # 7) kill switch dominates and persists across restart (file-based)
@@ -71,9 +75,13 @@ def test_gauntlet_fail_closed_chain() -> None:
             (cc.canary_dir(CID) / "KILL_SWITCH").unlink()
             for bad in ({"decision": "NO_DECISION"}, {**good_decision(), "vetoed_by_trrm": True}, {**good_decision(), "eqm_score": float("nan")}):
                 assert cc.canary_eligibility(CID, {**good_decision(), **bad})[0] is False
-            # 9) token max orders exhaustion
-            state.write_text(json.dumps({"paused": False, "daily_loss": 0, "total_loss": 0, "consecutive_losses": 0, "day": "2026-07-12", "orders_sent": 1}))
+            # 9) token max orders exhaustion (contract first_arm_max_orders=1)
+            oc.consume_order(CID)
             assert cc.verify_arm_token(CID)[1] == "TOKEN_MAX_ORDERS_EXHAUSTED"
+            # 10) mode switch invalidates the old token (mode covered by checksum+hash)
+            oc.create_arm_token(CID, 72, ["ADAUSDT"])
+            oc.write_contract(CID, "experimental", 200.0, force=True)
+            assert cc.verify_arm_token(CID)[1] in {"TOKEN_MODE_MISMATCH", "TOKEN_CONTRACT_HASH_MISMATCH"}
         finally:
             cc.phase_o_conflict_audit = original
 
@@ -83,7 +91,8 @@ def test_phase_o_conflict_blocks_everything() -> None:
         tmp = Path(t)
         setup(tmp)
         cc.init_canary(CID)
-        cc.create_arm_token(CID, 15.0, 72, ["ADAUSDT"], 5)
+        oc.write_contract(CID, "safe", 200.0)
+        oc.create_arm_token(CID, 72, ["ADAUSDT"])
         original = cc.phase_o_conflict_audit
         try:
             cc.phase_o_conflict_audit = lambda: {"conflict": True}

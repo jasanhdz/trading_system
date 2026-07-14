@@ -15,7 +15,6 @@ import os
 import re
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -26,15 +25,14 @@ from aegis_alpha.tools.gen2_d3_common import GEN2_ROOT, sha256_text, utc_now, va
 
 CANARY_ROOT = GEN2_ROOT / "live_canary"
 FREEZE_PATH = GEN2_ROOT / "GEN2_SYSTEM_FREEZE.json"
-DEFAULT_LIMITS = {
-    "experimental_capital_cap": 15.0,
-    "risk_per_trade_pct": 0.005,
-    "daily_loss_pct": 0.02,
-    "total_loss_pct": 0.05,
-    "max_consecutive_losses": 3,
-    "max_simultaneous_positions": 1,
-    "max_new_positions_per_30min": 1,
-}
+
+
+def _oc():
+    """Lazy import of the single-source-of-truth operational contract (avoids the
+    core<->contract import cycle). All risk limits, sizing and arm tokens live THERE."""
+    import aegis_alpha.tools.gen2_operational_contract as oc
+
+    return oc
 
 
 def canary_dir(candidate_id: str) -> Path:
@@ -63,9 +61,10 @@ def init_canary(candidate_id: str) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     for sub in ("daily_reports", "incidents", "parity_reports", "cost_reports"):
         (d / sub).mkdir(exist_ok=True)
-    manifest = {"schema": "gen2_canary_manifest_v1", "candidate_id": candidate_id,
-                "created_at_utc": utc_now().isoformat(), "limits": DEFAULT_LIMITS,
-                "armed_default": False, "spec": "GEN2_F1_LIVE_CANARY_SPEC.md v1.0"}
+    manifest = {"schema": "gen2_canary_manifest_v2", "candidate_id": candidate_id,
+                "created_at_utc": utc_now().isoformat(),
+                "limits_source": "operational_contract.json (gen2_operational_contract.py, GEN2_OPERATIONAL_MODES_SPEC.md)",
+                "armed_default": False, "spec": "GEN2_F1_LIVE_CANARY_SPEC.md v1.0 + GEN2_OPERATIONAL_MODES_SPEC.md v1.0"}
     atomic_write(d / "canary_manifest.json", json.dumps(manifest, indent=2))
     (d / "canary_manifest.sha256").write_text(sha256_text(json.dumps(manifest, indent=2)) + "\n")
     atomic_write(d / "system_freeze_reference.json", json.dumps({"freeze_sha256_fields": {k: freeze[k] for k in ("candidate_id", "trrm_v2_sha256", "eqm1_sha256", "d3_dataset_sha256", "feature_hash")}}, indent=2))
@@ -85,64 +84,17 @@ def engage_kill_switch(candidate_id: str, reason: str) -> None:
     append_jsonl(d / "incidents" / "incidents.jsonl", {"type": "KILL_SWITCH_ENGAGED", "reason": reason})
 
 
-# -------------------------------------------------------------------- arm token
-def create_arm_token(candidate_id: str, capital_cap: float, expiry_hours: int, allowed_symbols: list[str], max_orders: int) -> Path:
-    body = {"candidate_id": candidate_id, "capital_cap": capital_cap,
-            "expires_at": (utc_now() + timedelta(hours=expiry_hours)).isoformat(),
-            "allowed_symbols": sorted(allowed_symbols), "max_orders": max_orders,
-            "created_at": utc_now().isoformat(), "CANARY_ARMED": True}
-    body["checksum"] = sha256_text(json.dumps({k: body[k] for k in ("candidate_id", "capital_cap", "expires_at", "allowed_symbols", "max_orders")}, sort_keys=True))
-    d = canary_dir(candidate_id)
-    d.mkdir(parents=True, exist_ok=True)
-    path = d / "ARM_TOKEN.json"
-    atomic_write(path, json.dumps(body, indent=2))
-    return path
-
-
+# ------------------------------------------------- arm token / risk (delegated)
+# The single implementations live in gen2_operational_contract.py. These thin
+# delegates keep the historical 2-tuple call sites working without a second
+# token schema or a second set of limits ever existing again.
 def verify_arm_token(candidate_id: str) -> tuple[bool, str]:
-    path = canary_dir(candidate_id) / "ARM_TOKEN.json"
-    if not path.exists():
-        return False, "CANARY_UNARMED_NO_TOKEN"
-    try:
-        t = json.loads(path.read_text())
-    except Exception:
-        return False, "TOKEN_CORRUPT"
-    expect = sha256_text(json.dumps({k: t.get(k) for k in ("candidate_id", "capital_cap", "expires_at", "allowed_symbols", "max_orders")}, sort_keys=True))
-    if t.get("checksum") != expect:
-        return False, "TOKEN_CHECKSUM_INVALID"
-    if t.get("candidate_id") != candidate_id:
-        return False, "TOKEN_WRONG_CANDIDATE"
-    if not t.get("CANARY_ARMED"):
-        return False, "TOKEN_NOT_ARMED"
-    if datetime.fromisoformat(t["expires_at"]) < utc_now():
-        return False, "TOKEN_EXPIRED"
-    state = json.loads((canary_dir(candidate_id) / "risk_state.json").read_text())
-    if state.get("orders_sent", 0) >= int(t.get("max_orders", 0)):
-        return False, "TOKEN_MAX_ORDERS_EXHAUSTED"
-    return True, "TOKEN_VALID"
+    ok, reason, _token = _oc().verify_arm_token(candidate_id)
+    return ok, reason
 
 
-# -------------------------------------------------------------------- risk guard
-def risk_gate(candidate_id: str, limits: dict[str, Any] | None = None) -> tuple[bool, str]:
-    d = canary_dir(candidate_id)
-    limits = limits or DEFAULT_LIMITS
-    state = json.loads((d / "risk_state.json").read_text())
-    cap = limits["experimental_capital_cap"]
-    today = str(utc_now().date())
-    if state.get("day") != today:
-        state["day"], state["daily_loss"] = today, 0.0
-        atomic_write(d / "risk_state.json", json.dumps(state, indent=2))
-    if state.get("paused"):
-        return False, "CANARY_PAUSED"
-    if kill_switch_engaged(candidate_id):
-        return False, "KILL_SWITCH_ENGAGED"
-    if state["daily_loss"] >= limits["daily_loss_pct"] * cap:
-        return False, "DAILY_LOSS_CAP"
-    if state["total_loss"] >= limits["total_loss_pct"] * cap:
-        return False, "TOTAL_LOSS_CAP"
-    if state["consecutive_losses"] >= limits["max_consecutive_losses"]:
-        return False, "CONSECUTIVE_LOSS_CAP"
-    return True, "RISK_OK"
+def risk_gate(candidate_id: str) -> tuple[bool, str]:
+    return _oc().risk_gate(candidate_id)
 
 
 def record_trade_result(candidate_id: str, pnl: float) -> None:
@@ -158,8 +110,8 @@ def record_trade_result(candidate_id: str, pnl: float) -> None:
 
 
 # ---------------------------------------------------------- Phase O coexistence
-def phase_o_new_entries_paused() -> tuple[bool, str]:
-    yaml_path = REPO / "binance-futures-bot-ts" / "regime_config.live.yaml"
+def phase_o_new_entries_paused(ts_repo: Path | None = None) -> tuple[bool, str]:
+    yaml_path = (ts_repo or REPO / "binance-futures-bot-ts") / "regime_config.live.yaml"
     if not yaml_path.exists():
         return False, "PHASE_O_CONFIG_NOT_FOUND"
     text = yaml_path.read_text(encoding="utf-8")
@@ -224,17 +176,15 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["init", "create-arm-token", "status", "kill", "conflict-audit"], required=True)
     p.add_argument("--candidate-id", default="gen2-20260711T202935Z")
-    p.add_argument("--capital-cap", type=float, default=15.0)
     p.add_argument("--expiry-hours", type=int, default=72)
     p.add_argument("--allowed-symbols", default="ADAUSDT,DOGEUSDT")
-    p.add_argument("--max-orders", type=int, default=5)
     p.add_argument("--reason", default="manual")
     args = p.parse_args(argv)
     if args.mode == "init":
         out = {"initialized": str(init_canary(args.candidate_id)), "armed": False}
     elif args.mode == "create-arm-token":
-        out = {"token": str(create_arm_token(args.candidate_id, args.capital_cap, args.expiry_hours, [s.strip().upper() for s in args.allowed_symbols.split(",")], args.max_orders)),
-               "warning": "HUMAN ACTION ONLY - do not let automation call this"}
+        token = _oc().create_arm_token(args.candidate_id, args.expiry_hours, [s.strip().upper() for s in args.allowed_symbols.split(",")])
+        out = {"token": token, "warning": "HUMAN ACTION ONLY - do not let automation call this"}
     elif args.mode == "kill":
         engage_kill_switch(args.candidate_id, args.reason)
         out = {"kill_switch": "ENGAGED"}

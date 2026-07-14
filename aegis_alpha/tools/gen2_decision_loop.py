@@ -91,6 +91,17 @@ def evaluate_symbol(symbol: str, candles: pd.DataFrame, context: dict[str, pd.Da
     }
 
 
+def default_symbol_filters(symbol: str) -> dict[str, Any] | None:
+    """Real exchangeInfo filters; None (fail-closed) when unavailable."""
+    from aegis_alpha.tools.gen2_canary_exec import load_public_exchange_info
+
+    info = load_public_exchange_info((symbol,))
+    f = info.get(symbol)
+    if f is None:
+        return None
+    return {"step_size": f.step_size, "min_notional": f.min_notional, "min_qty": f.min_qty}
+
+
 def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token: dict[str, Any]) -> dict[str, Any]:
     from aegis_alpha.tools.gen2_canary_exec import deterministic_client_order_id
 
@@ -191,7 +202,14 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         eligible, reason = gates_for_live(candidate_id, decision, token.get("allowed_symbols", []) if token_ok else [], bridge_status)
         attempt: dict[str, Any] = {"symbol": symbol, "ts": decision.get("ts"), "eligible": eligible, "reason": reason}
         if eligible and live_enabled and contract is not None:
-            filters = (filters_fn or (lambda s: {"step_size": 1.0, "min_notional": 5.0, "min_qty": 0.0}))(symbol)
+            try:
+                filters = (filters_fn or default_symbol_filters)(symbol)
+            except Exception:
+                filters = None
+            if filters is None:
+                attempt["reason"] = "FILTERS_UNAVAILABLE"  # fail-closed: never size with guessed filters
+                live_attempts.append(attempt)
+                continue
             sizing = oc.compute_sizing(contract, decision["signal_price"], float(bridge_status.get("available_balance", 0) or 0), filters["step_size"], filters["min_notional"], filters.get("min_qty", 0.0))
             attempt["sizing"] = sizing
             if sizing["decision"] != "SIZED":
