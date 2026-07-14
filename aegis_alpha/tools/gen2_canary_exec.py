@@ -230,29 +230,56 @@ class BinancePrivateReadOnlyAdapter:
         return {"local_kill": True, "bridge_kill_ack": bridge_ack}
 
 
-def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateReadOnlyAdapter | None = None,
-                                  symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS) -> dict[str, Any]:
-    """Compare exchange truth (private read) vs local live_orders/fills streams.
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-    Fail-closed: any orphan/mismatch with exposure engages the kill switch.
+
+def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateReadOnlyAdapter | None = None,
+                                  symbols: tuple[str, ...] = DEFAULT_ALLOWED_SYMBOLS,
+                                  bridge_status: dict[str, Any] | None = None,
+                                  balance_tolerance_pct: float = 0.02) -> dict[str, Any]:
+    """Compare exchange truth (private read) vs local live_orders/fills/brackets streams.
+
+    Detects: orphan orders/positions, duplicated fills, fills without confirmed
+    brackets, balance mismatch vs the bridge's reported balance, and leverage /
+    margin-mode drift vs THE operational contract. Fail-closed: any incident
+    while exposure exists engages the kill switch.
     """
     adapter = adapter or BinancePrivateReadOnlyAdapter()
     cdir = core.canary_dir(candidate_id)
-    local_orders = []
-    lo = cdir / "live_orders.jsonl"
-    if lo.exists():
-        for line in lo.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                local_orders.append(json.loads(line))
+    local_orders = _read_jsonl(cdir / "live_orders.jsonl")
     local_ids = {r.get("order", {}).get("client_order_id") for r in local_orders if r.get("order")}
     local_ids |= {r.get("client_order_id") for r in local_orders if r.get("client_order_id")}
     local_ids.discard(None)
+    incidents: list[str] = []
+    details: dict[str, Any] = {}
+
+    # local-stream consistency (does not need exchange access)
+    fill_rows = [r for r in _read_jsonl(cdir / "fills.jsonl") if r.get("type") in (None, "FILL")]
+    fill_counts: dict[str, int] = {}
+    for r in fill_rows:
+        coid = str(r.get("client_order_id"))
+        fill_counts[coid] = fill_counts.get(coid, 0) + 1
+    duplicated_fills = sorted(c for c, n in fill_counts.items() if n > 1)
+    if duplicated_fills:
+        incidents.append("DUPLICATED_FILLS")
+        details["duplicated_fills"] = duplicated_fills
+    bracket_ok_ids = {str(r.get("client_order_id")) for r in _read_jsonl(cdir / "brackets.jsonl")
+                      if r.get("ok") is True or r.get("type") == "BRACKET_CONFIRMED"}
+    missing_brackets = sorted(set(fill_counts) - bracket_ok_ids)
+    if missing_brackets:
+        incidents.append("FILL_WITHOUT_CONFIRMED_BRACKET")
+        details["missing_brackets"] = missing_brackets
+
     if not adapter.available:
-        record = {"schema": "gen2_second_opinion_v1", "candidate_id": candidate_id,
-                  "status": "PRIVATE_READ_UNAVAILABLE", "local_order_ids": sorted(local_ids),
-                  "recorded_at_utc": utc_now().isoformat()}
+        record = {"schema": "gen2_second_opinion_v2", "candidate_id": candidate_id,
+                  "status": "PRIVATE_READ_UNAVAILABLE", "incidents": incidents, **details,
+                  "local_order_ids": sorted(local_ids), "recorded_at_utc": utc_now().isoformat()}
         append_jsonl(cdir / "reconciliations.jsonl", record)
         return record
+
     snapshot = adapter.private_snapshot(symbols)
     exchange_orders = {o.get("clientOrderId") for rows in snapshot.get("open_orders", {}).values() for o in rows}
     exchange_positions = [
@@ -261,15 +288,45 @@ def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateRead
     ]
     gen2_exchange_orders = {o for o in exchange_orders if o and o.startswith("GEN2-")}
     orphan_orders = sorted(gen2_exchange_orders - local_ids)
-    incidents: list[str] = []
     if orphan_orders:
         incidents.append("ORPHAN_ORDER_ON_EXCHANGE")
+        details["orphan_orders"] = orphan_orders
     if exchange_positions and not local_ids:
         incidents.append("POSITION_WITHOUT_LOCAL_ORDER")
+
+    # contract consistency on any open position (leverage / margin mode)
+    contract: dict[str, Any] | None = None
+    try:
+        contract = oc.load_contract(candidate_id)
+    except Exception:
+        pass
+    if contract is not None:
+        for pos in exchange_positions:
+            lev = int(float(pos.get("leverage", 0) or 0))
+            if lev and lev > int(contract["max_leverage"]):
+                incidents.append("LEVERAGE_ABOVE_CONTRACT")
+                details.setdefault("leverage_violations", []).append({"symbol": pos.get("symbol"), "leverage": lev})
+            margin_type = str(pos.get("marginType", pos.get("margin_type", ""))).upper()
+            if margin_type and margin_type != "ISOLATED":
+                incidents.append("MARGIN_MODE_NOT_ISOLATED")
+                details.setdefault("margin_violations", []).append({"symbol": pos.get("symbol"), "margin_type": margin_type})
+
+    # balance second opinion vs what the bridge reported to the brain
+    exchange_balance = snapshot.get("available_balance")
+    if bridge_status is not None and exchange_balance is not None:
+        bridge_balance = bridge_status.get("available_balance")
+        if bridge_balance is not None:
+            ref = max(abs(float(exchange_balance)), 1e-9)
+            drift = abs(float(exchange_balance) - float(bridge_balance)) / ref
+            details["balance_drift_pct"] = drift
+            if drift > balance_tolerance_pct:
+                incidents.append("BALANCE_MISMATCH_BRIDGE_VS_EXCHANGE")
+
     status = "RECONCILED" if not incidents else "RECONCILIATION_FAIL_CLOSED"
-    record = {"schema": "gen2_second_opinion_v1", "candidate_id": candidate_id, "status": status,
-              "incidents": incidents, "orphan_orders": orphan_orders,
+    record = {"schema": "gen2_second_opinion_v2", "candidate_id": candidate_id, "status": status,
+              "incidents": sorted(set(incidents)), **details,
               "open_position_count": len(exchange_positions),
+              "exchange_available_balance": exchange_balance,
               "local_order_ids": sorted(local_ids), "recorded_at_utc": utc_now().isoformat()}
     append_jsonl(cdir / "reconciliations.jsonl", record)
     if incidents and exchange_positions:

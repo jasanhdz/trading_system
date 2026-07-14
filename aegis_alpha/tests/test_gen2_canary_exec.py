@@ -68,14 +68,16 @@ def test_bracket_failure_and_reconciliation_fail_closed() -> None:
 
 
 class FakePrivateAdapter:
-    def __init__(self, open_orders: dict | None = None, positions: dict | None = None, ready: bool = True) -> None:
+    def __init__(self, open_orders: dict | None = None, positions: dict | None = None, ready: bool = True,
+                 balance: float = 100.0) -> None:
         self._open_orders = open_orders or {}
         self._positions = positions or {}
         self.available = ready
+        self._balance = balance
 
     def private_snapshot(self, symbols=("ADAUSDT",)):
         return {"private_read_ready": True, "open_orders": self._open_orders, "positions": self._positions,
-                "available_balance": 100.0, "account_equity": 100.0}
+                "available_balance": self._balance, "account_equity": self._balance}
 
 
 def test_second_opinion_flags_orphans_and_kills_on_exposure() -> None:
@@ -102,6 +104,40 @@ def test_second_opinion_without_credentials_is_recorded_not_silent() -> None:
         assert r["status"] == "PRIVATE_READ_UNAVAILABLE"
         rows = (core.canary_dir(CID) / "reconciliations.jsonl").read_text().splitlines()
         assert len(rows) == 1
+
+
+def test_second_opinion_detects_duplicated_fills_and_missing_brackets() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        cdir = core.canary_dir(CID)
+        with (cdir / "fills.jsonl").open("a") as f:
+            f.write(json.dumps({"type": "FILL", "client_order_id": "GEN2-dup", "ts_sequence": 1}) + "\n")
+            f.write(json.dumps({"type": "FILL", "client_order_id": "GEN2-dup", "ts_sequence": 2}) + "\n")
+            f.write(json.dumps({"type": "FILL", "client_order_id": "GEN2-nobracket", "ts_sequence": 3}) + "\n")
+        with (cdir / "brackets.jsonl").open("a") as f:
+            f.write(json.dumps({"ok": True, "client_order_id": "GEN2-dup"}) + "\n")
+        r = ex.second_opinion_reconciliation(CID, FakePrivateAdapter())
+        assert "DUPLICATED_FILLS" in r["incidents"]
+        assert "FILL_WITHOUT_CONFIRMED_BRACKET" in r["incidents"]
+        assert r["duplicated_fills"] == ["GEN2-dup"]
+        assert r["missing_brackets"] == ["GEN2-nobracket"]
+        assert core.kill_switch_engaged(CID) is False  # incidents but no exposure -> no kill
+
+
+def test_second_opinion_detects_leverage_margin_and_balance_drift() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        oc.write_contract(CID, "safe", 116.24)  # max_leverage 5
+        adapter = FakePrivateAdapter(
+            positions={"ADAUSDT": [{"symbol": "ADAUSDT", "positionAmt": "-12", "leverage": "20", "marginType": "cross"}]},
+            balance=100.0,
+        )
+        r = ex.second_opinion_reconciliation(CID, adapter, bridge_status={"available_balance": 80.0})
+        assert "LEVERAGE_ABOVE_CONTRACT" in r["incidents"]
+        assert "MARGIN_MODE_NOT_ISOLATED" in r["incidents"]
+        assert "BALANCE_MISMATCH_BRIDGE_VS_EXCHANGE" in r["incidents"]
+        assert "POSITION_WITHOUT_LOCAL_ORDER" in r["incidents"]
+        assert core.kill_switch_engaged(CID) is True  # incidents with exposure -> kill
 
 
 def test_dry_run_uses_unified_contract_and_submits_nothing() -> None:
@@ -143,6 +179,8 @@ if __name__ == "__main__":
     test_bracket_failure_and_reconciliation_fail_closed()
     test_second_opinion_flags_orphans_and_kills_on_exposure()
     test_second_opinion_without_credentials_is_recorded_not_silent()
+    test_second_opinion_detects_duplicated_fills_and_missing_brackets()
+    test_second_opinion_detects_leverage_margin_and_balance_drift()
     test_dry_run_uses_unified_contract_and_submits_nothing()
     test_phase_o_yaml_parser_single_source()
     print("test_gen2_canary_exec: OK")
