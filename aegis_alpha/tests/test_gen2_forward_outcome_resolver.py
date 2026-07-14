@@ -101,8 +101,37 @@ def test_fetch_failure_is_incident_not_crash() -> None:
         assert any(i["type"] == "OUTCOME_FETCH_FAILED" for i in incidents)
 
 
+def test_paper_vs_live_join_via_live_orders_signal_id() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        tmp = Path(t)
+        decisions = setup(tmp)
+        base = pd.Timestamp("2026-07-12 00:00:00")
+        write_decision(decisions, str(base))                                   # will have a live fill
+        write_decision(decisions, str(base + pd.Timedelta(minutes=30)))        # paper only
+        cdir = core.canary_dir(CID)
+        signal_id = f"ADAUSDT-{str(base).replace(' ', 'T')}"
+        coid = "GEN2-joinme"
+        with (cdir / "live_orders.jsonl").open("a") as f:
+            f.write(json.dumps({"order": {"signal_id": signal_id, "client_order_id": coid, "symbol": "ADAUSDT"},
+                                "ack": {"status": "ACCEPTED"}}) + "\n")
+        with (cdir / "fills.jsonl").open("a") as f:
+            f.write(json.dumps({"type": "FILL", "client_order_id": coid, "ts_sequence": 1,
+                                "payload": {"fill_price": 100.4, "fill_qty": 35, "latency_ms": 90}}) + "\n")
+        s = resolver.resolve(CID, decisions, fake_fetch_factory(), pd.Timestamp("2026-07-12 02:00:00"))
+        assert s["resolved_new"] == 2 and s["live_fills_matched"] == 1
+        rows = resolver.read_jsonl(cdir / "forward_outcomes.jsonl")
+        live = [r for r in rows if r["stream"] == "PAPER_AND_LIVE"]
+        paper = [r for r in rows if r["stream"] == "PAPER"]
+        assert len(live) == 1 and len(paper) == 1
+        assert live[0]["live_fill"]["client_order_id"] == coid
+        # slippage: fill 100.4 vs paper entry (next bar open 99.9) -> positive delta
+        assert live[0]["paper_vs_live_entry_delta_pct"] is not None
+        assert abs(live[0]["paper_vs_live_entry_delta_pct"] - (100.4 - live[0]["entry_price"]) / live[0]["entry_price"]) < 1e-12
+
+
 if __name__ == "__main__":
     test_resolver_computes_outcomes_and_is_idempotent()
     test_tail_label_from_spike()
     test_fetch_failure_is_incident_not_crash()
+    test_paper_vs_live_join_via_live_orders_signal_id()
     print("test_gen2_forward_outcome_resolver: OK")

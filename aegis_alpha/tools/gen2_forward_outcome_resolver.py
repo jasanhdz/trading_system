@@ -86,6 +86,31 @@ def decision_key(record: dict[str, Any]) -> str:
     return f"{record.get('candidate_id')}|{record.get('symbol')}|{record.get('ts') or record.get('timestamp')}"
 
 
+def signal_id_of(record: dict[str, Any]) -> str:
+    """Same derivation the decision loop uses when building the DecisionOrder."""
+    ts = str(record.get("ts") or record.get("timestamp") or "")
+    return f"{record.get('symbol')}-{ts.replace(' ', 'T')}"
+
+
+def build_live_fill_index(cdir: Path) -> dict[str, dict[str, Any]]:
+    """signal_id -> fill facts, joined through live_orders.jsonl (decisions carry
+    no client_order_id; the submitted order is the only place both ids meet)."""
+    id_by_signal: dict[str, str] = {}
+    for row in read_jsonl(cdir / "live_orders.jsonl"):
+        order = row.get("order") or {}
+        if order.get("signal_id") and order.get("client_order_id"):
+            id_by_signal[str(order["signal_id"])] = str(order["client_order_id"])
+    fills_by_id: dict[str, dict[str, Any]] = {}
+    for row in read_jsonl(cdir / "fills.jsonl"):
+        coid = row.get("client_order_id")
+        if not coid or row.get("type") not in (None, "FILL"):
+            continue
+        payload = row.get("payload") or {}
+        fills_by_id[str(coid)] = {k: payload.get(k, row.get(k)) for k in ("fill_price", "fill_qty", "fees", "latency_ms")}
+    return {sig: {"client_order_id": coid, **fills_by_id[coid]}
+            for sig, coid in id_by_signal.items() if coid in fills_by_id}
+
+
 def resolve(candidate_id: str, decisions_path: Path = FORWARD_DECISIONS,
             fetch_fn: Callable[[str, int, int], pd.DataFrame] = default_fetch_candles,
             now: pd.Timestamp | None = None) -> dict[str, Any]:
@@ -93,7 +118,7 @@ def resolve(candidate_id: str, decisions_path: Path = FORWARD_DECISIONS,
     out_path = cdir / "forward_outcomes.jsonl"
     already = {r.get("key") for r in read_jsonl(out_path)}
     decisions = [r for r in read_jsonl(decisions_path) if r.get("candidate_id") == candidate_id]
-    live_fills = {r.get("client_order_id"): r for r in read_jsonl(cdir / "fills.jsonl") if r.get("client_order_id")}
+    live_fills = build_live_fill_index(cdir)
     resolved = skipped_immature = skipped_done = failed = 0
     by_symbol_window: dict[str, list[pd.Timestamp]] = {}
     pending: list[dict[str, Any]] = []
@@ -130,21 +155,21 @@ def resolve(candidate_id: str, decisions_path: Path = FORWARD_DECISIONS,
         if outcome is None:
             failed += 1
             continue
-        fill = live_fills.get(rec.get("client_order_id"))
+        fill = live_fills.get(signal_id_of(rec))
         evidence = {
             "schema": "gen2_forward_outcome_v2",
             "key": decision_key(rec),
             "candidate_id": candidate_id,
             "symbol": rec["symbol"],
             "decision_ts": str(t),
-            "stream": "PAPER",
+            "stream": "PAPER_AND_LIVE" if fill else "PAPER",
             "hypothetical_action": rec.get("hypothetical_action"),
             "vetoed_by_trrm": rec.get("vetoed_by_trrm"),
             "eqm_score": rec.get("eqm_score"),
             "tail_score": rec.get("tail_score"),
             "qmae_q90": rec.get("qmae_q90"),
             **outcome,
-            "live_fill": {k: fill.get(k) for k in ("fill_price", "fill_qty", "fees", "latency_ms")} if fill else None,
+            "live_fill": {k: fill.get(k) for k in ("client_order_id", "fill_price", "fill_qty", "fees", "latency_ms")} if fill else None,
             "paper_vs_live_entry_delta_pct": (
                 (float(fill["fill_price"]) - outcome["entry_price"]) / outcome["entry_price"]
                 if fill and fill.get("fill_price") else None
