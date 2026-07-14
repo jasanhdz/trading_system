@@ -1,6 +1,30 @@
 # GEN2 — Operations Runbook, Deployment Checklist & Recovery Procedures
 
-**Status:** ops-runbook-v1.0 (2026-07-14) · Candidate `gen2-20260711T202935Z` · Owner: Jasan
+**Status:** ops-runbook-v2.0 (2026-07-14, always-on) · Candidate `gen2-20260711T202935Z` · Owner: Jasan
+
+## 0. Modo always-on (PM2) — el estado normal del sistema
+
+Desde ops-runbook-v2.0 los servicios Gen2 corren bajo PM2 (`ecosystem.gen2.config.js` en el repo TS) y se restauran solos tras reboot/apagón (systemd `pm2-jasan.service` + `pm2 save`, ya configurados):
+
+| Proceso | Qué hace | Política |
+|---|---|---|
+| `gen2-bridge` | bridge HTTP TS (único ejecutor) | autorestart, backoff 5s, 400M |
+| `gen2-watcher` | decision loop `--watch --live` cada 300s (paper hasta armar) | autorestart, backoff 15s, 1500M, lock singleton |
+| `gen2-monitor` | ops monitor `--expect-watch-running` | cron `*/15`, exit 1 visible en `pm2 ls` como errored |
+| `gen2-reconciler` | second-opinion vs exchange | cron `*/30` (necesita keys read-only en `.env.gen2`) |
+
+Secretos: `binance-futures-bot-ts/.env.gen2` (gitignored, 0600). `GEN2_EXECUTION_ENABLED=false` por defecto — el bridge valida en dry-run hasta que el owner lo cambie deliberadamente y reinicie `gen2-bridge`.
+
+**Checklist de despliegue corto (el definitivo):**
+1. Encender el servidor.
+2. Esperar ~2 min a que PM2 restaure todo (`pm2 ls`: gen2-bridge y gen2-watcher `online`).
+3. Verificar monitor: `pm2 logs gen2-monitor --lines 5 --nostream` o correr el monitor a mano → `healthy: true`.
+4. (Solo para operar en real) editar `.env.gen2`: `GEN2_EXECUTION_ENABLED=true` + keys → `pm2 restart gen2-bridge` → crear arm token (§1 paso 11).
+5. Esperar señal. Nada más.
+
+Logs separados en `binance-futures-bot-ts/logs/gen2/{bridge,watcher,monitor,reconciler}.{out,err}.log`.
+
+**Semántica de reinicios (verificada en vivo):** reinicio del watcher no re-emite decisiones (estado por símbolo por vela, lock singleton); reinicio del bridge no duplica órdenes (`bridge_state.json` + ids deterministas + dedup del exchange); el token se consume ANTES de enviar (un crash jamás deja orden aceptada con token vivo); apagón a mitad de un append deja como mucho una línea rota que todos los lectores saltan; snapshots se podan a los últimos 12.
 **Principio rector:** todo es fail-closed. Ante la duda, NO operar. El kill switch nunca se rearma solo; desarmarlo es SIEMPRE una acción humana deliberada.
 
 Rutas usadas abajo:
