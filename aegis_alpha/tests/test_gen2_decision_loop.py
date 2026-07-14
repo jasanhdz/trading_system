@@ -194,6 +194,20 @@ def test_pull_events_checkpoint_and_bridge_failure() -> None:
         assert r4["error"] == "BRIDGE_UNAVAILABLE" and r4["last_sequence"] == 3
 
 
+def test_environment_mismatch_vs_freeze_fails_before_unpickle() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = make_env(Path(t))
+        freeze = json.loads(core.FREEZE_PATH.read_text())
+        freeze["environment"] = {"pandas": "999.0.0", "sklearn": "999.0.0", "numpy": "999.0.0",
+                                 "executable": "/frozen/venv/bin/python"}
+        core.FREEZE_PATH.write_text(json.dumps(freeze))
+        try:
+            run(env)
+            raise AssertionError("environment drift must fail closed before unpickling")
+        except ValueError as exc:
+            assert "ENVIRONMENT_MISMATCH_VS_FREEZE" in str(exc)
+
+
 def test_watch_runner_heartbeat_incidents_and_hard_stop() -> None:
     with tempfile.TemporaryDirectory() as t:
         make_env(Path(t))
@@ -260,6 +274,7 @@ if __name__ == "__main__":
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()
     test_pull_events_checkpoint_and_bridge_failure()
+    test_environment_mismatch_vs_freeze_fails_before_unpickle()
     test_watch_runner_heartbeat_incidents_and_hard_stop()
     test_watch_kill_switch_blocks_live_but_paper_continues()
     print("test_gen2_decision_loop: OK")

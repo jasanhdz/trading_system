@@ -7,7 +7,7 @@ Rutas usadas abajo:
 - `REPO` = `/home/jasan/Develop/trading_system`
 - `GEN2` = `/home/jasan/Develop/aegis_gen2`
 - `CDIR` = `GEN2/live_canary/gen2-20260711T202935Z`
-- `PY` = `REPO/.venv_rocm62/bin/python`
+- `PY` = `/home/jasan/.venv_rocm62/bin/python` — **SIEMPRE este intérprete**: es el registrado en `GEN2_SYSTEM_FREEZE.json` (pandas 3.0.2/sklearn 1.8.0). En este host existe un segundo venv (`REPO/.venv_rocm62`, pandas 2.3.3) cuyo pandas NO puede cargar los pickles congelados; el decision loop ahora lo rechaza en frío con `ENVIRONMENT_MISMATCH_VS_FREEZE` antes de despicklear.
 
 ---
 

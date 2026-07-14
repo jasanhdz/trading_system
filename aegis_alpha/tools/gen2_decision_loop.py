@@ -43,7 +43,28 @@ PRIMARY_HORIZON = 12
 STOP_DISTANCE_PCT = oc.STOP_DISTANCE_PCT
 
 
+def check_environment_vs_freeze(freeze: dict[str, Any]) -> None:
+    """Fail-closed BEFORE unpickling: the frozen candidates are only valid in the
+    environment they were trained in (two venvs named rocm62 exist on this host;
+    pandas-3 pickles do not load under pandas 2)."""
+    env = freeze.get("environment") or {}
+    expected = {k: env.get(k) for k in ("pandas", "sklearn", "numpy") if env.get(k)}
+    if not expected:
+        return
+    import numpy
+    import sklearn
+
+    current = {"pandas": pd.__version__, "sklearn": sklearn.__version__, "numpy": numpy.__version__}
+    mismatched = {k: (v, current[k]) for k, v in expected.items() if current[k] != v}
+    if mismatched:
+        raise ValueError(
+            f"ENVIRONMENT_MISMATCH_VS_FREEZE: {mismatched} — run with the freeze interpreter "
+            f"{env.get('executable', '(unrecorded)')}"
+        )
+
+
 def load_bundles(trrm_dir: Path, eqm_dir: Path, freeze: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    check_environment_vs_freeze(freeze)
     sys.modules["__main__"].MedianImputer = MedianImputer
     trrm_pkl = trrm_dir / "rv2_candidate.pkl"
     eqm_pkl = eqm_dir / "eqm1_candidate.pkl"
@@ -301,7 +322,8 @@ def pull_events(candidate_id: str, fetch_fn: Any = None) -> dict[str, Any]:
 
 # Scientific-integrity failures must stop the runner cold; anything else is an
 # operational incident the watcher records and survives (fail-closed per cycle).
-HARD_STOP_MARKERS = ("TRRM_HASH_MISMATCH_VS_FREEZE", "EQM_HASH_MISMATCH_VS_FREEZE", "CANDIDATE_MISMATCH")
+HARD_STOP_MARKERS = ("TRRM_HASH_MISMATCH_VS_FREEZE", "EQM_HASH_MISMATCH_VS_FREEZE", "CANDIDATE_MISMATCH",
+                     "ENVIRONMENT_MISMATCH_VS_FREEZE")
 
 
 def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float = 300.0,
