@@ -193,8 +193,12 @@ def consume_order(candidate_id: str) -> None:
     core.atomic_write(path, json.dumps(t, indent=2))
 
 
-def risk_gate(candidate_id: str) -> tuple[bool, str]:
-    """THE risk gate: reads the single contract; replaces core.DEFAULT_LIMITS."""
+def risk_gate(candidate_id: str, mutate: bool = True) -> tuple[bool, str]:
+    """THE risk gate: reads the single contract; replaces core.DEFAULT_LIMITS.
+
+    mutate=False computes the day rollover in memory only — for read-only
+    callers (ops monitor) so they never race the watcher's state writes.
+    """
     try:
         contract = load_contract(candidate_id)
     except Exception as exc:
@@ -204,7 +208,8 @@ def risk_gate(candidate_id: str) -> tuple[bool, str]:
     today = str(utc_now().date())
     if state.get("day") != today:
         state["day"], state["daily_loss"] = today, 0.0
-        core.atomic_write(d / "risk_state.json", json.dumps(state, indent=2))
+        if mutate:
+            core.atomic_write(d / "risk_state.json", json.dumps(state, indent=2))
     if state.get("paused"):
         return False, "CANARY_PAUSED"
     if core.kill_switch_engaged(candidate_id):

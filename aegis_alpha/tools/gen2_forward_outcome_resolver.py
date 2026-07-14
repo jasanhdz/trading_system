@@ -39,9 +39,20 @@ MATURITY_MINUTES = 65  # 12 bars + closing margin
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Tolerant reader: a power cut can tear the last line of an append-only
+    stream; skipping it is safe (the writer re-appends idempotently) while a
+    hard parse error would block resolution forever."""
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
 
 
 def mature(ts: str, now: pd.Timestamp | None = None) -> bool:

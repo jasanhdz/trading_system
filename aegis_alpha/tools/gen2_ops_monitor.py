@@ -82,7 +82,7 @@ def build_report(candidate_id: str = DEFAULT_CANDIDATE_ID, status_fn: Any = None
     if not phase_paused:
         alerts.append("PHASE_O_NOT_PAUSED")
     armed, arm_reason, token = oc.verify_arm_token(candidate_id)
-    risk_ok, risk_reason = oc.risk_gate(candidate_id)
+    risk_ok, risk_reason = oc.risk_gate(candidate_id, mutate=False)  # monitor never writes trading state
 
     # --- bridge ------------------------------------------------------------------
     bridge: dict[str, Any] = {"probed": False}

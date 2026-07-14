@@ -220,6 +220,8 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
             continue  # dedup: one decision per closed candle
         state["last_processed"][symbol] = decision.get("ts")
         core.append_jsonl(FORWARD_ROOT / "forward_decisions.jsonl", {"collected_at": utc_now().isoformat(), **decision})
+        # persist per symbol: a crash mid-cycle must not re-emit already-appended candles
+        core.atomic_write(state_path, json.dumps(state, indent=2))
         decisions.append(decision)
         eligible, reason = gates_for_live(candidate_id, decision, token.get("allowed_symbols", []) if token_ok else [], bridge_status)
         attempt: dict[str, Any] = {"symbol": symbol, "ts": decision.get("ts"), "eligible": eligible, "reason": reason}
@@ -238,13 +240,18 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
                 attempt["reason"] = sizing["reason"]
             else:
                 order = build_decision_order(decision, sizing, token)
+                # Fail-closed ordering: burn the token BEFORE wiring the order. A crash
+                # between submit and consume could otherwise leave an ACCEPTED order
+                # with an unconsumed token -> a second live order past max_orders.
+                oc.consume_order(candidate_id)
                 ack = (execute_fn or bridge.post_execute)(order)
                 attempt["ack"] = ack
                 core.append_jsonl(cdir / "live_orders.jsonl", {"order": order, "ack": ack})
-                if ack.get("status") == "ACCEPTED":
-                    oc.consume_order(candidate_id)
-                elif ack.get("status") == "BRIDGE_UNAVAILABLE":
-                    core.append_jsonl(cdir / "incidents" / "incidents.jsonl", {"type": "BRIDGE_UNAVAILABLE_ON_SUBMIT", "order": order["client_order_id"]})
+                if ack.get("status") not in {"ACCEPTED", "ACCEPTED_DRYRUN", "DUPLICATE"}:
+                    core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
+                                      {"type": "TOKEN_CONSUMED_WITHOUT_CONFIRMED_ACK", "ack": ack,
+                                       "order": order["client_order_id"],
+                                       "operator_action": "verify on exchange before re-arming"})
         elif eligible and not live_enabled:
             attempt["reason"] = "WOULD_SUBMIT_LIVE_DISABLED"
         live_attempts.append(attempt)
@@ -324,6 +331,40 @@ def pull_events(candidate_id: str, fetch_fn: Any = None) -> dict[str, Any]:
 # operational incident the watcher records and survives (fail-closed per cycle).
 HARD_STOP_MARKERS = ("TRRM_HASH_MISMATCH_VS_FREEZE", "EQM_HASH_MISMATCH_VS_FREEZE", "CANDIDATE_MISMATCH",
                      "ENVIRONMENT_MISMATCH_VS_FREEZE")
+SNAPSHOT_RETENTION = 12  # forward snapshots kept on disk (~1 hour at 5-min cadence)
+
+
+def acquire_watch_lock(candidate_id: str) -> Path:
+    """Singleton guard: two watchers would double-append decisions and race the
+    risk state. Stale locks (dead pid) are taken over automatically (PM2 restart)."""
+    import os
+
+    lock = core.canary_dir(candidate_id) / "watcher.lock"
+    if lock.exists():
+        try:
+            pid = int(json.loads(lock.read_text())["pid"])
+            os.kill(pid, 0)  # raises if the pid is gone
+            raise RuntimeError(f"WATCHER_ALREADY_RUNNING pid={pid}")
+        except (ProcessLookupError, PermissionError, ValueError, KeyError):
+            pass  # stale or unreadable -> take over
+    core.atomic_write(lock, json.dumps({"pid": os.getpid(), "started_utc": utc_now().isoformat()}))
+    return lock
+
+
+def prune_forward_snapshots(keep: int = SNAPSHOT_RETENTION) -> int:
+    """Cap disk growth: the watcher creates one snapshot per cycle (~288/day)."""
+    import shutil
+
+    root = FORWARD_ROOT / "snapshots"
+    if not root.exists():
+        return 0
+    snaps = sorted(p for p in root.iterdir() if p.is_dir())
+    removed = 0
+    for old in snaps[:-keep] if keep > 0 else []:
+        validate_gen2_path(old)
+        shutil.rmtree(old, ignore_errors=True)
+        removed += 1
+    return removed
 
 
 def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float = 300.0,
@@ -338,8 +379,10 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
     candidate mismatch) aborts the watcher.
     """
     cdir = core.canary_dir(candidate_id)
+    lock = acquire_watch_lock(candidate_id)
     counters = {"cycles": 0, "cycle_errors": 0, "resolve_errors": 0, "decisions": 0,
-                "orders_submitted": 0, "outcomes_resolved": 0, "events_ingested": 0}
+                "orders_submitted": 0, "outcomes_resolved": 0, "events_ingested": 0,
+                "snapshots_pruned": 0}
     heartbeat: dict[str, Any] = {}
     while max_cycles is None or counters["cycles"] < max_cycles:
         cycle_started = utc_now().isoformat()
@@ -371,6 +414,11 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
             counters["resolve_errors"] += 1
             core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
                               {"type": "WATCH_RESOLVE_FAILED", "error": repr(exc)})
+        try:
+            counters["snapshots_pruned"] += prune_forward_snapshots()
+        except Exception as exc:
+            core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
+                              {"type": "WATCH_PRUNE_FAILED", "error": repr(exc)})
         counters["cycles"] += 1
         heartbeat = {
             "schema": "gen2_watch_heartbeat_v1",
@@ -385,6 +433,7 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
         core.atomic_write(cdir / "heartbeat.json", json.dumps(heartbeat, indent=2, default=json_default))
         if max_cycles is None or counters["cycles"] < max_cycles:
             sleep_fn(interval_seconds)
+    lock.unlink(missing_ok=True)
     return heartbeat
 
 

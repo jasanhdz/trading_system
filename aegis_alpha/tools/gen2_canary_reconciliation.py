@@ -26,8 +26,12 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         return []
     rows: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
+        if not line.strip():
+            continue
+        try:
             rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # torn trailing line after a power cut
     return rows
 
 

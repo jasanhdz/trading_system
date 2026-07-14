@@ -194,6 +194,67 @@ def test_pull_events_checkpoint_and_bridge_failure() -> None:
         assert r4["error"] == "BRIDGE_UNAVAILABLE" and r4["last_sequence"] == 3
 
 
+def test_token_burned_before_submit_and_unconfirmed_ack_incident() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = make_env(Path(t))
+        oc.write_contract(CID, "experimental", 200.0)
+        oc.create_arm_token(CID, 72, ["ADAUSDT"])
+        status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
+
+        def bridge_down(order):
+            return {"status": "BRIDGE_UNAVAILABLE", "reason": "NO_RESPONSE"}
+
+        s = run(env, live=True, status=status, execute=bridge_down)
+        assert s["orders_submitted"] == 0
+        # fail-closed: token was consumed BEFORE the wire attempt
+        assert oc.verify_arm_token(CID)[1] == "TOKEN_MAX_ORDERS_EXHAUSTED"
+        incidents = [json.loads(l) for l in (core.canary_dir(CID) / "incidents" / "incidents.jsonl").read_text().splitlines()]
+        assert any(i["type"] == "TOKEN_CONSUMED_WITHOUT_CONFIRMED_ACK" for i in incidents)
+
+
+def test_crash_mid_cycle_does_not_reemit_decisions() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = make_env(Path(t))
+        run(env)  # full cycle appends 3 decisions and persists per-symbol state
+        # simulate a crash-restart: fresh run over the same snapshot must re-emit nothing
+        s2 = run(env)
+        lines = (loop.FORWARD_ROOT / "forward_decisions.jsonl").read_text().splitlines()
+        assert s2["decisions"] == 0 and len(lines) == 3
+
+
+def test_watch_singleton_lock() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        make_env(Path(t))
+        lock = loop.acquire_watch_lock(CID)
+        try:
+            loop.acquire_watch_lock(CID)
+            raise AssertionError("second watcher must be refused")
+        except RuntimeError as exc:
+            assert "WATCHER_ALREADY_RUNNING" in str(exc)
+        # stale lock (dead pid) is taken over
+        core.atomic_write(lock, json.dumps({"pid": 999999999}))
+        lock2 = loop.acquire_watch_lock(CID)
+        assert lock2.exists()
+        lock2.unlink()
+
+
+def test_snapshot_pruning_keeps_recent() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        make_env(Path(t))
+        root = loop.FORWARD_ROOT / "snapshots"
+        root.mkdir(parents=True, exist_ok=True)
+        for i in range(15):
+            (root / f"2026071{i:02d}T000000Z").mkdir()
+        old_validate = loop.validate_gen2_path
+        loop.validate_gen2_path = lambda p: None  # tmp dirs live outside GEN2_ROOT
+        try:
+            removed = loop.prune_forward_snapshots(keep=12)
+        finally:
+            loop.validate_gen2_path = old_validate
+        assert removed == 3
+        assert len(list(root.iterdir())) == 12
+
+
 def test_environment_mismatch_vs_freeze_fails_before_unpickle() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = make_env(Path(t))
@@ -274,6 +335,10 @@ if __name__ == "__main__":
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()
     test_pull_events_checkpoint_and_bridge_failure()
+    test_token_burned_before_submit_and_unconfirmed_ack_incident()
+    test_crash_mid_cycle_does_not_reemit_decisions()
+    test_watch_singleton_lock()
+    test_snapshot_pruning_keeps_recent()
     test_environment_mismatch_vs_freeze_fails_before_unpickle()
     test_watch_runner_heartbeat_incidents_and_hard_stop()
     test_watch_kill_switch_blocks_live_but_paper_continues()

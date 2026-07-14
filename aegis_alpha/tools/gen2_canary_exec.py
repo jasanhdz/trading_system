@@ -233,7 +233,15 @@ class BinancePrivateReadOnlyAdapter:
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # torn trailing line after a power cut; append-only streams tolerate skip
+    return rows
 
 
 def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateReadOnlyAdapter | None = None,

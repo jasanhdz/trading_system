@@ -101,6 +101,17 @@ def test_fetch_failure_is_incident_not_crash() -> None:
         assert any(i["type"] == "OUTCOME_FETCH_FAILED" for i in incidents)
 
 
+def test_torn_trailing_line_is_skipped_not_fatal() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        tmp = Path(t)
+        decisions = setup(tmp)
+        write_decision(decisions, "2026-07-12 00:00:00")
+        with decisions.open("a") as f:
+            f.write('{"candidate_id": "gen2-test", "symbol": "ADA')  # power cut mid-append
+        s = resolver.resolve(CID, decisions, fake_fetch_factory(), pd.Timestamp("2026-07-12 02:00:00"))
+        assert s["resolved_new"] == 1  # the intact decision resolves; torn line ignored
+
+
 def test_paper_vs_live_join_via_live_orders_signal_id() -> None:
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
@@ -133,5 +144,6 @@ if __name__ == "__main__":
     test_resolver_computes_outcomes_and_is_idempotent()
     test_tail_label_from_spike()
     test_fetch_failure_is_incident_not_crash()
+    test_torn_trailing_line_is_skipped_not_fatal()
     test_paper_vs_live_join_via_live_orders_signal_id()
     print("test_gen2_forward_outcome_resolver: OK")
