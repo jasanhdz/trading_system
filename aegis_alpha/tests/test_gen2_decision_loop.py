@@ -157,10 +157,41 @@ def test_event_ingestion_dedup_and_pnl_wiring() -> None:
         assert core.kill_switch_engaged(CID) is True
 
 
+def test_pull_events_checkpoint_and_bridge_failure() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = make_env(Path(t))  # noqa: F841 - sets canary roots
+        oc.write_contract(CID, "safe", 200.0)
+        pages = {0: [{"type": "FILL", "client_order_id": "a", "ts_sequence": 1, "payload": {}},
+                     {"type": "POSITION_CLOSED", "client_order_id": "a", "ts_sequence": 2, "payload": {"realized_pnl": -0.5}}],
+                 2: [{"type": "BRACKET_CONFIRMED", "client_order_id": "a", "ts_sequence": 3, "payload": {}}]}
+        calls = []
+
+        def fake_fetch(after):
+            calls.append(after)
+            return pages.get(after, [])
+
+        r1 = loop.pull_events(CID, fake_fetch)
+        assert r1["pulled"] == 2 and r1["ingested"] == 2 and r1["last_sequence"] == 2
+        r2 = loop.pull_events(CID, fake_fetch)
+        assert calls == [0, 2]  # checkpoint advanced
+        assert r2["pulled"] == 1 and r2["last_sequence"] == 3
+        # re-delivery of already-seen events is deduped, checkpoint never regresses
+        pages[3] = pages[0]
+        r3 = loop.pull_events(CID, fake_fetch)
+        assert r3["ingested"] == 0 and r3["last_sequence"] == 3
+        # bridge failure -> incident, checkpoint untouched, no crash
+        def boom(after):
+            raise RuntimeError("down")
+
+        r4 = loop.pull_events(CID, boom)
+        assert r4["error"] == "BRIDGE_UNAVAILABLE" and r4["last_sequence"] == 3
+
+
 if __name__ == "__main__":
     test_paper_always_recorded_and_dedup()
     test_veto_blocks_live_but_paper_records()
     test_live_path_full_gauntlet_and_ack()
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()
+    test_pull_events_checkpoint_and_bridge_failure()
     print("test_gen2_decision_loop: OK")

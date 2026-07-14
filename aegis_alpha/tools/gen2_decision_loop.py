@@ -269,12 +269,41 @@ def ingest_events(candidate_id: str, events: list[dict[str, Any]]) -> dict[str, 
     return {"ingested": ingested, "total_seen": len(seen)}
 
 
+def pull_events(candidate_id: str, fetch_fn: Any = None) -> dict[str, Any]:
+    """Drain execution events from the TS bridge into the canary streams.
+
+    The consumed-sequence checkpoint persists across runs; ingest_events dedups
+    by (client_order_id, ts_sequence) so at-least-once delivery is safe.
+    """
+    cdir = core.canary_dir(candidate_id)
+    ckpt_path = cdir / "events_checkpoint.json"
+    ckpt = json.loads(ckpt_path.read_text()) if ckpt_path.exists() else {"last_sequence": 0}
+    try:
+        events = (fetch_fn or bridge.get_events)(int(ckpt["last_sequence"]))
+    except Exception as exc:
+        core.append_jsonl(cdir / "incidents" / "incidents.jsonl", {"type": "EVENTS_PULL_FAILED", "error": repr(exc)})
+        return {"pulled": 0, "ingested": 0, "last_sequence": ckpt["last_sequence"], "error": "BRIDGE_UNAVAILABLE"}
+    result = ingest_events(candidate_id, events)
+    if events:
+        # never regress on re-delivery of already-seen sequences
+        ckpt["last_sequence"] = max(int(ckpt["last_sequence"]), max(int(e.get("ts_sequence", 0)) for e in events))
+    core.atomic_write(ckpt_path, json.dumps(ckpt, indent=2))
+    return {"pulled": len(events), **result, "last_sequence": ckpt["last_sequence"]}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="GEN2 decision loop (manual; no PM2)")
     p.add_argument("--candidate-id", default=DEFAULT_CANDIDATE_ID)
     p.add_argument("--live", action="store_true", help="enable TS bridge submission path (still gated by token/contract/kill)")
+    p.add_argument("--pull-events", action="store_true", help="drain bridge execution events before the cycle")
+    p.add_argument("--events-only", action="store_true", help="only drain bridge events; skip the decision cycle")
     args = p.parse_args(argv)
-    print(json.dumps(run_cycle(args.candidate_id, live_enabled=args.live), indent=2, default=json_default)[:4000])
+    out: dict[str, Any] = {}
+    if args.pull_events or args.events_only:
+        out["events"] = pull_events(args.candidate_id)
+    if not args.events_only:
+        out["cycle"] = run_cycle(args.candidate_id, live_enabled=args.live)
+    print(json.dumps(out, indent=2, default=json_default)[:4000])
     return 0
 
 

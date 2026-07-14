@@ -63,6 +63,14 @@ def get_status(base_url: str = DEFAULT_BASE_URL, timeout: float = 5.0) -> dict[s
     return _request("GET", "/gen2/status", None, base_url, timeout)
 
 
+def get_events(after_sequence: int, base_url: str = DEFAULT_BASE_URL, timeout: float = 10.0) -> list[dict[str, Any]]:
+    page = _request("POST", "/gen2/events", {"after_sequence": int(after_sequence)}, base_url, timeout)
+    events = page.get("events")
+    if not isinstance(events, list):
+        raise BridgeUnavailable("EVENTS_PAGE_MALFORMED")
+    return events
+
+
 def post_execute(order: dict[str, Any], base_url: str = DEFAULT_BASE_URL, timeout: float = 10.0, retries: int = 2) -> dict[str, Any]:
     last: dict[str, Any] | None = None
     delay = 1.0
