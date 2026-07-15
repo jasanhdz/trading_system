@@ -306,6 +306,33 @@ def test_watch_runner_heartbeat_incidents_and_hard_stop() -> None:
         assert any(i["type"] == "WATCH_HARD_STOP_INTEGRITY" for i in incidents)
 
 
+def test_watch_notifications_severity_and_startup() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        make_env(Path(t))
+        oc.write_contract(CID, "safe", 200.0)
+        notes: list[tuple] = []
+
+        def note(cid, severity, title, body="", fingerprint=None):
+            notes.append((severity, title))
+            return {"sent": True}
+
+        # seed a connectivity incident (WARNING class) and a critical one before the cycle
+        core.append_jsonl(core.canary_dir(CID) / "incidents" / "incidents.jsonl", {"type": "EVENTS_PULL_FAILED", "error": "refused"})
+
+        def cycle_that_adds_critical_incident(cid, live_enabled=False):
+            core.append_jsonl(core.canary_dir(CID) / "incidents" / "incidents.jsonl", {"type": "ORPHAN_ORDER_ON_EXCHANGE"})
+            return {"decisions": 3, "orders_submitted": 0}
+
+        loop.run_watch(CID, interval_seconds=0.0, max_cycles=1, live_enabled=False,
+                       cycle_fn=cycle_that_adds_critical_incident, resolve_fn=lambda cid: {"resolved_new": 0},
+                       sleep_fn=lambda s: None, notify_fn=note)
+        titles = {(sev, title) for sev, title in notes}
+        # startup INFO always fires
+        assert any(sev == "INFO" and "ONLINE" in title for sev, title in titles)
+        # ORPHAN_ORDER_ON_EXCHANGE -> CRITICAL
+        assert any(sev == "CRITICAL" for sev, _ in notes)
+
+
 def test_watch_kill_switch_blocks_live_but_paper_continues() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = make_env(Path(t))
@@ -341,5 +368,6 @@ if __name__ == "__main__":
     test_snapshot_pruning_keeps_recent()
     test_environment_mismatch_vs_freeze_fails_before_unpickle()
     test_watch_runner_heartbeat_incidents_and_hard_stop()
+    test_watch_notifications_severity_and_startup()
     test_watch_kill_switch_blocks_live_but_paper_continues()
     print("test_gen2_decision_loop: OK")

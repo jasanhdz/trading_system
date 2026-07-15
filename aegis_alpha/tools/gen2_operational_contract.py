@@ -66,6 +66,20 @@ COMMON = {
     "pyramiding": False,
     "increase_after_losses": False,
     "scientific_freeze_untouched": True,
+    # Versioned OPERATIONAL feature flags — ALL OFF for the canary. Any of these
+    # ON would change the exit/exposure that ECON1 measured (fixed stop + H12
+    # time exit), so the canary would no longer validate the frozen economics.
+    # They are recorded in every contract so the state is auditable and a future
+    # flip is an explicit, versioned change (never a silent default).
+    "operational_flags": {
+        "trailing_stop": False,
+        "trailing_callback_pct": None,
+        "profit_protection": False,
+        "scale_in": False,
+        "scale_out": False,
+        "breakeven_move": False,
+        "flags_reason": "canary validates the frozen ECON1 exit (fixed stop + H12); enabling any of these alters exposure",
+    },
 }
 
 

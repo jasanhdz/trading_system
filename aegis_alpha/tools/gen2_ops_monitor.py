@@ -33,6 +33,9 @@ DEFAULT_CANDIDATE_ID = "gen2-20260711T202935Z"
 FORWARD_DECISIONS = GEN2_ROOT / "forward" / "forward_decisions.jsonl"
 HEARTBEAT_STALE_SECONDS = 1800  # 6 five-minute cycles with margin
 EVIDENCE_STALE_SECONDS = 7200
+CRITICAL_ALERTS = {"LOCAL_KILL_SWITCH_ENGAGED", "BRIDGE_KILL_SWITCH_ENGAGED",
+                   "PHASE_O_NOT_PAUSED", "BRIDGE_REPORTS_PHASE_O_UNPAUSED",
+                   "NEW_INCIDENTS_SINCE_LAST_CHECK"}
 
 
 def count_lines(path: Path) -> int:
@@ -69,7 +72,8 @@ def build_report(candidate_id: str = DEFAULT_CANDIDATE_ID, status_fn: Any = None
                  ping_fn: Any = None, now_epoch: float | None = None,
                  decisions_path: Path = FORWARD_DECISIONS,
                  expect_watch_running: bool = False,
-                 probe_bridge: bool = True, probe_binance: bool = True) -> dict[str, Any]:
+                 probe_bridge: bool = True, probe_binance: bool = True,
+                 notifier: Any = None) -> dict[str, Any]:
     cdir = core.canary_dir(candidate_id)
     now_epoch = now_epoch if now_epoch is not None else utc_now().timestamp()
     alerts: list[str] = []
@@ -165,6 +169,15 @@ def build_report(candidate_id: str = DEFAULT_CANDIDATE_ID, status_fn: Any = None
     core.atomic_write(out, json.dumps(report, indent=2, default=json_default))
     if alerts:
         core.append_jsonl(cdir / "alerts.jsonl", {"alerts": sorted(set(alerts)), "report": "monitor_report.json"})
+        if notifier is not None:
+            crit = sorted(set(alerts) & CRITICAL_ALERTS)
+            warn = sorted(set(alerts) - CRITICAL_ALERTS)
+            if crit:
+                notifier(candidate_id, "CRITICAL", "Monitor: alertas críticas", ", ".join(crit),
+                         fingerprint=f"monitor-crit-{'|'.join(crit)}")
+            if warn:
+                notifier(candidate_id, "WARNING", "Monitor: alertas", ", ".join(warn),
+                         fingerprint=f"monitor-warn-{'|'.join(warn)}")
     return report
 
 
@@ -175,9 +188,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="alert on missing/stale heartbeat and stalled evidence")
     p.add_argument("--no-bridge", action="store_true", help="skip the bridge probe")
     p.add_argument("--no-binance", action="store_true", help="skip the public Binance ping")
+    p.add_argument("--no-telegram", action="store_true", help="disable Telegram alert notifications")
     args = p.parse_args(argv)
+    notifier = None
+    if not args.no_telegram:
+        from aegis_alpha.tools.gen2_telegram import notify as notifier  # noqa: F811
     report = build_report(args.candidate_id, expect_watch_running=args.expect_watch_running,
-                          probe_bridge=not args.no_bridge, probe_binance=not args.no_binance)
+                          probe_bridge=not args.no_bridge, probe_binance=not args.no_binance,
+                          notifier=notifier)
     print(json.dumps(report, indent=2, default=json_default))
     return 0 if report["healthy"] else 1
 

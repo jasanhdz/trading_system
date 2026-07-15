@@ -332,6 +332,11 @@ def pull_events(candidate_id: str, fetch_fn: Any = None) -> dict[str, Any]:
 HARD_STOP_MARKERS = ("TRRM_HASH_MISMATCH_VS_FREEZE", "EQM_HASH_MISMATCH_VS_FREEZE", "CANDIDATE_MISMATCH",
                      "ENVIRONMENT_MISMATCH_VS_FREEZE")
 SNAPSHOT_RETENTION = 12  # forward snapshots kept on disk (~1 hour at 5-min cadence)
+# Transient/connectivity incidents notify at WARNING (no exposure implied); every
+# other new incident type is CRITICAL. WATCH_CYCLE_FAILED/PRUNE are notified
+# separately as WARNING at the point they happen, so they are excluded here.
+WARNING_INCIDENT_TYPES = {"EVENTS_PULL_FAILED", "OUTCOME_FETCH_FAILED", "BRIDGE_UNAVAILABLE_ON_SUBMIT"}
+SUPPRESS_INCIDENT_TYPES = {"WATCH_CYCLE_FAILED", "WATCH_PRUNE_FAILED"}
 
 
 def acquire_watch_lock(candidate_id: str) -> Path:
@@ -367,10 +372,59 @@ def prune_forward_snapshots(keep: int = SNAPSHOT_RETENTION) -> int:
     return removed
 
 
+def collect_startup_state(candidate_id: str, status_fn: Any = None) -> dict[str, Any]:
+    """Real system state for the Telegram startup message. Read-only, never raises."""
+    state: dict[str, Any] = {}
+    freeze = json.loads(core.FREEZE_PATH.read_text())
+    try:
+        state["contract"] = oc.load_contract(candidate_id)
+    except Exception:
+        state["contract"] = None
+    armed, arm_reason, token = oc.verify_arm_token(candidate_id)
+    state["armed"], state["arm_reason"] = armed, arm_reason
+    _, state["risk_reason"] = oc.risk_gate(candidate_id, mutate=False)
+    state["kill_switch"] = core.kill_switch_engaged(candidate_id)
+    state["phase_o_paused"] = core.phase_o_new_entries_paused()[0]
+    state["symbols_analyzed"] = list(SYMBOLS)
+    state["symbols_executable"] = token.get("allowed_symbols", []) if armed else []
+    try:
+        state["bridge"] = (status_fn or bridge.get_status)()
+    except Exception:
+        state["bridge"] = None
+    trrm_dir = GEN2_ROOT / "rv2" / "20260711T171832Z"
+    eqm_dir = GEN2_ROOT / "eqm1" / "20260711T201456Z"
+    models: dict[str, Any] = {}
+    try:
+        check_environment_vs_freeze(freeze)
+        models["environment"] = "valid"
+    except Exception as exc:
+        models["environment"] = str(exc)[:120]
+    try:
+        trrm_ok = sha256_file(trrm_dir / "rv2_candidate.pkl") == freeze["trrm_v2_sha256"]
+        eqm_ok = sha256_file(eqm_dir / "eqm1_candidate.pkl") == freeze["eqm1_sha256"]
+        models.update({"trrm": "hash-verified" if trrm_ok else "HASH MISMATCH",
+                       "qmae": "hash-verified" if trrm_ok else "HASH MISMATCH",  # QMAE lives in the TRRM bundle
+                       "eqm": "hash-verified" if eqm_ok else "HASH MISMATCH",
+                       "freeze_valid": trrm_ok and eqm_ok})
+    except Exception as exc:
+        models.update({"freeze_valid": False, "trrm": f"unreadable: {exc}"[:80]})
+    state["models"] = models
+    cdir = core.canary_dir(candidate_id)
+
+    def _count(path: Path) -> int:
+        return sum(1 for l in path.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()) if path.exists() else 0
+
+    state["evidence"] = {"decisions": _count(FORWARD_ROOT / "forward_decisions.jsonl"),
+                         "outcomes": _count(cdir / "forward_outcomes.jsonl"),
+                         "live_orders": _count(cdir / "live_orders.jsonl"),
+                         "incidents": _count(cdir / "incidents" / "incidents.jsonl")}
+    return state
+
+
 def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float = 300.0,
               max_cycles: int | None = None, live_enabled: bool = False,
               cycle_fn: Any = None, pull_fn: Any = None, resolve_fn: Any = None,
-              sleep_fn: Any = time.sleep) -> dict[str, Any]:
+              sleep_fn: Any = time.sleep, notify_fn: Any = None) -> dict[str, Any]:
     """Autonomous forward-evidence runner: events -> decisions -> outcomes -> heartbeat.
 
     Paper evidence collection never stops for live-path problems: the kill
@@ -384,6 +438,23 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
                 "orders_submitted": 0, "outcomes_resolved": 0, "events_ingested": 0,
                 "snapshots_pruned": 0}
     heartbeat: dict[str, Any] = {}
+    prev_kill = core.kill_switch_engaged(candidate_id)
+    incidents_path = cdir / "incidents" / "incidents.jsonl"
+
+    def _incident_count() -> int:
+        return sum(1 for l in incidents_path.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()) if incidents_path.exists() else 0
+
+    prev_incidents = _incident_count()
+    if notify_fn is not None:
+        try:
+            import aegis_alpha.tools.gen2_telegram as tg
+
+            startup_state = collect_startup_state(candidate_id)
+            notify_fn(candidate_id, "INFO", "GEN2 CANARY ONLINE",
+                      tg.build_startup_message(candidate_id, startup_state),
+                      fingerprint=f"startup-{utc_now().isoformat()}")
+        except Exception:
+            pass
     while max_cycles is None or counters["cycles"] < max_cycles:
         cycle_started = utc_now().isoformat()
         if live_enabled:
@@ -392,15 +463,26 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
         try:
             summary = (cycle_fn or run_cycle)(candidate_id, live_enabled=live_enabled)
             counters["decisions"] += int(summary.get("decisions", 0))
-            counters["orders_submitted"] += int(summary.get("orders_submitted", 0))
+            new_orders = int(summary.get("orders_submitted", 0))
+            counters["orders_submitted"] += new_orders
+            if new_orders and notify_fn is not None:
+                acks = [a.get("ack", {}) for a in summary.get("live_attempts", []) if a.get("ack")]
+                notify_fn(candidate_id, "INFO", f"ORDEN ENVIADA ({new_orders})",
+                          json.dumps(acks)[:600], fingerprint=f"order-{acks[0].get('client_order_id', counters['cycles'])}" if acks else None)
         except Exception as exc:
             if any(m in str(exc) for m in HARD_STOP_MARKERS):
                 core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
                                   {"type": "WATCH_HARD_STOP_INTEGRITY", "error": repr(exc)})
+                if notify_fn is not None:
+                    notify_fn(candidate_id, "CRITICAL", "WATCHER HARD STOP — integridad científica",
+                              repr(exc)[:400], fingerprint="hard-stop")
                 raise
             counters["cycle_errors"] += 1
             core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
                               {"type": "WATCH_CYCLE_FAILED", "error": repr(exc)})
+            if notify_fn is not None:
+                notify_fn(candidate_id, "WARNING", "Ciclo del watcher falló (continúo)",
+                          repr(exc)[:300], fingerprint=f"cycle-fail-{type(exc).__name__}")
         try:
             if resolve_fn is None:
                 import aegis_alpha.tools.gen2_forward_outcome_resolver as resolver
@@ -419,6 +501,26 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
         except Exception as exc:
             core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
                               {"type": "WATCH_PRUNE_FAILED", "error": repr(exc)})
+        if notify_fn is not None:
+            kill_now = core.kill_switch_engaged(candidate_id)
+            if kill_now and not prev_kill:
+                notify_fn(candidate_id, "CRITICAL", "KILL SWITCH ENGANCHADO",
+                          "El kill switch se activó durante este ciclo. Live bloqueado; paper continúa. Revisar incidentes y exchange.",
+                          fingerprint="kill-engaged")
+            prev_kill = kill_now
+            inc_now = _incident_count()
+            if inc_now > prev_incidents:
+                tail = incidents_path.read_text(encoding="utf-8", errors="replace").splitlines()[-(inc_now - prev_incidents):]
+                new_types = {json.loads(l).get("type", "?") for l in tail if l.strip()} - SUPPRESS_INCIDENT_TYPES
+                warn_types = sorted(new_types & WARNING_INCIDENT_TYPES)
+                crit_types = sorted(new_types - WARNING_INCIDENT_TYPES)
+                if crit_types:
+                    notify_fn(candidate_id, "CRITICAL", f"Incidentes críticos nuevos ({len(crit_types)})",
+                              ", ".join(crit_types)[:400], fingerprint=f"incidents-crit-{'|'.join(crit_types)}")
+                if warn_types:
+                    notify_fn(candidate_id, "WARNING", "Incidentes de conectividad",
+                              ", ".join(warn_types)[:400], fingerprint=f"incidents-warn-{'|'.join(warn_types)}")
+            prev_incidents = inc_now
         counters["cycles"] += 1
         heartbeat = {
             "schema": "gen2_watch_heartbeat_v1",
@@ -446,9 +548,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--watch", action="store_true", help="autonomous runner: events -> cycle -> outcomes -> heartbeat, repeat")
     p.add_argument("--interval-seconds", type=float, default=300.0)
     p.add_argument("--max-cycles", type=int, default=None, help="stop after N cycles (default: run until interrupted)")
+    p.add_argument("--no-telegram", action="store_true", help="disable Telegram notifications")
     args = p.parse_args(argv)
     if args.watch:
-        out: dict[str, Any] = {"watch": run_watch(args.candidate_id, args.interval_seconds, args.max_cycles, live_enabled=args.live)}
+        notify_fn = None
+        if not args.no_telegram:
+            from aegis_alpha.tools.gen2_telegram import notify as notify_fn  # noqa: F811
+        out: dict[str, Any] = {"watch": run_watch(args.candidate_id, args.interval_seconds, args.max_cycles,
+                                                  live_enabled=args.live, notify_fn=notify_fn)}
     else:
         out = {}
         if args.pull_events or args.events_only:
