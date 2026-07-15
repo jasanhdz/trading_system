@@ -107,7 +107,13 @@ def kill_switch_engaged(candidate_id: str) -> bool:
 
 
 def engage_kill_switch(candidate_id: str, reason: str) -> None:
+    """Idempotent: engaging an already-engaged kill switch preserves the original
+    file and does NOT re-log an incident. Without this, a periodic caller (the
+    reconciler, every 30 min) that keeps detecting the same unresolved exposure
+    would spam KILL_SWITCH_ENGAGED incidents and NEW_INCIDENTS Telegram alerts."""
     d = canary_dir(candidate_id)
+    if (d / "KILL_SWITCH").exists():
+        return  # already engaged; keep the original engaged_at/reason
     atomic_write(d / "KILL_SWITCH", json.dumps({"engaged_at": utc_now().isoformat(), "reason": reason}))
     append_jsonl(d / "incidents" / "incidents.jsonl", {"type": "KILL_SWITCH_ENGAGED", "reason": reason})
 

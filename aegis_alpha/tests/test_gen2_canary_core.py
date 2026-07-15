@@ -69,6 +69,15 @@ def test_gauntlet_fail_closed_chain() -> None:
             cc.engage_kill_switch(CID, "test")
             assert cc.kill_switch_engaged(CID) is True
             assert cc.canary_eligibility(CID, good_decision())[0] is False
+            # 7b) re-engaging is idempotent: no incident spam, original reason kept
+            inc_path = cc.canary_dir(CID) / "incidents" / "incidents.jsonl"
+            n_before = len(inc_path.read_text().splitlines()) if inc_path.exists() else 0
+            first = json.loads((cc.canary_dir(CID) / "KILL_SWITCH").read_text())
+            cc.engage_kill_switch(CID, "second-reason")
+            cc.engage_kill_switch(CID, "third-reason")
+            n_after = len(inc_path.read_text().splitlines()) if inc_path.exists() else 0
+            assert n_after == n_before  # no new incidents logged
+            assert json.loads((cc.canary_dir(CID) / "KILL_SWITCH").read_text())["reason"] == first["reason"]
             # 8) veto / NO_DECISION / non-finite are never eligible
             state = cc.canary_dir(CID) / "risk_state.json"
             state.write_text(json.dumps({"paused": False, "daily_loss": 0, "total_loss": 0, "consecutive_losses": 0, "day": "2026-07-12", "orders_sent": 0}))
