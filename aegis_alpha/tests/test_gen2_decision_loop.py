@@ -146,6 +146,72 @@ def test_stop_price_rounds_to_tick_size() -> None:
     assert abs(round(asp / 0.0001) * 0.0001 - asp) < 1e-9
 
 
+def _rank_env(tmp: Path, scores: dict) -> dict:
+    env = make_env(tmp)
+    loop.SYMBOLS = list(scores.keys())
+    # candle CSVs for every ranked symbol (the loop loads them before evaluating)
+    snap_dir = Path(env["snapshot"]["directory"])
+    n = 200
+    ts = pd.date_range("2026-07-12", periods=n, freq="5min")
+    for sym in scores:
+        pd.DataFrame({"timestamp": ts.astype(str), "open": 100.0, "high": 100.5, "low": 99.5, "close": 100.0,
+                      "volume": 10.0, "taker_buy_base_volume": 5.0, "open_time": (ts.astype("int64") // 10**6)}).to_csv(snap_dir / f"{sym}_5m.csv", index=False)
+    env["snapshot"] = {**env["snapshot"], "symbols": {s: {} for s in scores}}
+    orig = loop.evaluate_symbol
+
+    def fake_eval(symbol, candles, context, trrm, eqm, freeze):
+        return {"symbol": symbol, "ts": "2026-07-12 10:00:00", "candidate_id": CID,
+                "tail_score": 0.05, "qmae_q90": 0.1, "eqm_reg": scores[symbol], "eqm_clf": 0.7,
+                "eqm_score": scores[symbol], "vetoed_by_trrm": False,
+                "hypothetical_action": "CANDIDATE_SHORT", "signal_price": 100.0, "enforcement_action": "NONE"}
+
+    loop.evaluate_symbol = fake_eval
+    env["_restore"] = lambda: setattr(loop, "evaluate_symbol", orig)
+    return env
+
+
+def test_global_ranking_and_one_order_per_cycle() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88, "BTCUSDT": 0.61})
+        try:
+            oc.write_contract(CID, "experimental", 200.0)  # max_concurrent 3, max_orders_per_cycle 1
+            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT", "BTCUSDT"])
+            status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
+            sent = []
+            s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
+                               snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
+                               execute_fn=lambda o: sent.append(o) or {"status": "ACCEPTED", "client_order_id": o["client_order_id"]},
+                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+            # ranking is global by score, best first
+            assert [r["symbol"] for r in s["ranking"]] == ["ADAUSDT", "DOGEUSDT", "BTCUSDT"]
+            # exactly ONE order this cycle, and it is the highest score (ADA)
+            assert s["orders_submitted"] == 1 and len(sent) == 1 and sent[0]["symbol"] == "ADAUSDT"
+            # the rest are deferred, not opened
+            deferred = [a for a in s["live_attempts"] if a.get("reason") == "DEFERRED_ONE_ORDER_PER_CYCLE"]
+            assert {a["symbol"] for a in deferred} == {"DOGEUSDT", "BTCUSDT"}
+        finally:
+            env["_restore"]()
+
+
+def test_max_concurrent_positions_never_exceeded() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88})
+        try:
+            oc.write_contract(CID, "experimental", 200.0)  # max_concurrent 3
+            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT"])
+            # already 3 open -> no room, zero orders even with eligible opportunities
+            status = {"phase_o_allow_orders": False, "gen2_enabled": True,
+                      "open_positions": ["X", "Y", "Z"], "available_balance": 200.0}
+            s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
+                               snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
+                               execute_fn=lambda o: {"status": "ACCEPTED"},
+                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+            assert s["orders_submitted"] == 0
+            assert all(a["reason"] == "MAX_CONCURRENT_POSITIONS_REACHED" for a in s["live_attempts"] if a.get("eligible"))
+        finally:
+            env["_restore"]()
+
+
 def test_live_fail_closed_without_bridge_status() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = make_env(Path(t))
@@ -377,6 +443,8 @@ if __name__ == "__main__":
     test_veto_blocks_live_but_paper_records()
     test_live_path_full_gauntlet_and_ack()
     test_stop_price_rounds_to_tick_size()
+    test_global_ranking_and_one_order_per_cycle()
+    test_max_concurrent_positions_never_exceeded()
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()
     test_pull_events_checkpoint_and_bridge_failure()

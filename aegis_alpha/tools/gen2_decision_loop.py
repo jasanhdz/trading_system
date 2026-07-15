@@ -184,8 +184,9 @@ def gates_for_live(candidate_id: str, decision: dict[str, Any], token_symbols: l
         return False, "PHASE_O_NOT_PAUSED_PER_BRIDGE"
     if bridge_status.get("gen2_enabled") is not True:
         return False, "BRIDGE_GEN2_DISABLED"
-    if bridge_status.get("open_positions"):
-        return False, "MAX_CONCURRENT_POSITIONS_REACHED"
+    # NOTE: the max-concurrent-positions cap is enforced in the execution phase
+    # of run_cycle (count-based, against the live open-position count), not here.
+    # gates_for_live now answers only "is this a valid, armed opportunity?".
     return True, "ELIGIBLE"
 
 
@@ -228,7 +229,12 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         pass
 
     decisions: list[dict[str, Any]] = []
+    eligible_opps: list[dict[str, Any]] = []
     live_attempts: list[dict[str, Any]] = []
+    token_symbols = token.get("allowed_symbols", []) if token_ok else []
+
+    # Phase 1 — evaluate EVERY active symbol, record paper (always, independent of
+    # the live path), and collect the eligible opportunities for ranking.
     for symbol in snap["symbols"]:
         raw = load_snapshot_symbol(snap_dir, symbol).rename(columns={"taker_buy_base_volume": "buy_volume"})[SERIES_COLUMNS]
         decision = evaluate_symbol(symbol, raw, context, trrm, eqm, freeze)
@@ -239,47 +245,90 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         # persist per symbol: a crash mid-cycle must not re-emit already-appended candles
         core.atomic_write(state_path, json.dumps(state, indent=2))
         decisions.append(decision)
-        eligible, reason = gates_for_live(candidate_id, decision, token.get("allowed_symbols", []) if token_ok else [], bridge_status)
-        attempt: dict[str, Any] = {"symbol": symbol, "ts": decision.get("ts"), "eligible": eligible, "reason": reason}
-        if eligible and live_enabled and contract is not None:
-            try:
-                filters = (filters_fn or default_symbol_filters)(symbol)
-            except Exception:
-                filters = None
-            if filters is None:
-                attempt["reason"] = "FILTERS_UNAVAILABLE"  # fail-closed: never size with guessed filters
-                live_attempts.append(attempt)
-                continue
-            sizing = oc.compute_sizing(contract, decision["signal_price"], float(bridge_status.get("available_balance", 0) or 0), filters["step_size"], filters["min_notional"], filters.get("min_qty", 0.0))
-            attempt["sizing"] = sizing
-            if sizing["decision"] != "SIZED":
-                attempt["reason"] = sizing["reason"]
-            else:
-                order = build_decision_order(decision, sizing, token, tick_size=filters.get("tick_size"))
-                # Fail-closed ordering: burn the token BEFORE wiring the order. A crash
-                # between submit and consume could otherwise leave an ACCEPTED order
-                # with an unconsumed token -> a second live order past max_orders.
-                oc.consume_order(candidate_id)
-                ack = (execute_fn or bridge.post_execute)(order)
-                attempt["ack"] = ack
-                core.append_jsonl(cdir / "live_orders.jsonl", {"order": order, "ack": ack})
-                if ack.get("status") not in {"ACCEPTED", "ACCEPTED_DRYRUN", "DUPLICATE"}:
-                    core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
-                                      {"type": "TOKEN_CONSUMED_WITHOUT_CONFIRMED_ACK", "ack": ack,
-                                       "order": order["client_order_id"],
-                                       "operator_action": "verify on exchange before re-arming"})
-        elif eligible and not live_enabled:
+        eligible, reason = gates_for_live(candidate_id, decision, token_symbols, bridge_status)
+        if eligible:
+            eligible_opps.append(decision)
+        else:
+            live_attempts.append({"symbol": symbol, "ts": decision.get("ts"), "eligible": False,
+                                  "reason": reason, "score": decision.get("eqm_score")})
+
+    # Phase 2 — GLOBAL ranking by score, best first. Not iteration order, not
+    # per-symbol: the whole cross-symbol field competes on quality.
+    def _score(d: dict[str, Any]) -> float:
+        s = d.get("eqm_score")
+        return s if isinstance(s, (int, float)) and s == s else float("-inf")
+
+    eligible_opps.sort(key=_score, reverse=True)
+
+    # Phase 3 — sequential execution. At most max_orders_per_cycle (1) submitted
+    # this cycle, never exceeding max_concurrent open positions. Everything below
+    # the top is DEFERRED and re-evaluated fresh next cycle, so the system always
+    # opens the best opportunity available at that instant — never a batch of
+    # mediocre ones, never the next-in-list just because it was queued.
+    max_concurrent = int(contract.get("max_concurrent_positions", 1)) if contract else 1
+    max_per_cycle = int(contract.get("max_orders_per_cycle", 1)) if contract else 1
+    open_count = len(bridge_status.get("open_positions") or []) if bridge_status else 0
+    submitted_this_cycle = 0
+    for rank_idx, decision in enumerate(eligible_opps):
+        symbol = decision["symbol"]
+        attempt: dict[str, Any] = {"symbol": symbol, "ts": decision.get("ts"), "eligible": True,
+                                   "rank": rank_idx + 1, "score": decision.get("eqm_score")}
+        if not (live_enabled and contract is not None):
             attempt["reason"] = "WOULD_SUBMIT_LIVE_DISABLED"
+            live_attempts.append(attempt)
+            continue
+        if submitted_this_cycle >= max_per_cycle:
+            attempt["reason"] = "DEFERRED_ONE_ORDER_PER_CYCLE"
+            live_attempts.append(attempt)
+            continue
+        if open_count + submitted_this_cycle >= max_concurrent:
+            attempt["reason"] = "MAX_CONCURRENT_POSITIONS_REACHED"
+            live_attempts.append(attempt)
+            continue
+        try:
+            filters = (filters_fn or default_symbol_filters)(symbol)
+        except Exception:
+            filters = None
+        if filters is None:
+            attempt["reason"] = "FILTERS_UNAVAILABLE"  # fail-closed: never size with guessed filters
+            live_attempts.append(attempt)
+            continue
+        sizing = oc.compute_sizing(contract, decision["signal_price"], float(bridge_status.get("available_balance", 0) or 0), filters["step_size"], filters["min_notional"], filters.get("min_qty", 0.0))
+        attempt["sizing"] = sizing
+        if sizing["decision"] != "SIZED":
+            attempt["reason"] = sizing["reason"]  # not an order attempt -> next-best may still submit
+            live_attempts.append(attempt)
+            continue
+        order = build_decision_order(decision, sizing, token, tick_size=filters.get("tick_size"))
+        # Fail-closed ordering: burn the token BEFORE wiring the order. A crash
+        # between submit and consume could otherwise leave an ACCEPTED order
+        # with an unconsumed token -> a second live order past max_orders.
+        oc.consume_order(candidate_id)
+        submitted_this_cycle += 1  # this cycle's single-order budget is now spent
+        ack = (execute_fn or bridge.post_execute)(order)
+        attempt["ack"] = ack
+        attempt["reason"] = "SUBMITTED"
+        core.append_jsonl(cdir / "live_orders.jsonl", {"order": order, "ack": ack})
+        if ack.get("status") not in {"ACCEPTED", "ACCEPTED_DRYRUN", "DUPLICATE"}:
+            core.append_jsonl(cdir / "incidents" / "incidents.jsonl",
+                              {"type": "TOKEN_CONSUMED_WITHOUT_CONFIRMED_ACK", "ack": ack,
+                               "order": order["client_order_id"],
+                               "operator_action": "verify on exchange before re-arming"})
         live_attempts.append(attempt)
     core.atomic_write(state_path, json.dumps(state, indent=2))
     summary = {
-        "schema": "gen2_decision_loop_cycle_v1",
+        "schema": "gen2_decision_loop_cycle_v2",
         "candidate_id": candidate_id,
         "snapshot": snap.get("snapshot_id"),
         "decisions": len(decisions),
         "candidate_short": sum(1 for d in decisions if d.get("hypothetical_action") == "CANDIDATE_SHORT"),
         "vetoed": sum(1 for d in decisions if d.get("vetoed_by_trrm")),
         "no_decision": sum(1 for d in decisions if d.get("decision") == "NO_DECISION"),
+        "eligible_count": len(eligible_opps),
+        "ranking": [{"rank": i + 1, "symbol": d["symbol"], "score": d.get("eqm_score")} for i, d in enumerate(eligible_opps)],
+        "max_concurrent_positions": max_concurrent,
+        "max_orders_per_cycle": max_per_cycle,
+        "open_positions_at_cycle_start": open_count,
         "live_enabled": live_enabled,
         "live_attempts": live_attempts,
         "orders_submitted": sum(1 for a in live_attempts if a.get("ack", {}).get("status") == "ACCEPTED"),
