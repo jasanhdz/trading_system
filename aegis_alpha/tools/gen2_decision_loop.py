@@ -121,15 +121,31 @@ def default_symbol_filters(symbol: str) -> dict[str, Any] | None:
     f = info.get(symbol)
     if f is None:
         return None
-    return {"step_size": f.step_size, "min_notional": f.min_notional, "min_qty": f.min_qty}
+    return {"step_size": f.step_size, "min_notional": f.min_notional, "min_qty": f.min_qty, "tick_size": f.tick_size}
 
 
-def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token: dict[str, Any]) -> dict[str, Any]:
+def round_to_tick(price: float, tick_size: float) -> float:
+    """Round a price to the symbol's tick size. Binance rejects orders whose
+    price is not a multiple of the tick (this caused a real bracket failure on
+    DOGEUSDT when the stop was rounded to 8 decimals instead of the 5-decimal
+    tick), so the stop price MUST snap to the tick or the whole order aborts."""
+    if not tick_size or tick_size <= 0:
+        return round(price, 8)
+    import math
+
+    decimals = max(0, -int(round(math.log10(tick_size)))) if tick_size < 1 else 0
+    return round(round(price / tick_size) * tick_size, decimals + 2)
+
+
+def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token: dict[str, Any],
+                         tick_size: float | None = None) -> dict[str, Any]:
     from aegis_alpha.tools.gen2_canary_exec import deterministic_client_order_id
 
     signal_id = f"{decision['symbol']}-{decision['ts'].replace(' ', 'T')}"
     client_order_id = deterministic_client_order_id(decision["candidate_id"], signal_id, decision["symbol"], "SHORT")
     entry_price = decision["signal_price"]
+    raw_stop = entry_price * (1 + STOP_DISTANCE_PCT)
+    stop_price = round_to_tick(raw_stop, tick_size) if tick_size else round(raw_stop, 8)
     time_exit = str(pd.Timestamp(decision["ts"]) + pd.Timedelta(minutes=5 * (PRIMARY_HORIZON + 1)))
     return {
         "schema": "gen2_decision_order_v1",
@@ -143,7 +159,7 @@ def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token
         "leverage": sizing["leverage"],
         "margin_type": "ISOLATED",
         "entry": {"type": "MARKET"},
-        "brackets": {"stop_price": round(entry_price * (1 + STOP_DISTANCE_PCT), 8), "time_exit_at": time_exit, "reduce_only": True},
+        "brackets": {"stop_price": stop_price, "time_exit_at": time_exit, "reduce_only": True},
         "risk_context": {"max_loss_usd": sizing["per_stop_loss"], "arm_token_checksum": token.get("checksum")},
         "expires_at": str(pd.Timestamp(utc_now().isoformat()).tz_localize(None) + pd.Timedelta(seconds=60)),
     }
@@ -239,7 +255,7 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
             if sizing["decision"] != "SIZED":
                 attempt["reason"] = sizing["reason"]
             else:
-                order = build_decision_order(decision, sizing, token)
+                order = build_decision_order(decision, sizing, token, tick_size=filters.get("tick_size"))
                 # Fail-closed ordering: burn the token BEFORE wiring the order. A crash
                 # between submit and consume could otherwise leave an ACCEPTED order
                 # with an unconsumed token -> a second live order past max_orders.

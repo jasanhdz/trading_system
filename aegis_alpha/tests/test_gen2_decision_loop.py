@@ -77,7 +77,7 @@ def make_env(tmp: Path, tail_value: float = 0.05) -> dict:
 def run(env, live=False, status=None, execute=None):
     return loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=live,
                           snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
-                          execute_fn=execute, filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0})
+                          execute_fn=execute, filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
 
 
 def test_paper_always_recorded_and_dedup() -> None:
@@ -127,6 +127,23 @@ def test_live_path_full_gauntlet_and_ack() -> None:
         reasons = {a["reason"] for a in s2["live_attempts"]}
         # exhausted token yields empty allowed-symbols (fail-closed); either reason is the same block
         assert reasons & {"TOKEN_MAX_ORDERS_EXHAUSTED", "SYMBOL_NOT_IN_ARM_TOKEN"}
+
+
+def test_stop_price_rounds_to_tick_size() -> None:
+    # Regression: a stop rounded to 8 decimals (not the symbol tick) is rejected
+    # by Binance and the bracket fails. DOGE tick 0.00001 -> 5 decimals max.
+    decision = {"symbol": "DOGEUSDT", "ts": "2026-07-15 05:59:00", "candidate_id": CID, "signal_price": 0.07442}
+    sizing = {"quantity": 546, "leverage": 10, "per_stop_loss": 0.6}
+    order = loop.build_decision_order(decision, sizing, {"checksum": "x"}, tick_size=0.00001)
+    sp = order["brackets"]["stop_price"]
+    # must be a clean multiple of the tick (no 8-decimal residue like 0.07534345)
+    assert abs(round(sp / 0.00001) * 0.00001 - sp) < 1e-9
+    assert len(str(sp).split(".")[-1]) <= 5
+    assert sp > 0.07442  # short stop above entry
+    # ADA tick 0.0001
+    ada = loop.build_decision_order({**decision, "symbol": "ADAUSDT", "signal_price": 0.1633}, sizing, {"checksum": "x"}, tick_size=0.0001)
+    asp = ada["brackets"]["stop_price"]
+    assert abs(round(asp / 0.0001) * 0.0001 - asp) < 1e-9
 
 
 def test_live_fail_closed_without_bridge_status() -> None:
@@ -346,7 +363,7 @@ def test_watch_kill_switch_blocks_live_but_paper_continues() -> None:
                                 cid, env["trrm_dir"], env["eqm_dir"], live_enabled=live_enabled,
                                 snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
                                 execute_fn=lambda o: submitted.append(o) or {"status": "ACCEPTED"},
-                                filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0}),
+                                filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001}),
                             pull_fn=lambda cid: {"ingested": 0},
                             resolve_fn=lambda cid: {"resolved_new": 0}, sleep_fn=lambda s: None)
         assert submitted == []  # kill switch blocks the live path
@@ -359,6 +376,7 @@ if __name__ == "__main__":
     test_paper_always_recorded_and_dedup()
     test_veto_blocks_live_but_paper_records()
     test_live_path_full_gauntlet_and_ack()
+    test_stop_price_rounds_to_tick_size()
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()
     test_pull_events_checkpoint_and_bridge_failure()
