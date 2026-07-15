@@ -154,16 +154,27 @@ def load_contract(candidate_id: str) -> dict[str, Any]:
     return contract
 
 
-def create_arm_token(candidate_id: str, expiry_hours: int, allowed_symbols: list[str]) -> dict[str, Any]:
-    """Single token schema. Bound to candidate + mode + contract hash."""
+def create_arm_token(candidate_id: str, expiry_hours: int, allowed_symbols: list[str],
+                     max_orders: int | None = None) -> dict[str, Any]:
+    """Single token schema. Bound to candidate + mode + contract hash.
+
+    max_orders defaults to the contract's first_arm_max_orders (the conservative
+    first-arm cap of 1). To run the multi-position policy the owner passes a
+    larger value, but never above the contract's max_concurrent_positions —
+    the token can never authorize more open positions than the contract allows.
+    """
     contract = load_contract(candidate_id)
+    cap = int(contract["first_arm_max_orders"]) if max_orders is None else int(max_orders)
+    max_positions = int(contract.get("max_concurrent_positions", 1))
+    if cap < 1 or cap > max_positions:
+        raise ValueError(f"max_orders {cap} must be in [1, max_concurrent_positions={max_positions}]")
     body = {
         "schema": "gen2_arm_token_v3",
         "candidate_id": candidate_id,
         "mode": contract["mode"],
         "contract_sha256": hashlib.sha256(contract_path(candidate_id).read_bytes()).hexdigest(),
         "allowed_symbols": sorted(s.upper() for s in allowed_symbols),
-        "max_orders": contract["first_arm_max_orders"],
+        "max_orders": cap,
         "expires_at_epoch": utc_now().timestamp() + expiry_hours * 3600,
         "consumed_orders": 0,
     }
@@ -338,6 +349,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--initial-equity", type=float, required=False)
     p.add_argument("--expiry-hours", type=int, default=72)
     p.add_argument("--allowed-symbols", default="ADAUSDT,DOGEUSDT")
+    p.add_argument("--max-orders", type=int, default=None,
+                   help="token order cap (default: contract first_arm_max_orders=1; up to max_concurrent_positions)")
     p.add_argument("--force", action="store_true")
     args = p.parse_args(argv)
     if args.mode_op == "write-contract":
@@ -345,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--initial-equity required")
         out = write_contract(args.candidate_id, args.mode, args.initial_equity, args.force)
     elif args.mode_op == "create-arm-token":
-        out = create_arm_token(args.candidate_id, args.expiry_hours, args.allowed_symbols.split(","))
+        out = create_arm_token(args.candidate_id, args.expiry_hours, args.allowed_symbols.split(","), args.max_orders)
         out = {**out, "warning": "HUMAN ACTION ONLY"}
     else:
         ok, reason, token = verify_arm_token(args.candidate_id)

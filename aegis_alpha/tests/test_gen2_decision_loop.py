@@ -170,12 +170,26 @@ def _rank_env(tmp: Path, scores: dict) -> dict:
     return env
 
 
+def test_ranking_is_populated_even_in_paper_mode() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88, "BTCUSDT": 0.61})
+        try:
+            s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=False,
+                               snapshot_fn=lambda: env["snapshot"])
+            # ranking reflects the full candidate field by quality, no live path needed
+            assert [r["symbol"] for r in s["ranking"]] == ["ADAUSDT", "DOGEUSDT", "BTCUSDT"]
+            assert s["ranked_candidates"] == 3 and s["orders_submitted"] == 0
+        finally:
+            env["_restore"]()
+
+
 def test_global_ranking_and_one_order_per_cycle() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88, "BTCUSDT": 0.61})
         try:
             oc.write_contract(CID, "experimental", 200.0)  # max_concurrent 3, max_orders_per_cycle 1
-            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT", "BTCUSDT"])
+            # multi-order token (3) so the DEFERRED path is exercised, not token exhaustion
+            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT", "BTCUSDT"], max_orders=3)
             status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
             sent = []
             s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
@@ -186,9 +200,29 @@ def test_global_ranking_and_one_order_per_cycle() -> None:
             assert [r["symbol"] for r in s["ranking"]] == ["ADAUSDT", "DOGEUSDT", "BTCUSDT"]
             # exactly ONE order this cycle, and it is the highest score (ADA)
             assert s["orders_submitted"] == 1 and len(sent) == 1 and sent[0]["symbol"] == "ADAUSDT"
-            # the rest are deferred, not opened
+            # the rest are deferred to next cycle, not opened now
             deferred = [a for a in s["live_attempts"] if a.get("reason") == "DEFERRED_ONE_ORDER_PER_CYCLE"]
             assert {a["symbol"] for a in deferred} == {"DOGEUSDT", "BTCUSDT"}
+        finally:
+            env["_restore"]()
+
+
+def test_first_arm_token_caps_total_orders_at_one() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88})
+        try:
+            oc.write_contract(CID, "experimental", 200.0)
+            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT"])  # default max_orders=1
+            status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
+            sent = []
+            s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
+                               snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
+                               execute_fn=lambda o: sent.append(o) or {"status": "ACCEPTED", "client_order_id": o["client_order_id"]},
+                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+            # best (ADA) submits; the 1-order token is then exhausted for DOGE
+            assert s["orders_submitted"] == 1 and sent[0]["symbol"] == "ADAUSDT"
+            reasons = {a["symbol"]: a["reason"] for a in s["live_attempts"]}
+            assert reasons.get("DOGEUSDT") == "TOKEN_MAX_ORDERS_EXHAUSTED"
         finally:
             env["_restore"]()
 
@@ -443,7 +477,9 @@ if __name__ == "__main__":
     test_veto_blocks_live_but_paper_records()
     test_live_path_full_gauntlet_and_ack()
     test_stop_price_rounds_to_tick_size()
+    test_ranking_is_populated_even_in_paper_mode()
     test_global_ranking_and_one_order_per_cycle()
+    test_first_arm_token_caps_total_orders_at_one()
     test_max_concurrent_positions_never_exceeded()
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()
