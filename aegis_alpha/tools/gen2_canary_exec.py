@@ -470,12 +470,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidate-id", default=DEFAULT_CANDIDATE_ID)
     parser.add_argument("--public-market-data", action="store_true")
     parser.add_argument("--private-read", action="store_true")
+    parser.add_argument("--loop", action="store_true", help="always-on: repeat every --interval-seconds")
+    parser.add_argument("--interval-seconds", type=float, default=1800.0)
     args = parser.parse_args(argv)
-    if args.mode == "second-opinion":
-        payload = second_opinion_reconciliation(args.candidate_id)
-    else:
-        payload = dry_run(args.candidate_id, use_public=args.public_market_data, private_read=args.private_read)
-    print(json.dumps(payload, indent=2, default=json_default))
+    # Reuse the bot's existing Binance credentials for the private read-only
+    # reconciliation (never duplicated, never printed).
+    core.load_shared_env(("BINANCE_FUTURES_API_KEY", "BINANCE_API_KEY",
+                          "BINANCE_FUTURES_API_SECRET", "BINANCE_API_SECRET"))
+
+    def once() -> dict[str, Any]:
+        if args.mode == "second-opinion":
+            return second_opinion_reconciliation(args.candidate_id)
+        return dry_run(args.candidate_id, use_public=args.public_market_data, private_read=args.private_read)
+
+    if args.loop:
+        while True:
+            payload = once()
+            print(json.dumps({"status": payload.get("status"), "recorded_at": payload.get("recorded_at_utc")}, default=json_default), flush=True)
+            time.sleep(args.interval_seconds)
+    print(json.dumps(once(), indent=2, default=json_default))
     return 0
 
 

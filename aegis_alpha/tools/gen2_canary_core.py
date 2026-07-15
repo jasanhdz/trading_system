@@ -35,6 +35,34 @@ def _oc():
     return oc
 
 
+def load_shared_env(keys: tuple[str, ...]) -> dict[str, bool]:
+    """Reuse the TS bot's existing credentials for Python callers under PM2.
+
+    Populates os.environ with the named keys, reading .env.gen2 then the bot's
+    .env, WITHOUT overriding anything already set and WITHOUT printing values.
+    Mirrors the bridge's dotenv reuse so Binance/Telegram secrets live in a
+    single source and are never duplicated into GEN2 config or git.
+    """
+    import os
+
+    result = {k: bool(os.environ.get(k)) for k in keys}
+    ts_repo = REPO / "binance-futures-bot-ts"
+    for env_file in (ts_repo / ".env.gen2", ts_repo / ".env"):
+        if not env_file.exists():
+            continue
+        try:
+            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                for k in keys:
+                    if not os.environ.get(k) and line.startswith(f"{k}="):
+                        val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        if val:
+                            os.environ[k] = val
+                            result[k] = True
+        except Exception:
+            continue
+    return result
+
+
 def canary_dir(candidate_id: str) -> Path:
     d = CANARY_ROOT / candidate_id
     validate_gen2_path(d)

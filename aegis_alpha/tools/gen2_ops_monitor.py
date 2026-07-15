@@ -189,13 +189,27 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-bridge", action="store_true", help="skip the bridge probe")
     p.add_argument("--no-binance", action="store_true", help="skip the public Binance ping")
     p.add_argument("--no-telegram", action="store_true", help="disable Telegram alert notifications")
+    p.add_argument("--loop", action="store_true", help="always-on: re-check every --interval-seconds")
+    p.add_argument("--interval-seconds", type=float, default=900.0)
     args = p.parse_args(argv)
+    # Reuse the bot's GEN2_BRIDGE_SECRET for the signed bridge probe under PM2.
+    core.load_shared_env(("GEN2_BRIDGE_SECRET",))
     notifier = None
     if not args.no_telegram:
         from aegis_alpha.tools.gen2_telegram import notify as notifier  # noqa: F811
-    report = build_report(args.candidate_id, expect_watch_running=args.expect_watch_running,
-                          probe_bridge=not args.no_bridge, probe_binance=not args.no_binance,
-                          notifier=notifier)
+
+    def once() -> dict[str, Any]:
+        return build_report(args.candidate_id, expect_watch_running=args.expect_watch_running,
+                            probe_bridge=not args.no_bridge, probe_binance=not args.no_binance,
+                            notifier=notifier)
+
+    if args.loop:
+        import time as _time
+        while True:
+            report = once()
+            print(json.dumps({"checked_at": report["checked_at_utc"], "healthy": report["healthy"], "alerts": report["alerts"]}, default=json_default), flush=True)
+            _time.sleep(args.interval_seconds)
+    report = once()
     print(json.dumps(report, indent=2, default=json_default))
     return 0 if report["healthy"] else 1
 
