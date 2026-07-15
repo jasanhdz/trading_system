@@ -414,9 +414,30 @@ def collect_startup_state(candidate_id: str, status_fn: Any = None) -> dict[str,
     def _count(path: Path) -> int:
         return sum(1 for l in path.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()) if path.exists() else 0
 
-    state["evidence"] = {"decisions": _count(FORWARD_ROOT / "forward_decisions.jsonl"),
+    def _rows(path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        out = []
+        for l in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if l.strip():
+                try:
+                    out.append(json.loads(l))
+                except Exception:
+                    pass
+        return out
+
+    # live_orders.jsonl mixes legacy dry-run attempts and decision-loop submissions;
+    # separate the four honestly (never count a dry-run as a real order).
+    lo = _rows(cdir / "live_orders.jsonl")
+    real_submissions = sum(1 for r in lo if (r.get("ack") or {}).get("status") == "ACCEPTED")
+    dryrun_requests = sum(1 for r in lo if (r.get("ack") or {}).get("status") == "ACCEPTED_DRYRUN"
+                          or r.get("dry_run") is True or r.get("order_action") in ("NO_ORDER", "SUBMIT_ORDER"))
+    real_fills = sum(1 for r in _rows(cdir / "fills.jsonl") if r.get("type") in (None, "FILL"))
+    state["evidence"] = {"paper_decisions": _count(FORWARD_ROOT / "forward_decisions.jsonl"),
                          "outcomes": _count(cdir / "forward_outcomes.jsonl"),
-                         "live_orders": _count(cdir / "live_orders.jsonl"),
+                         "dryrun_requests": dryrun_requests,
+                         "real_order_submissions": real_submissions,
+                         "real_fills": real_fills,
                          "incidents": _count(cdir / "incidents" / "incidents.jsonl")}
     return state
 

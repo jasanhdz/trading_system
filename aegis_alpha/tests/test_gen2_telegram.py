@@ -81,11 +81,11 @@ def test_startup_message_reflects_real_state_without_secrets() -> None:
             "symbols_analyzed": ["BTCUSDT", "ADAUSDT"], "symbols_executable": [],
             "bridge": {"gen2_enabled": True, "execution_enabled": False, "available_balance": None, "open_positions": []},
             "models": {"freeze_valid": True, "environment": "valid", "trrm": "hash-verified", "qmae": "hash-verified", "eqm": "hash-verified"},
-            "evidence": {"decisions": 33, "outcomes": 22, "live_orders": 0, "incidents": 0},
+            "evidence": {"paper_decisions": 33, "outcomes": 22, "dryrun_requests": 5, "real_order_submissions": 0, "real_fills": 0, "incidents": 0},
         }
         msg = tg.build_startup_message(CID, state)
         for needle in ("GEN2 CANARY ONLINE", "EXPERIMENTAL", "Armed: NO", "PAUSED", "hash-verified",
-                       "Decisiones: 33", "dry-run", "Ninguna", "BTC ADA"):
+                       "Paper decisions: 33", "Órdenes reales: 0", "Fills reales: 0", "dry-run", "Ninguna", "BTC ADA"):
             assert needle in msg, f"missing: {needle}"
         assert "secret" not in msg.lower()
 
