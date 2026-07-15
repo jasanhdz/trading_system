@@ -57,7 +57,12 @@ MODES: dict[str, dict[str, Any]] = {
 }
 COMMON = {
     "margin_type": "ISOLATED",
-    "max_concurrent_positions": 1,
+    # Multi-symbol sequential policy: up to 3 concurrent positions, but only ONE
+    # order opened per decision cycle so the ranking is re-evaluated fresh between
+    # each open (never a batch of mediocre entries). The decision loop enforces
+    # both. The FIRST arm token still caps total orders at first_arm_max_orders.
+    "max_concurrent_positions": 3,
+    "max_orders_per_cycle": 1,
     "max_new_positions_per_30min": 1,
     "first_arm_max_orders": 1,
     "stop_distance_pct": STOP_DISTANCE_PCT,
