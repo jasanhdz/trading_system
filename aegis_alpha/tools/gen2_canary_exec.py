@@ -267,9 +267,15 @@ def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateRead
     # local-stream consistency (does not need exchange access)
     fill_rows = [r for r in _read_jsonl(cdir / "fills.jsonl") if r.get("type") in (None, "FILL")]
     fill_counts: dict[str, int] = {}
+    fill_symbol: dict[str, str] = {}
     for r in fill_rows:
         coid = str(r.get("client_order_id"))
         fill_counts[coid] = fill_counts.get(coid, 0) + 1
+    for r in local_orders:
+        order = r.get("order") or {}
+        coid = order.get("client_order_id") or r.get("client_order_id")
+        if coid and order.get("symbol"):
+            fill_symbol[str(coid)] = str(order["symbol"])
     duplicated_fills = sorted(c for c, n in fill_counts.items() if n > 1)
     if duplicated_fills:
         incidents.append("DUPLICATED_FILLS")
@@ -277,11 +283,13 @@ def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateRead
     bracket_ok_ids = {str(r.get("client_order_id")) for r in _read_jsonl(cdir / "brackets.jsonl")
                       if r.get("ok") is True or r.get("type") == "BRACKET_CONFIRMED"}
     missing_brackets = sorted(set(fill_counts) - bracket_ok_ids)
-    if missing_brackets:
-        incidents.append("FILL_WITHOUT_CONFIRMED_BRACKET")
-        details["missing_brackets"] = missing_brackets
 
     if not adapter.available:
+        # Unverifiable: cannot confirm the position is closed -> keep this fail-safe
+        # (unchanged behavior: an unresolved historical fill still raises the incident).
+        if missing_brackets:
+            incidents.append("FILL_WITHOUT_CONFIRMED_BRACKET")
+            details["missing_brackets"] = missing_brackets
         record = {"schema": "gen2_second_opinion_v2", "candidate_id": candidate_id,
                   "status": "PRIVATE_READ_UNAVAILABLE", "incidents": incidents, **details,
                   "local_order_ids": sorted(local_ids), "recorded_at_utc": utc_now().isoformat()}
@@ -294,6 +302,20 @@ def second_opinion_reconciliation(candidate_id: str, adapter: BinancePrivateRead
         pos for rows in snapshot.get("positions", {}).values() for pos in rows
         if abs(float(pos.get("positionAmt", 0) or 0)) > 0
     ]
+    open_symbols_now = {str(p.get("symbol")) for p in exchange_positions}
+    # A fill missing a confirmed bracket is only a LIVE risk if that symbol's
+    # position is still open right now (ground truth from the exchange). A fill
+    # whose position is verifiably CLOSED (e.g. resolved by an emergency close or
+    # a later manual/cross-strategy close) no longer needs protection — flagging
+    # it forever would be a permanent false FAIL_CLOSED signal (alarm fatigue)
+    # for a genuinely healthy system. Still fully recorded either way (details),
+    # never hidden — only its effect on the fail-closed status/kill changes.
+    live_missing_brackets = [c for c in missing_brackets if fill_symbol.get(c) in open_symbols_now]
+    if missing_brackets:
+        details["missing_brackets"] = missing_brackets
+        details["missing_brackets_resolved_position_closed"] = sorted(set(missing_brackets) - set(live_missing_brackets))
+    if live_missing_brackets:
+        incidents.append("FILL_WITHOUT_CONFIRMED_BRACKET")
     gen2_exchange_orders = {o for o in exchange_orders if o and o.startswith("GEN2-")}
     orphan_orders = sorted(gen2_exchange_orders - local_ids)
     if orphan_orders:

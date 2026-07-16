@@ -116,12 +116,38 @@ def test_second_opinion_detects_duplicated_fills_and_missing_brackets() -> None:
             f.write(json.dumps({"type": "FILL", "client_order_id": "GEN2-nobracket", "ts_sequence": 3}) + "\n")
         with (cdir / "brackets.jsonl").open("a") as f:
             f.write(json.dumps({"ok": True, "client_order_id": "GEN2-dup"}) + "\n")
-        r = ex.second_opinion_reconciliation(CID, FakePrivateAdapter())
+        with (cdir / "live_orders.jsonl").open("a") as f:
+            f.write(json.dumps({"order": {"client_order_id": "GEN2-nobracket", "symbol": "ADAUSDT"}}) + "\n")
+        # the symbol's position is CURRENTLY open on the exchange -> real live risk
+        adapter = FakePrivateAdapter(positions={"ADAUSDT": [{"symbol": "ADAUSDT", "positionAmt": "-10"}]})
+        r = ex.second_opinion_reconciliation(CID, adapter)
         assert "DUPLICATED_FILLS" in r["incidents"]
         assert "FILL_WITHOUT_CONFIRMED_BRACKET" in r["incidents"]
         assert r["duplicated_fills"] == ["GEN2-dup"]
         assert r["missing_brackets"] == ["GEN2-nobracket"]
-        assert core.kill_switch_engaged(CID) is False  # incidents but no exposure -> no kill
+        assert core.kill_switch_engaged(CID) is True  # exposure IS open -> kill engages
+
+
+def test_second_opinion_does_not_reflag_a_resolved_historical_fill_forever() -> None:
+    # Regression: a fill that once lacked a confirmed bracket but whose position
+    # is now verifiably CLOSED on the exchange must not keep tripping
+    # RECONCILIATION_FAIL_CLOSED / kill forever (permanent false alarm).
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        cdir = core.canary_dir(CID)
+        with (cdir / "fills.jsonl").open("a") as f:
+            f.write(json.dumps({"type": "FILL", "client_order_id": "GEN2-old-closed", "ts_sequence": 1}) + "\n")
+        with (cdir / "live_orders.jsonl").open("a") as f:
+            f.write(json.dumps({"order": {"client_order_id": "GEN2-old-closed", "symbol": "DOGEUSDT"}}) + "\n")
+        # no position open for DOGEUSDT right now (0 exposure, ground truth)
+        adapter = FakePrivateAdapter(positions={})
+        r = ex.second_opinion_reconciliation(CID, adapter)
+        assert "FILL_WITHOUT_CONFIRMED_BRACKET" not in r["incidents"]
+        assert r["status"] == "RECONCILED"
+        # still fully recorded, never hidden — just not incident-worthy anymore
+        assert r["missing_brackets"] == ["GEN2-old-closed"]
+        assert r["missing_brackets_resolved_position_closed"] == ["GEN2-old-closed"]
+        assert core.kill_switch_engaged(CID) is False
 
 
 def test_second_opinion_detects_leverage_margin_and_balance_drift() -> None:
@@ -180,6 +206,7 @@ if __name__ == "__main__":
     test_second_opinion_flags_orphans_and_kills_on_exposure()
     test_second_opinion_without_credentials_is_recorded_not_silent()
     test_second_opinion_detects_duplicated_fills_and_missing_brackets()
+    test_second_opinion_does_not_reflag_a_resolved_historical_fill_forever()
     test_second_opinion_detects_leverage_margin_and_balance_drift()
     test_dry_run_uses_unified_contract_and_submits_nothing()
     test_phase_o_yaml_parser_single_source()
