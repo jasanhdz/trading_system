@@ -125,6 +125,27 @@ No existe ningún comando de desarme en el código: es intencional.
 - Alertas acumuladas: `CDIR/alerts.jsonl` (append-only). Reporte vivo: `CDIR/monitor_report.json`.
 - Streams append-only auditables: `forward_decisions.jsonl`, `live_orders.jsonl`, `fills.jsonl`, `brackets.jsonl`, `reconciliations.jsonl`, `incidents/incidents.jsonl`, `forward_outcomes.jsonl`, `alerts.jsonl`, `contract_history.jsonl`, bridge `events_outbox.jsonl`.
 
+## 8. Selection Policy (umbral congelado)
+
+**Qué es.** La regla que decide si un ciclo abre o se abstiene. Vive en `GEN2_SELECTION_POLICY.json` (junto al freeze) y es parte de la ciencia congelada.
+
+**Flujo por ciclo:** 11 símbolos → veto TRRM (abstiene si `tail ≥ 0.1017`) → EQM score de los supervivientes → **ranking global** → se toma el mejor → se compara contra el **umbral absoluto congelado** (`threshold_value = 0.01432240`). Si el mejor lo supera → abre. Si no → `NO_DECISION` con motivo `BELOW_FROZEN_EQM_THRESHOLD`, se registra en paper (`selection_outcomes.jsonl`) y espera la siguiente vela.
+
+**Por qué NO usamos `score > 0`.** El cero del score de EQM (reg_component) **no es** el breakeven económico — es un valor arbitrario. Usar `>0` no corresponde a nada que ECON1 haya validado.
+
+**Por qué NO usamos best-of-cycle sin filtro.** Abrir "el mejor de cada ciclo" aunque todos sean negativos toma trades de expectativa negativa que ECON1 nunca midió; sangraría capital y contaminaría la pregunta científica "¿aguanta el edge?".
+
+**Por qué el umbral congelado.** ECON1 validó tomar el **top-decil por EQM score** del pool veto-retenido (`budget_n = round(0.10 × keep_n)`, TOPK=0.10, edge +$0.140/trade). El umbral es exactamente ese top-decil expresado como un número absoluto: `quantile_0.90(s_eqm | supervivientes-del-veto del dev H12 congelado)`. Es **market-independent**, no se recalcula, no se adapta.
+
+**Qué garantiza científicamente.** El canary abre **solo** los trades de alta calidad que ECON1 midió, reproduciendo su régimen de selección. Cuando el mercado no ofrece señal top-decil (como ahora — mejor score ~+0.002 < 0.0143), **abstenerse es lo correcto**, no un fallo.
+
+**Comandos:**
+- `gen2_selection_policy.py --mode freeze` — congela el umbral (inmutable; verifica todos los hashes vs freeze).
+- `gen2_selection_policy.py --mode validate-selection-policy` — **recomputa desde cero** y compara (drift debe ser 0); hard stop si algo cambió (dataset/EQM/candidate/threshold). Correr antes de cada re-armado.
+- `gen2_decision_loop.py --dry-run-cycle` — un ciclo paper mostrando ranking, scores, umbral, ganador, abre/no-abre y motivo. Sin órdenes.
+
+**Fail-closed:** el loop carga el umbral verificando candidate + los 4 hashes contra el freeze en cada arranque; un policy ausente o con hash distinto es **hard stop** del watcher (marcadores `SELECTION_POLICY_*`), igual que un mismatch de modelo — nunca opera con una política de selección no validada.
+
 ## 7. Límites conocidos (aceptados para el canary, documentados)
 - El monitor no envía Telegram/email por sí mismo; el operador ejecuta o programa el cron (decisión: cero secretos nuevos en Python).
 - El time-exit H12 lo ejecuta el bridge TS (scheduler de 30s, corre incluso con kill switch porque reduce riesgo). El PnL del time-exit es un **estimado** (entry fill vs close fill, sin fees); PnL desconocido (stop/manual) genera `POSITION_CLOSED_UNKNOWN_PNL_REQUIRES_OPERATOR` — el operador registra el PnL real de Binance y ajusta `risk_state.json` a mano si difiere materialmente.
