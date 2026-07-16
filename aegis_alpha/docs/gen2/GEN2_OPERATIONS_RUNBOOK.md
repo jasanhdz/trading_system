@@ -1,6 +1,25 @@
 # GEN2 — Operations Runbook, Deployment Checklist & Recovery Procedures
 
-**Status:** ops-runbook-v2.0 (2026-07-14, always-on) · Candidate `gen2-20260711T202935Z` · Owner: Jasan
+**Status:** ops-runbook-v3.0 (2026-07-16, autonomous) · Candidate `gen2-20260711T202935Z` · Owner: Jasan
+
+## 9. Autonomous operation (config = source of truth, PM2 = arm)
+
+**The model (v3):** there is no contract, arm token, or manual re-arming. A single file, `gen2_config.yaml`, is the entire operational source of truth. **`pm2 start` = ARMED, `pm2 stop` = DISARMED.** A running watcher IS the authorization.
+
+**`gen2_config.yaml`** (at `/home/jasan/Develop/aegis_gen2/`, gitignored; template in `docs/gen2/gen2_config.example.yaml`): mode, capital.initial_equity, symbols, execution_enabled, telegram_enabled, optional risk_overrides. The mode preset supplies the safe leverage/loss caps; overrides are coherence-validated and **fail-closed** (an incoherent config refuses to trade). Science (candidate, hashes, frozen threshold) is NOT editable here.
+
+**To operate:** edit `gen2_config.yaml` (set `execution_enabled: true` when ready) → `pm2 restart gen2-bridge gen2-watcher`. That's it. To pause: `pm2 stop gen2-watcher` (or `execution_enabled: false` + restart).
+
+**Automatic audit (replaces contracts):**
+- Every start writes `startup_audit.jsonl` (timestamp, commit, candidate, config checksum, hashes, mode, symbols, environment).
+- A live edit is detected and diffed → `config_changes.jsonl` with `CONFIGURATION_CHANGED` (old/new per field) and a Telegram WARNING; an edit that makes the config INVALID is flagged CRITICAL and the last valid config keeps running (fail-closed).
+
+**Kill switch under autonomous operation (smart re-arm):** kill switches are UNCHANGED — any critical event (bracket failure, reconciliation mismatch, orphan/unprotected position, hash/env/candidate mismatch, equity floor) stops new orders, protects capital, fires Telegram + incident. The switch file persists across restart. On `pm2 restart` the watcher runs the **startup gauntlet** (science hashes + env + selection policy + config coherence + Phase O paused + **no open position** per the bridge). The kill clears **only if the gauntlet passes clean** — so a restart can never resume into a broken/unsafe state. If the cause is unresolved (e.g. a position still open), the kill stays and Telegram says exactly why. Resolve the cause, then `pm2 restart`.
+
+**What was removed (and why it's safe):** arm token (PM2-alive is the authorization; its candidate/hash binding is already covered by the freeze/env/selection-policy hard-stops; its order cap is covered by `max_orders_per_day`/`max_concurrent`/`max_orders_per_cycle`), the derived contract JSON (config is the single source), and `consume_order`. The blast radius is bounded by the capital caps (daily 10% / total 25% / equity floor 75%), which trip long before the daily order cap.
+
+---
+
 
 ## 0. Modo always-on (PM2) — el estado normal del sistema
 
