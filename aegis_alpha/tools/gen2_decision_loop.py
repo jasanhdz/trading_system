@@ -253,8 +253,10 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
     candidate_opps: list[dict[str, Any]] = []
     live_attempts: list[dict[str, Any]] = []
     # Symbol allowlist and the live master switch come from the config, not a token.
+    # execution: config enables, GEN2_EXECUTION_ENABLED env can only DENY.
+    import aegis_alpha.tools.gen2_config as _cfg2
     allowed_symbols = list(contract.get("symbols", [])) if contract else []
-    execution_enabled = bool(contract.get("execution_enabled", False)) if contract else False
+    execution_enabled = _cfg2.effective_execution_enabled(contract)
 
     # Phase 1 — evaluate EVERY active symbol, record paper (always, independent of
     # the live path), and collect every CANDIDATE_SHORT with a finite score. These
@@ -519,20 +521,27 @@ def collect_startup_state(candidate_id: str, status_fn: Any = None) -> dict[str,
         state["contract"] = oc.load_contract(candidate_id)
     except Exception:
         state["contract"] = None
-    # Autonomous: "armed" = config valid + execution enabled + kill off (PM2 alive).
+    # Autonomous: "armed" = config valid + effective execution + kill off (PM2 alive).
+    import aegis_alpha.tools.gen2_config as _cfg2
     contract = state["contract"]
     killed = core.kill_switch_engaged(candidate_id)
-    exec_on = bool(contract.get("execution_enabled")) if contract else False
-    state["armed"] = bool(contract) and exec_on and not killed
+    config_exec = bool(contract.get("execution_enabled")) if contract else False
+    deny = _cfg2.emergency_deny_active()
+    effective_exec = _cfg2.effective_execution_enabled(contract)
+    state["config_execution_enabled"] = config_exec
+    state["emergency_deny_override"] = deny
+    state["effective_execution"] = effective_exec
+    state["armed"] = bool(contract) and effective_exec and not killed
     state["arm_reason"] = ("ARMED_VIA_CONFIG" if state["armed"]
                            else "KILL_SWITCH" if killed
-                           else "EXECUTION_DISABLED_IN_CONFIG" if contract and not exec_on
+                           else "EMERGENCY_DENY_OVERRIDE" if config_exec and deny
+                           else "EXECUTION_DISABLED_IN_CONFIG" if contract and not config_exec
                            else "NO_CONFIG")
     _, state["risk_reason"] = oc.risk_gate(candidate_id, mutate=False)
     state["kill_switch"] = killed
     state["phase_o_paused"] = core.phase_o_new_entries_paused()[0]
     state["symbols_analyzed"] = list(SYMBOLS)
-    state["symbols_executable"] = list(contract.get("symbols", [])) if (contract and exec_on) else []
+    state["symbols_executable"] = list(contract.get("symbols", [])) if (contract and effective_exec) else []
     try:
         state["bridge"] = (status_fn or bridge.get_status)()
     except Exception:

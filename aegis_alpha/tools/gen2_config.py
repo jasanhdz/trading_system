@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,27 @@ DEFAULT_CANDIDATE_ID = "gen2-20260711T202935Z"
 OVERRIDABLE = ("default_leverage", "balance_fraction", "fixed_notional_usd",
                "daily_loss_pct", "total_loss_pct", "equity_floor_fraction",
                "max_concurrent_positions", "max_orders_per_cycle", "max_orders_per_day")
+# Execution enablement — SINGLE SOURCE OF TRUTH is gen2_config.yaml
+# execution_enabled. The GEN2_EXECUTION_ENABLED env var is DENY-ONLY: it can
+# only force execution OFF (emergency kill), never ON. config false + env true
+# = DISABLED, always. Default (config missing/false, no env) = DISABLED.
+DENY_ONLY_ENV = "GEN2_EXECUTION_ENABLED"
+_DENY_VALUES = {"false", "0", "off", "no", "disable", "disabled"}
+
+
+def emergency_deny_active() -> bool:
+    """True only when the deny-only env var is explicitly set to a false-like
+    value. Anything else (unset, 'true', junk) does NOT deny — and never enables."""
+    v = os.environ.get(DENY_ONLY_ENV)
+    return v is not None and v.strip().lower() in _DENY_VALUES
+
+
+def effective_execution_enabled(contract: dict[str, Any] | None) -> bool:
+    """The single effective execution decision: config enables, env can only deny.
+    Missing/invalid config (contract is None) -> disabled."""
+    if not contract:
+        return False
+    return bool(contract.get("execution_enabled")) and not emergency_deny_active()
 
 
 def config_checksum(path: Path | None = None) -> str:
