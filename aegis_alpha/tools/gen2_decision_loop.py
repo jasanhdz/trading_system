@@ -161,6 +161,16 @@ def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token
         "entry": {"type": "MARKET"},
         "brackets": {"stop_price": stop_price, "time_exit_at": time_exit, "reduce_only": True},
         "risk_context": {"max_loss_usd": sizing["per_stop_loss"], "arm_token_checksum": token.get("checksum")},
+        # Explicit ownership so the TS executor never manages this position with
+        # another strategy's policy (Phase O adopting a Gen2 short is the bug
+        # this closes). The bridge persists this into the ownership registry.
+        "strategy_context": {
+            "owner": "GEN2",
+            "strategy": "GEN2_EQM_TRRM",
+            "exit_policy": "GEN2_H12",
+            "risk_policy": f"GEN2_{token.get('mode', 'EXPERIMENTAL')}",
+            "notification_policy": "GEN2",
+        },
         "expires_at": str(pd.Timestamp(utc_now().isoformat()).tz_localize(None) + pd.Timedelta(seconds=60)),
     }
 
