@@ -597,11 +597,48 @@ def collect_startup_state(candidate_id: str, status_fn: Any = None) -> dict[str,
     return state
 
 
-def startup_gauntlet(candidate_id: str, status_fn: Any = None) -> tuple[bool, list[str]]:
+# The bridge's kill switch is a file in its state dir (Gen2Bridge writes
+# stateDir/BRIDGE_KILL and reads it live). Tests override BRIDGE_STATE_DIR.
+BRIDGE_STATE_DIR: Path | None = None
+
+
+def bridge_kill_path() -> Path:
+    import os
+
+    base = BRIDGE_STATE_DIR or (Path(os.environ["GEN2_STATE_DIR"]) if os.environ.get("GEN2_STATE_DIR")
+                                else REPO / "binance-futures-bot-ts" / "logs" / "gen2_bridge")
+    return Path(base) / "BRIDGE_KILL"
+
+
+def bridge_kill_engaged() -> bool:
+    return bridge_kill_path().exists()
+
+
+def _default_open_orders_count(candidate_id: str) -> int | None:
+    """Signed read-only count of open orders on the config symbols. None if the
+    account can't be read (credentials absent) -> gauntlet treats as unverifiable."""
+    core.load_shared_env(("BINANCE_FUTURES_API_KEY", "BINANCE_API_KEY",
+                          "BINANCE_FUTURES_API_SECRET", "BINANCE_API_SECRET"))
+    from aegis_alpha.tools.gen2_canary_exec import BinancePrivateReadOnlyAdapter
+
+    ad = BinancePrivateReadOnlyAdapter()
+    if not ad.available:
+        return None
+    try:
+        contract = oc.load_contract(candidate_id)
+        symbols = contract.get("symbols") or ["ADAUSDT", "DOGEUSDT"]
+    except Exception:
+        symbols = ["ADAUSDT", "DOGEUSDT"]
+    return sum(len(ad.open_orders(s)) for s in symbols)
+
+
+def startup_gauntlet(candidate_id: str, status_fn: Any = None, orders_fn: Any = None) -> tuple[bool, list[str]]:
     """Automatable safety gauntlet run at watcher start. Returns (ok, failures).
-    Used to decide whether a persisted kill switch may clear on `pm2 restart`:
-    the kill clears ONLY if this passes — so a restart can never resume into a
-    broken/unsafe state (drifted science, open position, Phase O active)."""
+    Decides whether a persisted kill switch may clear on `pm2 restart`: the kills
+    clear ONLY if EVERY check passes — so a restart can never resume into a
+    broken/unsafe state. Validates: science hashes, environment, selection
+    policy, config, Phase O paused, bridge healthy, no open positions, no open
+    orders."""
     failures: list[str] = []
     freeze = json.loads(core.FREEZE_PATH.read_text())
     # science: environment + model hashes + selection policy vs freeze
@@ -632,20 +669,61 @@ def startup_gauntlet(candidate_id: str, status_fn: Any = None) -> tuple[bool, li
     # Phase O paused
     if not core.phase_o_new_entries_paused()[0]:
         failures.append("PHASE_O_NOT_PAUSED")
-    # bridge reachable + NO open position (a kill from an orphan/unprotected
-    # position must not clear while the position still exists)
+    # bridge HEALTHY (reachable + gen2 enabled) + NO open position. If the bridge
+    # can't be reached we cannot confirm safety -> fail (keep kills).
     try:
         st = (status_fn or bridge.get_status)()
+        if not st.get("gen2_enabled"):
+            failures.append("BRIDGE_NOT_HEALTHY")
         if st.get("open_positions"):
             failures.append("OPEN_POSITION_PRESENT")
-    except Exception:
-        pass  # bridge unreachable at boot is not itself a reason to keep a kill
+    except Exception as exc:
+        failures.append(f"BRIDGE_UNREACHABLE:{str(exc)[:40]}")
+    # NO open orders (signed private read). Unverifiable -> fail (keep kills).
+    try:
+        n = (orders_fn or _default_open_orders_count)(candidate_id)
+        if n is None:
+            failures.append("OPEN_ORDERS_UNVERIFIABLE")
+        elif n > 0:
+            failures.append("OPEN_ORDERS_PRESENT")
+    except Exception as exc:
+        failures.append(f"OPEN_ORDERS_CHECK_FAILED:{str(exc)[:40]}")
     return (len(failures) == 0, failures)
 
 
-def startup_arm(candidate_id: str, status_fn: Any = None, notify_fn: Any = None) -> dict[str, Any]:
-    """PM2 = arm. On watcher start: write the startup audit, and if a kill switch
-    is engaged, clear it ONLY if the gauntlet passes (smart re-arm)."""
+def _clear_both_kills(candidate_id: str) -> tuple[bool, str]:
+    """Atomically clear BOTH kill switches (Python + bridge): both or neither.
+    On any failure, roll back so the pair stays consistently engaged."""
+    py = core.canary_dir(candidate_id) / "KILL_SWITCH"
+    br = bridge_kill_path()
+    py_bak = py.read_text() if py.is_file() else None
+    try:
+        py.unlink(missing_ok=True)
+    except Exception as exc:
+        return False, f"PY_KILL_UNLINK_FAILED:{exc}"[:80]
+    try:
+        br.unlink(missing_ok=True)
+    except Exception as exc:
+        if py_bak is not None:  # rollback: re-engage python so neither is cleared
+            py.write_text(py_bak)
+        return False, f"BRIDGE_KILL_UNLINK_FAILED:{exc}"[:80]
+    return True, "BOTH_CLEARED"
+
+
+def _engage_both_kills(candidate_id: str, reason: str) -> None:
+    """Make both kill switches consistently engaged (idempotent)."""
+    core.engage_kill_switch(candidate_id, reason)  # idempotent, no re-log if present
+    br = bridge_kill_path()
+    if not br.exists():
+        br.parent.mkdir(parents=True, exist_ok=True)
+        br.write_text(json.dumps({"engaged_at": utc_now().isoformat(), "reason": reason}))
+
+
+def startup_arm(candidate_id: str, status_fn: Any = None, notify_fn: Any = None,
+                orders_fn: Any = None) -> dict[str, Any]:
+    """PM2 = arm. On watcher start: write the startup audit; then, if EITHER kill
+    switch is engaged, clear BOTH atomically iff the full gauntlet passes; else
+    engage BOTH consistently and alert with the exact failing validation."""
     import aegis_alpha.tools.gen2_config as cfg
 
     audit = None
@@ -655,23 +733,39 @@ def startup_arm(candidate_id: str, status_fn: Any = None, notify_fn: Any = None)
     except Exception as exc:
         core.append_jsonl(core.canary_dir(candidate_id) / "incidents" / "incidents.jsonl",
                           {"type": "STARTUP_CONFIG_INVALID", "error": str(exc)[:160]})
-    ok, failures = startup_gauntlet(candidate_id, status_fn)
-    result: dict[str, Any] = {"gauntlet_ok": ok, "failures": failures, "kill_cleared": False, "audit": audit}
-    if core.kill_switch_engaged(candidate_id):
-        if ok:
-            kpath = core.canary_dir(candidate_id) / "KILL_SWITCH"
-            kpath.unlink(missing_ok=True)
-            result["kill_cleared"] = True
-            core.append_jsonl(core.canary_dir(candidate_id) / "incidents" / "incidents.jsonl",
-                              {"type": "KILL_SWITCH_CLEARED_ON_RESTART", "gauntlet": "PASSED"})
+    ok, failures = startup_gauntlet(candidate_id, status_fn, orders_fn)
+    py_killed = core.kill_switch_engaged(candidate_id)
+    br_killed = bridge_kill_engaged()
+    result: dict[str, Any] = {"gauntlet_ok": ok, "failures": failures, "kills_cleared": False,
+                              "py_kill_was": py_killed, "bridge_kill_was": br_killed, "audit": audit}
+    inc = core.canary_dir(candidate_id) / "incidents" / "incidents.jsonl"
+    if not (py_killed or br_killed):
+        return result  # nothing engaged; nothing to do
+    if ok:
+        cleared, why = _clear_both_kills(candidate_id)
+        result["kills_cleared"] = cleared
+        if cleared:
+            core.append_jsonl(inc, {"type": "KILL_SWITCHES_CLEARED_ON_RESTART", "gauntlet": "PASSED",
+                                    "py_kill_was": py_killed, "bridge_kill_was": br_killed})
             if notify_fn is not None:
-                notify_fn(candidate_id, "INFO", "Kill switch limpiado en restart (gauntlet OK)",
-                          "El gauntlet de arranque pasó limpio; el kill switch se limpió y el sistema queda armado.",
-                          fingerprint=f"kill-cleared-{utc_now().isoformat()}")
-        elif notify_fn is not None:
-            notify_fn(candidate_id, "CRITICAL", "Kill switch NO se limpió en restart",
-                      f"El gauntlet falló: {', '.join(failures)}. El sistema queda DESARMADO hasta resolver la causa.",
-                      fingerprint=f"kill-held-{'|'.join(failures)}")
+                notify_fn(candidate_id, "INFO", "Kill switches limpiados en restart (gauntlet OK)",
+                          "El gauntlet pasó limpio; ambos kill switches (Python + bridge) se limpiaron atómicamente. "
+                          "El sistema queda armado (ejecución sigue gobernada por execution_enabled del config).",
+                          fingerprint=f"kills-cleared-{utc_now().isoformat()}")
+        else:  # atomic clear failed -> keep both engaged, alert
+            _engage_both_kills(candidate_id, "KILL_CLEAR_ATOMIC_FAILURE")
+            core.append_jsonl(inc, {"type": "KILL_CLEAR_ATOMIC_FAILURE", "reason": why})
+            if notify_fn is not None:
+                notify_fn(candidate_id, "CRITICAL", "Fallo atómico limpiando kill switches",
+                          f"{why}. Ambos kill switches quedan ENGANCHADOS (fail-closed).",
+                          fingerprint=f"kill-atomic-fail-{why[:30]}")
+    else:
+        _engage_both_kills(candidate_id, f"GAUNTLET_FAILED:{'|'.join(failures)}"[:120])
+        core.append_jsonl(inc, {"type": "KILL_SWITCHES_HELD_ON_RESTART", "failures": failures})
+        if notify_fn is not None:
+            notify_fn(candidate_id, "CRITICAL", "Kill switches NO se limpiaron en restart",
+                      f"El gauntlet falló: {', '.join(failures)}. Ambos kill switches quedan ENGANCHADOS "
+                      "hasta resolver la causa.", fingerprint=f"kills-held-{'|'.join(failures)}")
     return result
 
 
