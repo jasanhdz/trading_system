@@ -74,10 +74,11 @@ def make_env(tmp: Path, tail_value: float = 0.05) -> dict:
     return {"trrm_dir": trrm_dir, "eqm_dir": eqm_dir, "snapshot": snapshot}
 
 
-def run(env, live=False, status=None, execute=None):
+def run(env, live=False, status=None, execute=None, selection_threshold=-1.0):
     return loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=live,
                           snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
-                          execute_fn=execute, filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+                          execute_fn=execute, filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001},
+                          selection_threshold=selection_threshold)
 
 
 def test_paper_always_recorded_and_dedup() -> None:
@@ -175,7 +176,7 @@ def test_ranking_is_populated_even_in_paper_mode() -> None:
         env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88, "BTCUSDT": 0.61})
         try:
             s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=False,
-                               snapshot_fn=lambda: env["snapshot"])
+                               snapshot_fn=lambda: env["snapshot"], selection_threshold=-1.0)
             # ranking reflects the full candidate field by quality, no live path needed
             assert [r["symbol"] for r in s["ranking"]] == ["ADAUSDT", "DOGEUSDT", "BTCUSDT"]
             assert s["ranked_candidates"] == 3 and s["orders_submitted"] == 0
@@ -195,7 +196,7 @@ def test_global_ranking_and_one_order_per_cycle() -> None:
             s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
                                snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
                                execute_fn=lambda o: sent.append(o) or {"status": "ACCEPTED", "client_order_id": o["client_order_id"]},
-                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001}, selection_threshold=-1.0)
             # ranking is global by score, best first
             assert [r["symbol"] for r in s["ranking"]] == ["ADAUSDT", "DOGEUSDT", "BTCUSDT"]
             # exactly ONE order this cycle, and it is the highest score (ADA)
@@ -218,7 +219,7 @@ def test_first_arm_token_caps_total_orders_at_one() -> None:
             s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
                                snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
                                execute_fn=lambda o: sent.append(o) or {"status": "ACCEPTED", "client_order_id": o["client_order_id"]},
-                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001}, selection_threshold=-1.0)
             # best (ADA) submits; the 1-order token is then exhausted for DOGE
             assert s["orders_submitted"] == 1 and sent[0]["symbol"] == "ADAUSDT"
             reasons = {a["symbol"]: a["reason"] for a in s["live_attempts"]}
@@ -239,9 +240,54 @@ def test_max_concurrent_positions_never_exceeded() -> None:
             s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
                                snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
                                execute_fn=lambda o: {"status": "ACCEPTED"},
-                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+                               filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001}, selection_threshold=-1.0)
             assert s["orders_submitted"] == 0
             assert all(a["reason"] == "MAX_CONCURRENT_POSITIONS_REACHED" for a in s["live_attempts"] if a.get("eligible"))
+        finally:
+            env["_restore"]()
+
+
+def test_frozen_threshold_gate_abstains_and_opens() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = _rank_env(Path(t), {"ADAUSDT": 0.20, "DOGEUSDT": 0.10, "BTCUSDT": 0.05})
+        try:
+            oc.write_contract(CID, "experimental", 200.0)
+            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT", "BTCUSDT"], max_orders=3)
+            status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
+            sent = []
+            ex = lambda o: sent.append(o) or {"status": "ACCEPTED", "client_order_id": o["client_order_id"]}
+            common = dict(snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status, execute_fn=ex,
+                         filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001})
+            # threshold ABOVE all scores -> nobody opens, cycle abstains with the frozen reason
+            s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True, selection_threshold=0.50, **common)
+            assert s["orders_submitted"] == 0
+            assert s["selection_outcome"]["no_decision_reason"] == "BELOW_FROZEN_EQM_THRESHOLD"
+            assert s["selection_outcome"]["best_symbol"] == "ADAUSDT" and s["selection_outcome"]["best_clears_threshold"] is False
+            assert all(a["reason"] == "BELOW_FROZEN_EQM_THRESHOLD" for a in s["live_attempts"])
+            # threshold BETWEEN scores (0.15): only ADA (0.20) clears -> exactly it opens
+            st = json.loads((core.canary_dir(CID) / "loop_state.json").read_text()); st["last_processed"] = {}
+            core.atomic_write(core.canary_dir(CID) / "loop_state.json", json.dumps(st))
+            s2 = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True, selection_threshold=0.15, **common)
+            assert s2["orders_submitted"] == 1 and sent[-1]["symbol"] == "ADAUSDT"
+            assert s2["selection_outcome"]["best_clears_threshold"] is True and s2["selection_outcome"]["opened"] is True
+            # DOGE/BTC are below threshold -> abstain (not deferred)
+            reasons = {a["symbol"]: a["reason"] for a in s2["live_attempts"]}
+            assert reasons["DOGEUSDT"] == "BELOW_FROZEN_EQM_THRESHOLD"
+        finally:
+            env["_restore"]()
+
+
+def test_selection_outcome_recorded_in_paper() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        env = _rank_env(Path(t), {"ADAUSDT": 0.20})
+        try:
+            s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=False,
+                               snapshot_fn=lambda: env["snapshot"], selection_threshold=0.50)
+            # abstention recorded in the paper selection_outcomes stream
+            rows = (loop.FORWARD_ROOT / "selection_outcomes.jsonl").read_text().splitlines()
+            last = json.loads(rows[-1])
+            assert last["no_decision_reason"] == "BELOW_FROZEN_EQM_THRESHOLD"
+            assert last["frozen_threshold"] == 0.50 and last["best_symbol"] == "ADAUSDT"
         finally:
             env["_restore"]()
 
@@ -463,7 +509,8 @@ def test_watch_kill_switch_blocks_live_but_paper_continues() -> None:
                                 cid, env["trrm_dir"], env["eqm_dir"], live_enabled=live_enabled,
                                 snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
                                 execute_fn=lambda o: submitted.append(o) or {"status": "ACCEPTED"},
-                                filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001}),
+                                filters_fn=lambda s: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001},
+                                selection_threshold=-1.0),
                             pull_fn=lambda cid: {"ingested": 0},
                             resolve_fn=lambda cid: {"resolved_new": 0}, sleep_fn=lambda s: None)
         assert submitted == []  # kill switch blocks the live path
@@ -480,6 +527,8 @@ if __name__ == "__main__":
     test_ranking_is_populated_even_in_paper_mode()
     test_global_ranking_and_one_order_per_cycle()
     test_first_arm_token_caps_total_orders_at_one()
+    test_frozen_threshold_gate_abstains_and_opens()
+    test_selection_outcome_recorded_in_paper()
     test_max_concurrent_positions_never_exceeded()
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()

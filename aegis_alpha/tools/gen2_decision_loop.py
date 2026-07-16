@@ -204,7 +204,7 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
               trrm_dir: Path | None = None, eqm_dir: Path | None = None,
               live_enabled: bool = False,
               snapshot_fn: Any = None, status_fn: Any = None, execute_fn: Any = None,
-              filters_fn: Any = None) -> dict[str, Any]:
+              filters_fn: Any = None, selection_threshold: float | None = None) -> dict[str, Any]:
     freeze = json.loads(core.FREEZE_PATH.read_text())
     if freeze["candidate_id"] != candidate_id:
         raise ValueError("CANDIDATE_MISMATCH")
@@ -237,6 +237,16 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         contract = oc.load_contract(candidate_id)
     except Exception:
         pass
+
+    # Frozen selection threshold — part of the scientific freeze. Verified against
+    # the freeze hashes on every load (cheap; no recompute). A missing or drifted
+    # policy is a scientific-integrity hard stop, exactly like a model-hash
+    # mismatch: operating without it would be a different, unvalidated strategy.
+    # (Injectable for tests; production always loads the frozen artifact.)
+    if selection_threshold is None:
+        from aegis_alpha.tools.gen2_selection_policy import load_threshold_verified
+
+        selection_threshold = load_threshold_verified(freeze)
 
     decisions: list[dict[str, Any]] = []
     candidate_opps: list[dict[str, Any]] = []
@@ -281,6 +291,14 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         symbol = decision["symbol"]
         attempt: dict[str, Any] = {"symbol": symbol, "ts": decision.get("ts"),
                                    "rank": rank_idx + 1, "score": decision.get("eqm_score")}
+        # FROZEN SELECTION GATE (scientific, applies in paper and live): the best
+        # candidate must clear the frozen top-decile threshold or it is an
+        # abstention. Ranked descending, so once one is below, all below it are too.
+        if _score(decision) < selection_threshold:
+            attempt["eligible"] = False
+            attempt["reason"] = "BELOW_FROZEN_EQM_THRESHOLD"
+            live_attempts.append(attempt)
+            continue
         eligible, reason = gates_for_live(candidate_id, decision, token_symbols, bridge_status)
         attempt["eligible"] = eligible
         if not eligible:
@@ -331,8 +349,37 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
                                "operator_action": "verify on exchange before re-arming"})
         live_attempts.append(attempt)
     core.atomic_write(state_path, json.dumps(state, indent=2))
+
+    # Per-cycle selection outcome — always recorded (paper), documenting exactly
+    # why the cycle did or did not open. Distinguishes the SCIENTIFIC abstention
+    # (below the frozen threshold, all vetoed) from OPERATIONAL blocks.
+    orders_submitted = sum(1 for a in live_attempts if a.get("ack", {}).get("status") == "ACCEPTED")
+    best = candidate_opps[0] if candidate_opps else None
+    best_score = _score(best) if best else None
+    if not candidate_opps:
+        no_decision_reason = "NO_CANDIDATES_ALL_TRRM_REJECTED_OR_NODECISION"
+    elif best_score is not None and best_score < selection_threshold:
+        no_decision_reason = "BELOW_FROZEN_EQM_THRESHOLD"
+    elif orders_submitted > 0:
+        no_decision_reason = None
+    else:
+        # best cleared the threshold but an operational gate blocked it; surface
+        # that gate's reason (token/kill/daily-cap/max-concurrent/execution-disabled)
+        top = next((a for a in live_attempts if a.get("rank") == 1), None)
+        no_decision_reason = (top or {}).get("reason", "OPERATIONAL_BLOCK")
+    selection_outcome = {
+        "frozen_threshold": selection_threshold,
+        "best_symbol": best["symbol"] if best else None,
+        "best_score": best_score,
+        "best_clears_threshold": bool(best_score is not None and best_score >= selection_threshold),
+        "opened": orders_submitted > 0,
+        "no_decision_reason": no_decision_reason,
+    }
+    core.append_jsonl(FORWARD_ROOT / "selection_outcomes.jsonl",
+                      {"collected_at": utc_now().isoformat(), "candidate_id": candidate_id,
+                       "snapshot": snap.get("snapshot_id"), **selection_outcome})
     summary = {
-        "schema": "gen2_decision_loop_cycle_v2",
+        "schema": "gen2_decision_loop_cycle_v3",
         "candidate_id": candidate_id,
         "snapshot": snap.get("snapshot_id"),
         "decisions": len(decisions),
@@ -342,12 +389,13 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         "ranked_candidates": len(candidate_opps),
         "live_eligible": sum(1 for a in live_attempts if a.get("eligible")),
         "ranking": [{"rank": i + 1, "symbol": d["symbol"], "score": d.get("eqm_score")} for i, d in enumerate(candidate_opps)],
+        "selection_outcome": selection_outcome,
         "max_concurrent_positions": max_concurrent,
         "max_orders_per_cycle": max_per_cycle,
         "open_positions_at_cycle_start": open_count,
         "live_enabled": live_enabled,
         "live_attempts": live_attempts,
-        "orders_submitted": sum(1 for a in live_attempts if a.get("ack", {}).get("status") == "ACCEPTED"),
+        "orders_submitted": orders_submitted,
         "generated_at_utc": utc_now().isoformat(),
     }
     core.atomic_write(cdir / "loop_last_cycle.json", json.dumps(summary, indent=2, default=json_default))
@@ -411,7 +459,9 @@ def pull_events(candidate_id: str, fetch_fn: Any = None) -> dict[str, Any]:
 # Scientific-integrity failures must stop the runner cold; anything else is an
 # operational incident the watcher records and survives (fail-closed per cycle).
 HARD_STOP_MARKERS = ("TRRM_HASH_MISMATCH_VS_FREEZE", "EQM_HASH_MISMATCH_VS_FREEZE", "CANDIDATE_MISMATCH",
-                     "ENVIRONMENT_MISMATCH_VS_FREEZE")
+                     "ENVIRONMENT_MISMATCH_VS_FREEZE", "SELECTION_POLICY_MISSING",
+                     "SELECTION_POLICY_CANDIDATE_MISMATCH", "SELECTION_POLICY_HASH_MISMATCH",
+                     "SELECTION_POLICY_INVALID_SCHEMA")
 SNAPSHOT_RETENTION = 12  # forward snapshots kept on disk (~1 hour at 5-min cadence)
 # Transient/connectivity incidents notify at WARNING (no exposure implied); every
 # other new incident type is CRITICAL. WATCH_CYCLE_FAILED/PRUNE are notified
@@ -662,7 +712,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--interval-seconds", type=float, default=300.0)
     p.add_argument("--max-cycles", type=int, default=None, help="stop after N cycles (default: run until interrupted)")
     p.add_argument("--no-telegram", action="store_true", help="disable Telegram notifications")
+    p.add_argument("--dry-run-cycle", action="store_true",
+                   help="run ONE paper cycle and print ranking/scores/threshold/winner/decision (no orders)")
     args = p.parse_args(argv)
+    if args.dry_run_cycle:
+        summary = run_cycle(args.candidate_id, live_enabled=False)
+        so = summary["selection_outcome"]
+        print("=== GEN2 DRY-RUN CYCLE (paper, no orders) ===")
+        print(f"snapshot: {summary['snapshot']} | símbolos analizados: {summary['decisions']} | "
+              f"vetados TRRM: {summary['vetoed']} | candidatos: {summary['ranked_candidates']}")
+        print(f"FROZEN THRESHOLD: {so['frozen_threshold']:.8f}")
+        print("ranking global (EQM score, mejor primero):")
+        for r in summary["ranking"]:
+            mark = "✓" if (r.get("score") is not None and r["score"] >= so["frozen_threshold"]) else "·"
+            print(f"  {mark} #{r['rank']:2} {r['symbol']:9} {r['score']:+.6f}")
+        print(f"ganador: {so['best_symbol']} score={so['best_score']} | supera umbral: {so['best_clears_threshold']}")
+        print(f"DECISIÓN: {'ABRIRÍA (live)' if so['best_clears_threshold'] else 'NO_DECISION'} | "
+              f"motivo: {so['no_decision_reason'] or 'OPEN_CANDIDATE'}")
+        print("(dry-run: ninguna orden enviada)")
+        return 0
     if args.watch:
         notify_fn = None
         if not args.no_telegram:
