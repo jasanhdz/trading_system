@@ -318,6 +318,7 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         # between submit and consume could otherwise leave an ACCEPTED order
         # with an unconsumed token -> a second live order past max_orders.
         oc.consume_order(candidate_id)
+        core.record_order_opened(candidate_id)  # daily order counter -> DAILY_ORDER_CAP gate
         submitted_this_cycle += 1  # this cycle's single-order budget is now spent
         ack = (execute_fn or bridge.post_execute)(order)
         attempt["ack"] = ack
@@ -609,6 +610,17 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
                           "El kill switch se activó durante este ciclo. Live bloqueado; paper continúa. Revisar incidentes y exchange.",
                           fingerprint="kill-engaged")
             prev_kill = kill_now
+            # Soft consecutive-loss signal (EXPERIMENTAL_CONTINUOUS): alert but do
+            # not halt — capital caps still bind. Hard modes are blocked in risk_gate.
+            try:
+                if contract is not None and contract.get("consecutive_loss_policy") == "soft":
+                    streak = int(json.loads((cdir / "risk_state.json").read_text()).get("consecutive_losses", 0))
+                    if streak >= 3:
+                        notify_fn(candidate_id, "WARNING", f"Racha de {streak} pérdidas (modo continuo)",
+                                  "Continúo operando (política soft). Caps de pérdida diaria/total siguen activos.",
+                                  fingerprint=f"loss-streak-{streak}")
+            except Exception:
+                pass
             inc_now = _incident_count()
             if inc_now > prev_incidents:
                 tail = incidents_path.read_text(encoding="utf-8", errors="replace").splitlines()[-(inc_now - prev_incidents):]

@@ -143,6 +143,19 @@ def record_trade_result(candidate_id: str, pnl: float) -> None:
     atomic_write(d / "risk_state.json", json.dumps(state, indent=2))
 
 
+def record_order_opened(candidate_id: str) -> int:
+    """Increment the daily order counter (with day rollover). Returns the new count.
+    Feeds the DAILY_ORDER_CAP gate; call once per order actually submitted."""
+    d = canary_dir(candidate_id)
+    state = json.loads((d / "risk_state.json").read_text())
+    today = str(utc_now().date())
+    if state.get("day") != today:
+        state["day"], state["daily_loss"], state["orders_today"] = today, 0.0, 0
+    state["orders_today"] = int(state.get("orders_today", 0)) + 1
+    atomic_write(d / "risk_state.json", json.dumps(state, indent=2))
+    return int(state["orders_today"])
+
+
 # ---------------------------------------------------------- Phase O coexistence
 def phase_o_new_entries_paused(ts_repo: Path | None = None) -> tuple[bool, str]:
     yaml_path = (ts_repo or REPO / "binance-futures-bot-ts") / "regime_config.live.yaml"

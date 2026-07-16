@@ -39,6 +39,8 @@ MODES: dict[str, dict[str, Any]] = {
         "total_loss_pct": 0.05,
         "equity_floor_fraction": 0.95,
         "compounding": False,
+        "max_orders_per_day": 5,
+        "consecutive_loss_policy": "hard",  # 3 losses -> block until manual review
     },
     "EXPERIMENTAL": {
         "mode": "EXPERIMENTAL",
@@ -53,6 +55,32 @@ MODES: dict[str, dict[str, Any]] = {
         "equity_floor_fraction": 0.75,
         "compounding": True,
         "sunset": {"technically_validated_orders": 20, "max_days": 60},
+        "max_orders_per_day": 10,
+        "consecutive_loss_policy": "hard",
+    },
+    # Continuous experimental canary: same science, same stop/liquidation safety
+    # and the SAME capital caps as EXPERIMENTAL (daily/total loss floors are
+    # capital protection and stay hard). What changes is OPERATIONAL cadence —
+    # it is meant to keep collecting forward evidence rather than halt on a
+    # short losing streak: up to 20 orders/day and a SOFT consecutive-loss
+    # policy (alert + continue instead of blocking). Every trade still opens
+    # with a mandatory stop; the daily/total loss caps and every exposure-based
+    # kill switch remain unchanged.
+    "EXPERIMENTAL_CONTINUOUS": {
+        "mode": "EXPERIMENTAL_CONTINUOUS",
+        "sizing_kind": "BALANCE_FRACTION",
+        "fixed_notional_usd": None,
+        "balance_fraction": 0.15,  # smaller so up to 3 concurrent fit within the wallet
+        "max_leverage": 10,
+        "default_leverage": 10,
+        "risk_per_trade_pct": 0.0225,
+        "daily_loss_pct": 0.10,
+        "total_loss_pct": 0.25,
+        "equity_floor_fraction": 0.75,
+        "compounding": True,
+        "sunset": {"technically_validated_orders": 60, "max_days": 60},
+        "max_orders_per_day": 20,
+        "consecutive_loss_policy": "soft",  # losing streaks alert + continue (capital caps still bind)
     },
 }
 COMMON = {
@@ -237,7 +265,8 @@ def risk_gate(candidate_id: str, mutate: bool = True) -> tuple[bool, str]:
     state = json.loads((d / "risk_state.json").read_text())
     today = str(utc_now().date())
     if state.get("day") != today:
-        state["day"], state["daily_loss"] = today, 0.0
+        # day rollover resets the daily loss AND the daily order counter
+        state["day"], state["daily_loss"], state["orders_today"] = today, 0.0, 0
         if mutate:
             core.atomic_write(d / "risk_state.json", json.dumps(state, indent=2))
     if state.get("paused"):
@@ -248,15 +277,25 @@ def risk_gate(candidate_id: str, mutate: bool = True) -> tuple[bool, str]:
     if not sunset_ok:
         return False, sunset_reason
     equity0 = contract["initial_equity"]
+    # Capital protection — ALWAYS hard, in every mode (critical safety).
     if state["daily_loss"] >= contract["daily_loss_pct"] * equity0:
         return False, "DAILY_LOSS_CAP"
     if state["total_loss"] >= contract["total_loss_pct"] * equity0:
         return False, "TOTAL_LOSS_CAP"
-    if state["consecutive_losses"] >= 3:
-        return False, "CONSECUTIVE_LOSS_CAP"
     if equity0 - state["total_loss"] <= contract["equity_floor"]:
         core.engage_kill_switch(candidate_id, "EQUITY_FLOOR_REACHED")
         return False, "EQUITY_FLOOR_REACHED"
+    # Daily ORDER ceiling (operational): stop opening new trades once the day's
+    # budget is spent; existing positions keep their stops/exits.
+    if int(state.get("orders_today", 0)) >= int(contract.get("max_orders_per_day", 10)):
+        return False, "DAILY_ORDER_CAP"
+    # Consecutive-loss handling depends on the mode's policy. SAFE/EXPERIMENTAL
+    # block ("hard"); EXPERIMENTAL_CONTINUOUS treats a losing streak as an
+    # operational signal ("soft") — it does NOT block here (capital caps above
+    # still bind), the loop alerts on it. This is the ONLY block relaxed for
+    # continuous mode; no exposure/capital/science guard is weakened.
+    if contract.get("consecutive_loss_policy", "hard") == "hard" and state["consecutive_losses"] >= 3:
+        return False, "CONSECUTIVE_LOSS_CAP"
     return True, "RISK_OK"
 
 
@@ -325,8 +364,9 @@ def _count_technically_validated_orders(candidate_id: str) -> int:
 
 
 def experimental_sunset_check(contract: dict[str, Any], candidate_id: str) -> tuple[bool, str]:
-    """EXPERIMENTAL expires at >=N technically validated orders or max_days, whichever first."""
-    if contract["mode"] != "EXPERIMENTAL":
+    """Any experimental mode expires at >=N technically validated orders or max_days.
+    SAFE (the future production contract) has no sunset."""
+    if not str(contract["mode"]).startswith("EXPERIMENTAL"):
         return True, "NOT_EXPERIMENTAL"
     sunset = contract.get("sunset")
     if not sunset:
@@ -345,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--mode-op", choices=["write-contract", "create-arm-token", "status"], required=True)
     p.add_argument("--candidate-id", default=DEFAULT_CANDIDATE_ID)
-    p.add_argument("--mode", choices=["safe", "experimental"], default="safe")
+    p.add_argument("--mode", choices=["safe", "experimental", "experimental_continuous"], default="safe")
     p.add_argument("--initial-equity", type=float, required=False)
     p.add_argument("--expiry-hours", type=int, default=72)
     p.add_argument("--allowed-symbols", default="ADAUSDT,DOGEUSDT")

@@ -110,10 +110,51 @@ def test_experimental_sunset_max_days_and_validated_orders() -> None:
         assert oc.risk_gate(CID) == (True, "RISK_OK")
 
 
+def test_experimental_continuous_mode_and_daily_order_cap() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        c = oc.write_contract(CID, "experimental_continuous", 200.0)
+        assert c["mode"] == "EXPERIMENTAL_CONTINUOUS"
+        assert c["max_orders_per_day"] == 20 and c["consecutive_loss_policy"] == "soft"
+        assert c["sunset"]["technically_validated_orders"] == 60  # continuous has a sunset too
+        assert oc.risk_gate(CID) == (True, "RISK_OK")
+        # daily order cap: reach 20 -> blocked; existing positions unaffected
+        for _ in range(20):
+            core.record_order_opened(CID)
+        assert oc.risk_gate(CID) == (False, "DAILY_ORDER_CAP")
+        # day rollover clears it (simulate by editing the stored day)
+        d = core.canary_dir(CID)
+        st = json.loads((d / "risk_state.json").read_text())
+        st["day"] = "2000-01-01"
+        core.atomic_write(d / "risk_state.json", json.dumps(st))
+        assert oc.risk_gate(CID) == (True, "RISK_OK")
+
+
+def test_soft_vs_hard_consecutive_loss_policy() -> None:
+    with tempfile.TemporaryDirectory() as t:
+        setup(Path(t))
+        # hard (EXPERIMENTAL): 3 losses -> block
+        oc.write_contract(CID, "experimental", 200.0)
+        for _ in range(3):
+            core.record_trade_result(CID, -0.01)
+        assert oc.risk_gate(CID) == (False, "CONSECUTIVE_LOSS_CAP")
+        # soft (EXPERIMENTAL_CONTINUOUS): same streak does NOT block (capital caps still bind)
+        oc.write_contract(CID, "experimental_continuous", 200.0, force=True)
+        assert oc.risk_gate(CID) == (True, "RISK_OK")
+        # but daily loss cap still binds (capital protection unchanged)
+        d = core.canary_dir(CID)
+        st = json.loads((d / "risk_state.json").read_text())
+        st["daily_loss"] = 100.0  # > 10% of 200
+        core.atomic_write(d / "risk_state.json", json.dumps(st))
+        assert oc.risk_gate(CID) == (False, "DAILY_LOSS_CAP")
+
+
 if __name__ == "__main__":
     test_modes_coherent_and_switch_requires_new_token()
     test_incoherent_contract_refused()
     test_risk_gate_uses_single_contract()
     test_sizing_by_mode_and_token_consumption()
     test_experimental_sunset_max_days_and_validated_orders()
+    test_experimental_continuous_mode_and_daily_order_cap()
+    test_soft_vs_hard_consecutive_loss_policy()
     print("test_gen2_operational_contract: OK")
