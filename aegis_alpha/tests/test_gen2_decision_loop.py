@@ -86,7 +86,7 @@ def test_paper_always_recorded_and_dedup() -> None:
         env = make_env(Path(t))
         s1 = run(env)
         assert s1["decisions"] == 3 and s1["candidate_short"] == 3 and s1["orders_submitted"] == 0
-        assert all(a["reason"] in {"WOULD_SUBMIT_LIVE_DISABLED", "CANARY_UNARMED_NO_TOKEN", "SYMBOL_NOT_IN_ARM_TOKEN"} or not a["eligible"] for a in s1["live_attempts"])
+        assert all(a["reason"] in {"WOULD_SUBMIT_LIVE_DISABLED", "SYMBOL_NOT_ALLOWED", "OPERATIONAL_CONTRACT_MISSING", "EXECUTION_DISABLED_IN_CONFIG"} or not a["eligible"] for a in s1["live_attempts"])
         # same candle -> dedup, no duplicate paper records
         s2 = run(env)
         assert s2["decisions"] == 0
@@ -105,8 +105,8 @@ def test_live_path_full_gauntlet_and_ack() -> None:
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
         env = make_env(tmp)
-        oc.write_contract(CID, "experimental", 200.0)
-        oc.create_arm_token(CID, 72, ["ADAUSDT"])
+        # autonomous: symbols + execution come from the config/contract, no token
+        oc.write_contract(CID, "experimental", 200.0, symbols=["ADAUSDT"], execution_enabled=True)
         status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
         sent = []
 
@@ -115,19 +115,19 @@ def test_live_path_full_gauntlet_and_ack() -> None:
             return {"status": "ACCEPTED", "client_order_id": order["client_order_id"]}
 
         s = run(env, live=True, status=status, execute=fake_execute)
-        assert s["orders_submitted"] == 1  # only ADAUSDT is in the token
+        assert s["orders_submitted"] == 1  # only ADAUSDT is in the config allowlist
         assert sent[0]["symbol"] == "ADAUSDT" and sent[0]["side"] == "SHORT"
         assert sent[0]["brackets"]["stop_price"] > 100.0
-        # token consumed (first_arm_max_orders=1) -> second cycle cannot submit
-        env["snapshot"] = {**env["snapshot"]}
-        state = json.loads((core.canary_dir(CID) / "loop_state.json").read_text())
-        state["last_processed"] = {}
-        core.atomic_write(core.canary_dir(CID) / "loop_state.json", json.dumps(state))
+        # other env symbols are not in the config allowlist -> SYMBOL_NOT_ALLOWED
+        reasons = {a["symbol"]: a["reason"] for a in s["live_attempts"]}
+        assert all(reasons.get(sym) == "SYMBOL_NOT_ALLOWED" for sym in ("BTCUSDT", "ETHUSDT") if sym in reasons)
+        # execution_disabled config -> no order even for an allowed symbol
+        oc.write_contract(CID, "experimental", 200.0, force=True, symbols=["ADAUSDT"], execution_enabled=False)
+        st = json.loads((core.canary_dir(CID) / "loop_state.json").read_text()); st["last_processed"] = {}
+        core.atomic_write(core.canary_dir(CID) / "loop_state.json", json.dumps(st))
         s2 = run(env, live=True, status=status, execute=fake_execute)
         assert s2["orders_submitted"] == 0
-        reasons = {a["reason"] for a in s2["live_attempts"]}
-        # exhausted token yields empty allowed-symbols (fail-closed); either reason is the same block
-        assert reasons & {"TOKEN_MAX_ORDERS_EXHAUSTED", "SYMBOL_NOT_IN_ARM_TOKEN"}
+        assert any(a["reason"] == "EXECUTION_DISABLED_IN_CONFIG" for a in s2["live_attempts"])
 
 
 def test_stop_price_rounds_to_tick_size() -> None:
@@ -188,9 +188,8 @@ def test_global_ranking_and_one_order_per_cycle() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88, "BTCUSDT": 0.61})
         try:
-            oc.write_contract(CID, "experimental", 200.0)  # max_concurrent 3, max_orders_per_cycle 1
-            # multi-order token (3) so the DEFERRED path is exercised, not token exhaustion
-            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT", "BTCUSDT"], max_orders=3)
+            # max_concurrent 3, max_orders_per_cycle 1; symbols via config, no token
+            oc.write_contract(CID, "experimental", 200.0, symbols=["ADAUSDT", "DOGEUSDT", "BTCUSDT"], execution_enabled=True)
             status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
             sent = []
             s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
@@ -208,22 +207,24 @@ def test_global_ranking_and_one_order_per_cycle() -> None:
             env["_restore"]()
 
 
-def test_first_arm_token_caps_total_orders_at_one() -> None:
+def test_daily_order_cap_limits_total_orders() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88})
         try:
-            oc.write_contract(CID, "experimental", 200.0)
-            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT"])  # default max_orders=1
+            oc.write_contract(CID, "experimental", 200.0, symbols=["ADAUSDT", "DOGEUSDT"], execution_enabled=True)
+            # pre-spend the daily order budget (EXPERIMENTAL cap = 10)
+            st = json.loads((core.canary_dir(CID) / "risk_state.json").read_text())
+            st["orders_today"] = 10
+            core.atomic_write(core.canary_dir(CID) / "risk_state.json", json.dumps(st))
             status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
             sent = []
             s = loop.run_cycle(CID, env["trrm_dir"], env["eqm_dir"], live_enabled=True,
                                snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
                                execute_fn=lambda o: sent.append(o) or {"status": "ACCEPTED", "client_order_id": o["client_order_id"]},
                                filters_fn=lambda x: {"step_size": 1.0, "min_notional": 5.0, "tick_size": 0.001}, selection_threshold=-1.0)
-            # best (ADA) submits; the 1-order token is then exhausted for DOGE
-            assert s["orders_submitted"] == 1 and sent[0]["symbol"] == "ADAUSDT"
-            reasons = {a["symbol"]: a["reason"] for a in s["live_attempts"]}
-            assert reasons.get("DOGEUSDT") == "TOKEN_MAX_ORDERS_EXHAUSTED"
+            # daily cap reached -> risk gate blocks, zero orders
+            assert s["orders_submitted"] == 0
+            assert any(a["reason"] == "DAILY_ORDER_CAP" for a in s["live_attempts"])
         finally:
             env["_restore"]()
 
@@ -233,7 +234,6 @@ def test_max_concurrent_positions_never_exceeded() -> None:
         env = _rank_env(Path(t), {"ADAUSDT": 0.93, "DOGEUSDT": 0.88})
         try:
             oc.write_contract(CID, "experimental", 200.0)  # max_concurrent 3
-            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT"])
             # already 3 open -> no room, zero orders even with eligible opportunities
             status = {"phase_o_allow_orders": False, "gen2_enabled": True,
                       "open_positions": ["X", "Y", "Z"], "available_balance": 200.0}
@@ -251,8 +251,7 @@ def test_frozen_threshold_gate_abstains_and_opens() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = _rank_env(Path(t), {"ADAUSDT": 0.20, "DOGEUSDT": 0.10, "BTCUSDT": 0.05})
         try:
-            oc.write_contract(CID, "experimental", 200.0)
-            oc.create_arm_token(CID, 72, ["ADAUSDT", "DOGEUSDT", "BTCUSDT"], max_orders=3)
+            oc.write_contract(CID, "experimental", 200.0, symbols=["ADAUSDT", "DOGEUSDT", "BTCUSDT"], execution_enabled=True)
             status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
             sent = []
             ex = lambda o: sent.append(o) or {"status": "ACCEPTED", "client_order_id": o["client_order_id"]}
@@ -295,8 +294,7 @@ def test_selection_outcome_recorded_in_paper() -> None:
 def test_live_fail_closed_without_bridge_status() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = make_env(Path(t))
-        oc.write_contract(CID, "safe", 200.0)
-        oc.create_arm_token(CID, 72, ["ADAUSDT"])
+        oc.write_contract(CID, "safe", 200.0, symbols=["ADAUSDT"], execution_enabled=True)
         s = run(env, live=True, status=None, execute=lambda o: {"status": "ACCEPTED"})
         assert s["orders_submitted"] == 0
         assert any(a["reason"] == "BRIDGE_STATUS_UNAVAILABLE" for a in s["live_attempts"])
@@ -357,11 +355,10 @@ def test_pull_events_checkpoint_and_bridge_failure() -> None:
         assert r4["error"] == "BRIDGE_UNAVAILABLE" and r4["last_sequence"] == 3
 
 
-def test_token_burned_before_submit_and_unconfirmed_ack_incident() -> None:
+def test_order_counted_before_submit_and_unconfirmed_ack_incident() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = make_env(Path(t))
-        oc.write_contract(CID, "experimental", 200.0)
-        oc.create_arm_token(CID, 72, ["ADAUSDT"])
+        oc.write_contract(CID, "experimental", 200.0, symbols=["ADAUSDT"], execution_enabled=True)
         status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
 
         def bridge_down(order):
@@ -369,8 +366,9 @@ def test_token_burned_before_submit_and_unconfirmed_ack_incident() -> None:
 
         s = run(env, live=True, status=status, execute=bridge_down)
         assert s["orders_submitted"] == 0
-        # fail-closed: token was consumed BEFORE the wire attempt
-        assert oc.verify_arm_token(CID)[1] == "TOKEN_MAX_ORDERS_EXHAUSTED"
+        # fail-closed: the daily counter was incremented BEFORE the wire attempt
+        st = json.loads((core.canary_dir(CID) / "risk_state.json").read_text())
+        assert st["orders_today"] >= 1
         incidents = [json.loads(l) for l in (core.canary_dir(CID) / "incidents" / "incidents.jsonl").read_text().splitlines()]
         assert any(i["type"] == "TOKEN_CONSUMED_WITHOUT_CONFIRMED_ACK" for i in incidents)
 
@@ -444,7 +442,7 @@ def test_watch_runner_heartbeat_incidents_and_hard_stop() -> None:
                 raise RuntimeError("snapshot fetch timeout")  # operational -> survive
             return {"decisions": 3, "orders_submitted": 0}
 
-        hb = loop.run_watch(CID, interval_seconds=0.01, max_cycles=3, live_enabled=False,
+        hb = loop.run_watch(CID, interval_seconds=0.01, max_cycles=3, live_enabled=False, arm_on_start=False,
                             cycle_fn=flaky_cycle, resolve_fn=lambda cid: {"resolved_new": 2},
                             sleep_fn=sleeps.append)
         assert hb["cycles"] == 3 and hb["cycle_errors"] == 1
@@ -460,7 +458,7 @@ def test_watch_runner_heartbeat_incidents_and_hard_stop() -> None:
             raise ValueError("TRRM_HASH_MISMATCH_VS_FREEZE")
 
         try:
-            loop.run_watch(CID, interval_seconds=0.01, max_cycles=2, cycle_fn=poisoned_cycle,
+            loop.run_watch(CID, interval_seconds=0.01, max_cycles=2, arm_on_start=False, cycle_fn=poisoned_cycle,
                            resolve_fn=lambda cid: {"resolved_new": 0}, sleep_fn=lambda s: None)
             raise AssertionError("hash mismatch must abort the watcher")
         except ValueError:
@@ -486,7 +484,7 @@ def test_watch_notifications_severity_and_startup() -> None:
             core.append_jsonl(core.canary_dir(CID) / "incidents" / "incidents.jsonl", {"type": "ORPHAN_ORDER_ON_EXCHANGE"})
             return {"decisions": 3, "orders_submitted": 0}
 
-        loop.run_watch(CID, interval_seconds=0.0, max_cycles=1, live_enabled=False,
+        loop.run_watch(CID, interval_seconds=0.0, max_cycles=1, live_enabled=False, arm_on_start=False,
                        cycle_fn=cycle_that_adds_critical_incident, resolve_fn=lambda cid: {"resolved_new": 0},
                        sleep_fn=lambda s: None, notify_fn=note)
         titles = {(sev, title) for sev, title in notes}
@@ -499,12 +497,11 @@ def test_watch_notifications_severity_and_startup() -> None:
 def test_watch_kill_switch_blocks_live_but_paper_continues() -> None:
     with tempfile.TemporaryDirectory() as t:
         env = make_env(Path(t))
-        oc.write_contract(CID, "safe", 200.0)
-        oc.create_arm_token(CID, 72, ["ADAUSDT"])
+        oc.write_contract(CID, "safe", 200.0, symbols=["ADAUSDT"], execution_enabled=True)
         core.engage_kill_switch(CID, "pre-existing")
         status = {"phase_o_allow_orders": False, "gen2_enabled": True, "open_positions": [], "available_balance": 200.0}
         submitted = []
-        hb = loop.run_watch(CID, interval_seconds=0.0, max_cycles=1, live_enabled=True,
+        hb = loop.run_watch(CID, interval_seconds=0.0, max_cycles=1, live_enabled=True, arm_on_start=False,
                             cycle_fn=lambda cid, live_enabled=False: loop.run_cycle(
                                 cid, env["trrm_dir"], env["eqm_dir"], live_enabled=live_enabled,
                                 snapshot_fn=lambda: env["snapshot"], status_fn=lambda: status,
@@ -526,14 +523,14 @@ if __name__ == "__main__":
     test_stop_price_rounds_to_tick_size()
     test_ranking_is_populated_even_in_paper_mode()
     test_global_ranking_and_one_order_per_cycle()
-    test_first_arm_token_caps_total_orders_at_one()
+    test_daily_order_cap_limits_total_orders()
     test_frozen_threshold_gate_abstains_and_opens()
     test_selection_outcome_recorded_in_paper()
     test_max_concurrent_positions_never_exceeded()
     test_live_fail_closed_without_bridge_status()
     test_event_ingestion_dedup_and_pnl_wiring()
     test_pull_events_checkpoint_and_bridge_failure()
-    test_token_burned_before_submit_and_unconfirmed_ack_incident()
+    test_order_counted_before_submit_and_unconfirmed_ack_incident()
     test_crash_mid_cycle_does_not_reemit_decisions()
     test_watch_singleton_lock()
     test_snapshot_pruning_keeps_recent()

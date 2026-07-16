@@ -137,7 +137,7 @@ def round_to_tick(price: float, tick_size: float) -> float:
     return round(round(price / tick_size) * tick_size, decimals + 2)
 
 
-def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token: dict[str, Any],
+def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], contract: dict[str, Any],
                          tick_size: float | None = None) -> dict[str, Any]:
     from aegis_alpha.tools.gen2_canary_exec import deterministic_client_order_id
 
@@ -160,7 +160,7 @@ def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token
         "margin_type": "ISOLATED",
         "entry": {"type": "MARKET"},
         "brackets": {"stop_price": stop_price, "time_exit_at": time_exit, "reduce_only": True},
-        "risk_context": {"max_loss_usd": sizing["per_stop_loss"], "arm_token_checksum": token.get("checksum")},
+        "risk_context": {"max_loss_usd": sizing["per_stop_loss"], "config_checksum": (contract or {}).get("config_checksum")},
         # Explicit ownership so the TS executor never manages this position with
         # another strategy's policy (Phase O adopting a Gen2 short is the bug
         # this closes). The bridge persists this into the ownership registry.
@@ -168,24 +168,24 @@ def build_decision_order(decision: dict[str, Any], sizing: dict[str, Any], token
             "owner": "GEN2",
             "strategy": "GEN2_EQM_TRRM",
             "exit_policy": "GEN2_H12",
-            "risk_policy": f"GEN2_{token.get('mode', 'EXPERIMENTAL')}",
+            "risk_policy": f"GEN2_{(contract or {}).get('mode', 'EXPERIMENTAL')}",
             "notification_policy": "GEN2",
         },
         "expires_at": str(pd.Timestamp(utc_now().isoformat()).tz_localize(None) + pd.Timedelta(seconds=60)),
     }
 
 
-def gates_for_live(candidate_id: str, decision: dict[str, Any], token_symbols: list[str], bridge_status: dict[str, Any] | None) -> tuple[bool, str]:
+def gates_for_live(candidate_id: str, decision: dict[str, Any], allowed_symbols: list[str], bridge_status: dict[str, Any] | None) -> tuple[bool, str]:
     if decision.get("decision") == "NO_DECISION":
         return False, str(decision.get("reason"))
     if decision.get("hypothetical_action") != "CANDIDATE_SHORT":
         return False, "VETOED_OR_ABSTAIN"
-    if decision["symbol"] not in token_symbols:
-        return False, "SYMBOL_NOT_IN_ARM_TOKEN"
+    if decision["symbol"] not in allowed_symbols:
+        return False, "SYMBOL_NOT_ALLOWED"
+    # Autonomous authorization: no arm token. A running watcher + a coherent
+    # config + kill switch off IS the authorization (PM2 is the arm mechanism).
+    # execution_enabled is checked at the cycle level; risk_gate covers caps/kill.
     ok, reason = oc.risk_gate(candidate_id)
-    if not ok:
-        return False, reason
-    ok, reason, _ = oc.verify_arm_token(candidate_id)
     if not ok:
         return False, reason
     if bridge_status is None:
@@ -231,7 +231,8 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
         except Exception:
             bridge_status = None
 
-    token_ok, _, token = oc.verify_arm_token(candidate_id)
+    # Autonomous authorization: the operational config (gen2_config.yaml) is the
+    # single source of truth; a running watcher IS the arm. No arm token.
     contract = None
     try:
         contract = oc.load_contract(candidate_id)
@@ -251,7 +252,9 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
     decisions: list[dict[str, Any]] = []
     candidate_opps: list[dict[str, Any]] = []
     live_attempts: list[dict[str, Any]] = []
-    token_symbols = token.get("allowed_symbols", []) if token_ok else []
+    # Symbol allowlist and the live master switch come from the config, not a token.
+    allowed_symbols = list(contract.get("symbols", [])) if contract else []
+    execution_enabled = bool(contract.get("execution_enabled", False)) if contract else False
 
     # Phase 1 — evaluate EVERY active symbol, record paper (always, independent of
     # the live path), and collect every CANDIDATE_SHORT with a finite score. These
@@ -299,14 +302,20 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
             attempt["reason"] = "BELOW_FROZEN_EQM_THRESHOLD"
             live_attempts.append(attempt)
             continue
-        eligible, reason = gates_for_live(candidate_id, decision, token_symbols, bridge_status)
+        eligible, reason = gates_for_live(candidate_id, decision, allowed_symbols, bridge_status)
         attempt["eligible"] = eligible
         if not eligible:
             attempt["reason"] = reason
             live_attempts.append(attempt)
             continue
+        # live_enabled = the runner enabled the submission path; execution_enabled
+        # = the config master switch. Both must be on to place a real order.
         if not (live_enabled and contract is not None):
             attempt["reason"] = "WOULD_SUBMIT_LIVE_DISABLED"
+            live_attempts.append(attempt)
+            continue
+        if not execution_enabled:
+            attempt["reason"] = "EXECUTION_DISABLED_IN_CONFIG"
             live_attempts.append(attempt)
             continue
         if submitted_this_cycle >= max_per_cycle:
@@ -331,11 +340,10 @@ def run_cycle(candidate_id: str = DEFAULT_CANDIDATE_ID,
             attempt["reason"] = sizing["reason"]  # not an order attempt -> next-best may still submit
             live_attempts.append(attempt)
             continue
-        order = build_decision_order(decision, sizing, token, tick_size=filters.get("tick_size"))
-        # Fail-closed ordering: burn the token BEFORE wiring the order. A crash
-        # between submit and consume could otherwise leave an ACCEPTED order
-        # with an unconsumed token -> a second live order past max_orders.
-        oc.consume_order(candidate_id)
+        order = build_decision_order(decision, sizing, contract, tick_size=filters.get("tick_size"))
+        # Fail-closed ordering: record the order against the daily cap BEFORE
+        # wiring it. A crash between submit and record would otherwise let the
+        # DAILY_ORDER_CAP under-count and permit an extra order.
         core.record_order_opened(candidate_id)  # daily order counter -> DAILY_ORDER_CAP gate
         submitted_this_cycle += 1  # this cycle's single-order budget is now spent
         ack = (execute_fn or bridge.post_execute)(order)
@@ -511,13 +519,20 @@ def collect_startup_state(candidate_id: str, status_fn: Any = None) -> dict[str,
         state["contract"] = oc.load_contract(candidate_id)
     except Exception:
         state["contract"] = None
-    armed, arm_reason, token = oc.verify_arm_token(candidate_id)
-    state["armed"], state["arm_reason"] = armed, arm_reason
+    # Autonomous: "armed" = config valid + execution enabled + kill off (PM2 alive).
+    contract = state["contract"]
+    killed = core.kill_switch_engaged(candidate_id)
+    exec_on = bool(contract.get("execution_enabled")) if contract else False
+    state["armed"] = bool(contract) and exec_on and not killed
+    state["arm_reason"] = ("ARMED_VIA_CONFIG" if state["armed"]
+                           else "KILL_SWITCH" if killed
+                           else "EXECUTION_DISABLED_IN_CONFIG" if contract and not exec_on
+                           else "NO_CONFIG")
     _, state["risk_reason"] = oc.risk_gate(candidate_id, mutate=False)
-    state["kill_switch"] = core.kill_switch_engaged(candidate_id)
+    state["kill_switch"] = killed
     state["phase_o_paused"] = core.phase_o_new_entries_paused()[0]
     state["symbols_analyzed"] = list(SYMBOLS)
-    state["symbols_executable"] = token.get("allowed_symbols", []) if armed else []
+    state["symbols_executable"] = list(contract.get("symbols", [])) if (contract and exec_on) else []
     try:
         state["bridge"] = (status_fn or bridge.get_status)()
     except Exception:
@@ -573,10 +588,89 @@ def collect_startup_state(candidate_id: str, status_fn: Any = None) -> dict[str,
     return state
 
 
+def startup_gauntlet(candidate_id: str, status_fn: Any = None) -> tuple[bool, list[str]]:
+    """Automatable safety gauntlet run at watcher start. Returns (ok, failures).
+    Used to decide whether a persisted kill switch may clear on `pm2 restart`:
+    the kill clears ONLY if this passes — so a restart can never resume into a
+    broken/unsafe state (drifted science, open position, Phase O active)."""
+    failures: list[str] = []
+    freeze = json.loads(core.FREEZE_PATH.read_text())
+    # science: environment + model hashes + selection policy vs freeze
+    try:
+        check_environment_vs_freeze(freeze)
+    except Exception as exc:
+        failures.append(str(exc)[:80])
+    try:
+        trrm_dir = GEN2_ROOT / "rv2" / "20260711T171832Z"
+        eqm_dir = GEN2_ROOT / "eqm1" / "20260711T201456Z"
+        if sha256_file(trrm_dir / "rv2_candidate.pkl") != freeze["trrm_v2_sha256"]:
+            failures.append("TRRM_HASH_MISMATCH_VS_FREEZE")
+        if sha256_file(eqm_dir / "eqm1_candidate.pkl") != freeze["eqm1_sha256"]:
+            failures.append("EQM_HASH_MISMATCH_VS_FREEZE")
+    except Exception as exc:
+        failures.append(f"MODEL_HASH_UNREADABLE:{exc}"[:80])
+    try:
+        from aegis_alpha.tools.gen2_selection_policy import load_threshold_verified
+
+        load_threshold_verified(freeze)
+    except Exception as exc:
+        failures.append(str(exc)[:80])
+    # config coherent
+    try:
+        oc.load_contract(candidate_id)
+    except Exception as exc:
+        failures.append(f"CONFIG:{exc}"[:80])
+    # Phase O paused
+    if not core.phase_o_new_entries_paused()[0]:
+        failures.append("PHASE_O_NOT_PAUSED")
+    # bridge reachable + NO open position (a kill from an orphan/unprotected
+    # position must not clear while the position still exists)
+    try:
+        st = (status_fn or bridge.get_status)()
+        if st.get("open_positions"):
+            failures.append("OPEN_POSITION_PRESENT")
+    except Exception:
+        pass  # bridge unreachable at boot is not itself a reason to keep a kill
+    return (len(failures) == 0, failures)
+
+
+def startup_arm(candidate_id: str, status_fn: Any = None, notify_fn: Any = None) -> dict[str, Any]:
+    """PM2 = arm. On watcher start: write the startup audit, and if a kill switch
+    is engaged, clear it ONLY if the gauntlet passes (smart re-arm)."""
+    import aegis_alpha.tools.gen2_config as cfg
+
+    audit = None
+    try:
+        audit = cfg.write_startup_audit(candidate_id)
+        cfg.snapshot_for_change_tracking(candidate_id)
+    except Exception as exc:
+        core.append_jsonl(core.canary_dir(candidate_id) / "incidents" / "incidents.jsonl",
+                          {"type": "STARTUP_CONFIG_INVALID", "error": str(exc)[:160]})
+    ok, failures = startup_gauntlet(candidate_id, status_fn)
+    result: dict[str, Any] = {"gauntlet_ok": ok, "failures": failures, "kill_cleared": False, "audit": audit}
+    if core.kill_switch_engaged(candidate_id):
+        if ok:
+            kpath = core.canary_dir(candidate_id) / "KILL_SWITCH"
+            kpath.unlink(missing_ok=True)
+            result["kill_cleared"] = True
+            core.append_jsonl(core.canary_dir(candidate_id) / "incidents" / "incidents.jsonl",
+                              {"type": "KILL_SWITCH_CLEARED_ON_RESTART", "gauntlet": "PASSED"})
+            if notify_fn is not None:
+                notify_fn(candidate_id, "INFO", "Kill switch limpiado en restart (gauntlet OK)",
+                          "El gauntlet de arranque pasó limpio; el kill switch se limpió y el sistema queda armado.",
+                          fingerprint=f"kill-cleared-{utc_now().isoformat()}")
+        elif notify_fn is not None:
+            notify_fn(candidate_id, "CRITICAL", "Kill switch NO se limpió en restart",
+                      f"El gauntlet falló: {', '.join(failures)}. El sistema queda DESARMADO hasta resolver la causa.",
+                      fingerprint=f"kill-held-{'|'.join(failures)}")
+    return result
+
+
 def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float = 300.0,
               max_cycles: int | None = None, live_enabled: bool = False,
               cycle_fn: Any = None, pull_fn: Any = None, resolve_fn: Any = None,
-              sleep_fn: Any = time.sleep, notify_fn: Any = None) -> dict[str, Any]:
+              sleep_fn: Any = time.sleep, notify_fn: Any = None,
+              arm_on_start: bool = True) -> dict[str, Any]:
     """Autonomous forward-evidence runner: events -> decisions -> outcomes -> heartbeat.
 
     Paper evidence collection never stops for live-path problems: the kill
@@ -597,6 +691,16 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
         return sum(1 for l in incidents_path.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()) if incidents_path.exists() else 0
 
     prev_incidents = _incident_count()
+    # PM2 = arm: startup audit + smart (gauntlet-gated) kill clear.
+    if arm_on_start:
+        try:
+            startup_arm(candidate_id, notify_fn=notify_fn)
+        except Exception as exc:
+            core.append_jsonl(cdir / "incidents" / "incidents.jsonl", {"type": "STARTUP_ARM_FAILED", "error": repr(exc)})
+    prev_kill = core.kill_switch_engaged(candidate_id)  # re-read after a possible clear
+    import aegis_alpha.tools.gen2_config as _cfg
+
+    prev_config_checksum = _cfg.config_checksum()
     if notify_fn is not None:
         try:
             import aegis_alpha.tools.gen2_telegram as tg
@@ -609,6 +713,19 @@ def run_watch(candidate_id: str = DEFAULT_CANDIDATE_ID, interval_seconds: float 
             pass
     while max_cycles is None or counters["cycles"] < max_cycles:
         cycle_started = utc_now().isoformat()
+        # detect a live config edit (CONFIGURATION_CHANGED) before acting on it
+        try:
+            change = _cfg.detect_config_change(prev_config_checksum, candidate_id)
+            if change is not None:
+                prev_config_checksum = change["new_checksum"]
+                if notify_fn is not None:
+                    sev = "WARNING" if change["new_config_valid"] else "CRITICAL"
+                    body = ("cambios: " + json.dumps(change["diff"])[:400]) if change["new_config_valid"] \
+                        else f"CONFIG INVÁLIDA, se mantiene la anterior: {change['invalid_reason']}"
+                    notify_fn(candidate_id, sev, "CONFIGURATION_CHANGED", body,
+                              fingerprint=f"cfgchg-{change['new_checksum'][:12]}")
+        except Exception:
+            pass
         if live_enabled:
             ev = (pull_fn or pull_events)(candidate_id)
             counters["events_ingested"] += int(ev.get("ingested", 0))
