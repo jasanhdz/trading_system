@@ -17,10 +17,21 @@ mode: EXPERIMENTAL_CONTINUOUS
 capital:
   initial_equity: 16.24        # real experimental wallet
 
-# Symbols Aegis analyses / is allowed to execute (replaces the arm-token allowlist).
+# Symbols Aegis analyses AND is allowed to execute — the SAME 11-symbol
+# universe end to end (single source of truth for both Python ranking and the
+# TS bridge's executable allowlist; replaces the old arm-token allowlist).
 symbols:
-  - ADAUSDT
+  - BTCUSDT
+  - ETHUSDT
+  - SOLUSDT
+  - BNBUSDT
+  - XRPUSDT
   - DOGEUSDT
+  - ADAUSDT
+  - AVAXUSDT
+  - SUIUSDT
+  - LTCUSDT
+  - LINKUSDT
 
 # Execution master switch. false = paper only (bridge validates, sends nothing).
 # Set true when you want the autonomous system to place real orders.
