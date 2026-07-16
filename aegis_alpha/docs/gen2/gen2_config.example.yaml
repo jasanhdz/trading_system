@@ -1,0 +1,32 @@
+# TEMPLATE — copy to /home/jasan/Develop/aegis_gen2/gen2_config.yaml and edit.
+# This is the SINGLE operational source of truth. PM2 start = ARMED, PM2 stop = DISARMED.
+# GEN2 — single operational source of truth (autonomous deployment).
+# PM2 is the arm/disarm mechanism: a running watcher IS the authorization.
+# Science is frozen and NOT editable here (candidate, hashes, and the frozen
+# selection threshold live in GEN2_SYSTEM_FREEZE.json / GEN2_SELECTION_POLICY.json).
+# Any change is auto-audited (startup_audit.jsonl) and diffed live
+# (config_changes.jsonl -> CONFIGURATION_CHANGED). Incoherent values fail closed.
+
+candidate_id: gen2-20260711T202935Z
+
+# Operational mode preset (SAFE | EXPERIMENTAL | EXPERIMENTAL_CONTINUOUS).
+# The preset provides the safe leverage/loss caps; risk_overrides may tune the
+# operator-facing ones but must stay coherent (validated fail-closed).
+mode: EXPERIMENTAL_CONTINUOUS
+
+capital:
+  initial_equity: 16.24        # real experimental wallet
+
+# Symbols Aegis analyses / is allowed to execute (replaces the arm-token allowlist).
+symbols:
+  - ADAUSDT
+  - DOGEUSDT
+
+# Execution master switch. false = paper only (bridge validates, sends nothing).
+# Set true when you want the autonomous system to place real orders.
+execution_enabled: false
+
+telegram_enabled: true
+
+# Optional operator overrides on top of the mode preset (must stay coherent).
+risk_overrides: {}

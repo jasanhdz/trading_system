@@ -142,7 +142,11 @@ def validate_coherence(contract: dict[str, Any], initial_equity: float) -> list[
     return errors
 
 
-def write_contract(candidate_id: str, mode: str, initial_equity: float, force: bool = False) -> dict[str, Any]:
+def write_contract(candidate_id: str, mode: str, initial_equity: float, force: bool = False,
+                   symbols: list[str] | None = None, execution_enabled: bool = True) -> dict[str, Any]:
+    """Legacy JSON contract writer (kept for tests / back-compat). Production uses
+    gen2_config.yaml. symbols/execution_enabled mirror the config fields the loop
+    reads for the autonomous (token-free) authorization."""
     mode = mode.upper()
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode}")
@@ -162,6 +166,8 @@ def write_contract(candidate_id: str, mode: str, initial_equity: float, force: b
         "initial_equity": float(initial_equity),
         "equity_floor": float(initial_equity) * MODES[mode]["equity_floor_fraction"],
         "created_at_utc": utc_now().isoformat(),
+        "symbols": [s.upper() for s in (symbols or [])],
+        "execution_enabled": bool(execution_enabled),
         "scientific_hashes": {k: freeze[k] for k in ("trrm_v2_sha256", "eqm1_sha256", "d3_dataset_sha256", "feature_hash")},
     }
     errors = validate_coherence(contract, float(initial_equity))
@@ -173,6 +179,22 @@ def write_contract(candidate_id: str, mode: str, initial_equity: float, force: b
 
 
 def load_contract(candidate_id: str) -> dict[str, Any]:
+    """Single source of truth = gen2_config.yaml (autonomous deployment). Falls
+    back to the legacy operational_contract.json only when no config yaml exists
+    (kept for tests/back-compat). The config is coherence-validated fail-closed."""
+    import aegis_alpha.tools.gen2_config as cfg
+
+    # The config yaml is the PRODUCTION source of truth. Tests override
+    # core.CANARY_ROOT to a temp dir, in which case we use the per-candidate
+    # legacy contract they wrote instead of the global production config.
+    production = str(core.CANARY_ROOT) == str(cfg.GEN2_ROOT / "live_canary")
+    if production and cfg.CONFIG_PATH.exists():
+        try:
+            data = cfg._read_yaml(cfg.CONFIG_PATH)
+        except Exception:
+            data = {}
+        if str(data.get("candidate_id")) == candidate_id:
+            return cfg.load_config(candidate_id)  # production path; surfaces coherence errors
     path = contract_path(candidate_id)
     if not path.exists():
         raise FileNotFoundError("OPERATIONAL_CONTRACT_MISSING")
