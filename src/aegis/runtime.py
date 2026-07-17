@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
+from time import perf_counter
+from typing import Mapping
 
 from .config import BrainConfig, load_brain_config
 from .decision import DecisionFreezer, GlobalSelectionPolicy, ScientificCandidateBuilder
@@ -13,6 +16,30 @@ from .features import DeterministicFeaturePipeline, MarketSnapshotValidator
 from .layers import LayerSettings, OrderedScientificLayers
 from .models import DeterministicModelRuntime, load_model_bundle
 from .utils import HashProvider, Sha256HashProvider, SystemUtcClock, UtcClock
+
+
+class RuntimeMetrics:
+    """In-process scientific counters; values never influence a decision."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._counters: dict[str, int] = {"requests": 0, "errors": 0, "no_trade": 0, "selected": 0, "outcomes": 0}
+        self._latency_seconds: dict[str, float] = {}
+        self._stage_calls: dict[str, int] = {}
+
+    def increment(self, name: str) -> None:
+        with self._lock:
+            self._counters[name] = self._counters.get(name, 0) + 1
+
+    def latency(self, stage: str, seconds: float) -> None:
+        with self._lock:
+            self._latency_seconds[stage] = self._latency_seconds.get(stage, 0.0) + seconds
+            self._stage_calls[stage] = self._stage_calls.get(stage, 0) + 1
+
+    def snapshot(self) -> Mapping[str, Mapping[str, float | int]]:
+        with self._lock:
+            means = {stage: self._latency_seconds[stage] / self._stage_calls[stage] for stage in self._latency_seconds}
+            return {"counters": dict(self._counters), "mean_latency_seconds": means}
 
 
 @dataclass
@@ -28,6 +55,7 @@ class BrainRuntime:
     evidence: EvidenceRecorder
     hashing: HashProvider
     clock: UtcClock
+    metrics: RuntimeMetrics = field(default_factory=RuntimeMetrics)
 
     @property
     def ready(self) -> bool:
@@ -49,19 +77,26 @@ class BrainRuntime:
         )
 
     def evaluate(self, request: DecisionRequest) -> DecisionResponse:
-        if request.contract_version != self.config.contract_version or request.config_version != self.config.config_version:
-            raise ValueError("request contract or configuration version mismatch")
-        if not self.ready:
-            raise RuntimeError("scientific brain is not ready")
-        now = self.clock.now()
-        self.validator.validate(request.snapshot, now)
-        features = self.features.transform(request.snapshot)
-        predictions = self.models.predict(features)
+        started = perf_counter()
+        self.metrics.increment("requests")
+        try:
+            if request.contract_version != self.config.contract_version or request.config_version != self.config.config_version:
+                raise ValueError("request contract or configuration version mismatch")
+            if not self.ready:
+                raise RuntimeError("scientific brain is not ready")
+            now = self.clock.now()
+            stage = perf_counter(); self.validator.validate(request.snapshot, now); self.metrics.latency("validation", perf_counter() - stage)
+            stage = perf_counter(); features = self.features.transform(request.snapshot); self.metrics.latency("features", perf_counter() - stage)
+            stage = perf_counter(); predictions = self.models.predict(features); self.metrics.latency("models", perf_counter() - stage)
+        except Exception:
+            self.metrics.increment("errors")
+            self.metrics.latency("total", perf_counter() - started)
+            raise
         context = ScientificContext(request.request_id, request.decision_cycle_id, request.snapshot.closed_at,
                                     request.snapshot.timeframe, request.snapshot.portfolio, features)
-        layers = self.layers.apply(predictions, context)
-        candidates = self.candidate_builder.build(request.decision_cycle_id, predictions, layers)
-        selection = self.selection_policy.select(candidates, request.snapshot.portfolio, now)
+        stage = perf_counter(); layers = self.layers.apply(predictions, context); self.metrics.latency("layers", perf_counter() - stage)
+        stage = perf_counter(); candidates = self.candidate_builder.build(request.decision_cycle_id, predictions, layers); self.metrics.latency("candidates", perf_counter() - stage)
+        stage = perf_counter(); selection = self.selection_policy.select(candidates, request.snapshot.portfolio, now); self.metrics.latency("selection", perf_counter() - stage)
         evidence_payload = {
             "request_hash": self.hashing.digest_value(request), "validation": "VALID",
             "feature_batch": features, "predictions": predictions, "layers": layers,
@@ -87,6 +122,8 @@ class BrainRuntime:
             decision_cycle_id=request.decision_cycle_id, event_type="DECISION_EVALUATED", occurred_at=now,
             payload={**evidence_payload, "frozen": frozen, "response": response},
         ))
+        self.metrics.increment("no_trade" if response.status.value == "NO_TRADE" else "selected")
+        self.metrics.latency("total", perf_counter() - started)
         return response
 
 

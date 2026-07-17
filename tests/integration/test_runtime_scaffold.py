@@ -16,6 +16,9 @@ def test_end_to_end_scientific_pipeline_is_deterministic_and_global(decision_req
     assert len(first.ranking) == 11
     assert len(first.selected) <= 1
     assert len(runtime.evidence.events) == 2  # type: ignore[attr-defined]
+    metrics = runtime.metrics.snapshot()
+    assert metrics["counters"]["requests"] == 2
+    assert {"validation", "features", "models", "layers", "candidates", "selection", "total"} <= set(metrics["mean_latency_seconds"])
 
 
 def test_api_health_manifest_and_routes(decision_request) -> None:

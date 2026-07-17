@@ -28,6 +28,7 @@ class BrainApi:
 
     def submit_outcome(self, outcome: DecisionOutcome) -> None:
         self.runtime.evidence.record_outcome(outcome)
+        self.runtime.metrics.increment("outcomes")
 
 
 def create_app(api: BrainApi) -> Any:
