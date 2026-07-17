@@ -22,7 +22,6 @@ model:
   name: aegis_alpha
   version: 0.1.0
   champion_path: aegis_alpha/models/champion/aegis_champion.zip
-  bc_path: aegis_alpha/models/bc/aegis_bc_prudent.zip
   window_size: 64
   n_features: 21
 

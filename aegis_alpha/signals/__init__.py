@@ -9,5 +9,3 @@ from .common import (
     safe_div,
     win_rate,
 )
-from .signal_registry import SIGNAL_REGISTRY, SignalSpec
-

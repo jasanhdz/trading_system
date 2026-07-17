@@ -38,7 +38,6 @@ class ModelConfig:
     name: str = "aegis_alpha"
     version: str = "0.1.0"
     champion_path: str = "aegis_alpha/models/champion/aegis_champion.zip"
-    bc_path: str = "aegis_alpha/models/bc/aegis_bc_prudent.zip"
     window_size: int = 64
     n_features: int = 21
 
