@@ -1,0 +1,40 @@
+{
+  "approved": true,
+  "bundle_id": "aegis-offline-reference-v1",
+  "content_hash": "86bf58a4c8f958f048a8547364e2858604a1a171e32ac39ab6366e50618d4b23",
+  "estimators": [
+    {
+      "heads": {
+        "expected_return": {"bias": 0.0, "weights": {"relative_return_12": 0.10, "ret_12": 0.18, "trend_strength_12": 0.0002}},
+        "long": {"bias": -0.10, "weights": {"cross_rank_return_6": 0.70, "ema_gap_6_12": 12.0, "market_direction_6": 8.0, "ret_12": 10.0}},
+        "neutral": {"bias": 0.15, "weights": {"chop_12": 0.50, "range_expansion": -0.20}},
+        "qmae_q90": {"bias": 0.008, "weights": {"atr_24": 0.80, "range_mean_24": 0.30}},
+        "quality": {"bias": 0.10, "weights": {"chop_12": -0.70, "persistence_6": 0.20, "trend_strength_12": 0.05}},
+        "short": {"bias": -0.10, "weights": {"cross_rank_return_6": -0.70, "ema_gap_6_12": -12.0, "market_direction_6": -8.0, "ret_12": -10.0}},
+        "tail_risk": {"bias": -1.10, "weights": {"atr_24": 20.0, "range_expansion": 0.40, "volatility_ratio_6_24": 0.25}}
+      },
+      "horizon_bars": 12,
+      "model_id": "linear-momentum-h12"
+    },
+    {
+      "heads": {
+        "expected_return": {"bias": 0.0, "weights": {"relative_return_6": 0.08, "ret_6": 0.14, "ema_slope_12": 0.12}},
+        "long": {"bias": -0.05, "weights": {"cross_rank_return_6": 0.50, "ema_gap_12_24": 10.0, "persistence_6": 0.30}},
+        "neutral": {"bias": 0.10, "weights": {"chop_12": 0.40, "volatility_ratio_6_24": -0.10}},
+        "qmae_q90": {"bias": 0.009, "weights": {"atr_12": 0.65, "candle_range_fraction": 0.20}},
+        "quality": {"bias": 0.15, "weights": {"chop_12": -0.60, "volume_zscore_24": 0.04, "trend_strength_12": 0.04}},
+        "short": {"bias": -0.05, "weights": {"cross_rank_return_6": -0.50, "ema_gap_12_24": -10.0, "persistence_6": -0.30}},
+        "tail_risk": {"bias": -1.00, "weights": {"atr_12": 18.0, "range_expansion": 0.30, "volume_zscore_24": 0.04}}
+      },
+      "horizon_bars": 12,
+      "model_id": "linear-regime-h12"
+    }
+  ],
+  "feature_hash": "9a6e74720e14ce52800033e14979c4309c2a7f3d3c49b0218e727f29fe64248d",
+  "feature_schema_version": "aegis-features-v1",
+  "normalizer": {"clip_absolute": 12.0, "means": {}, "scales": {}},
+  "schema_version": "aegis-model-bundle-v1",
+  "symbol_set_hash": "f6448e67daf1d017e16cc6b331f6494e97e178824474994fff08864303ccd348",
+  "timeframe": "5m",
+  "universe_id": "aegis-operational-eleven-v1"
+}

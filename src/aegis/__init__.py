@@ -1,9 +1,7 @@
-"""Scientific brain contracts for the Aegis clean rebuild.
+"""Aegis Clean Rebuild scientific brain."""
 
-This package intentionally exposes structure only. Scientific algorithms,
-artifact loading, persistence, and transport remain TODO.
-"""
-
+from .api import BrainApi, create_app
 from .domain import BrainManifest, DecisionRequest, DecisionResponse
+from .runtime import BrainRuntime, build_runtime
 
-__all__ = ["BrainManifest", "DecisionRequest", "DecisionResponse"]
+__all__ = ["BrainApi", "BrainManifest", "BrainRuntime", "DecisionRequest", "DecisionResponse", "build_runtime", "create_app"]

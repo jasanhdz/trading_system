@@ -1,16 +1,161 @@
-"""Approved model-bundle runtime boundary.
+"""Verified immutable model bundles and deterministic inference runtime."""
 
-TODO migration reference: study the bundle and feature compatibility contracts
-in ``feature/wraith-phantom-v8:aegis_alpha/tools/gen2_rv2_train.py`` without
-copying its estimator or training implementation into the online runtime.
-"""
+from __future__ import annotations
 
-from typing import Protocol
+import json
+import math
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Mapping, Protocol
 
-from .domain import FeatureBatch, ModelPredictions
+from .domain import FeatureBatch, ModelPrediction, ModelPredictions, TradeSide
+from .features import FrozenNormalizer
+from .utils import Sha256HashProvider
+
+
+class ModelBundleError(ValueError):
+    pass
 
 
 class ModelRuntime(Protocol):
+    bundle_id: str
+
+    def predict(self, features: FeatureBatch) -> ModelPredictions: ...
+
+
+@dataclass(frozen=True)
+class LinearHead:
+    bias: float
+    weights: Mapping[str, float]
+
+    def evaluate(self, values: Mapping[str, float]) -> float:
+        result = self.bias + math.fsum(float(weight) * values.get(name, 0.0) for name, weight in self.weights.items())
+        if not math.isfinite(result):
+            raise ModelBundleError("non-finite linear head output")
+        return result
+
+
+@dataclass(frozen=True)
+class EstimatorSpec:
+    model_id: str
+    horizon_bars: int
+    long: LinearHead
+    short: LinearHead
+    neutral: LinearHead
+    expected_return: LinearHead
+    tail_risk: LinearHead
+    qmae_q90: LinearHead
+    quality: LinearHead
+
+
+@dataclass(frozen=True)
+class ModelBundle:
+    bundle_id: str
+    schema_version: str
+    feature_schema_version: str
+    feature_hash: str
+    universe_id: str
+    symbol_set_hash: str
+    timeframe: str
+    approved: bool
+    content_hash: str
+    normalizer: FrozenNormalizer
+    estimators: tuple[EstimatorSpec, ...]
+
+
+def _head(payload: Mapping[str, Any]) -> LinearHead:
+    weights = payload.get("weights", {})
+    if not isinstance(weights, Mapping):
+        raise ModelBundleError("head weights must be a mapping")
+    parsed = {str(name): float(value) for name, value in weights.items()}
+    if not all(math.isfinite(value) for value in parsed.values()):
+        raise ModelBundleError("head weights must be finite")
+    return LinearHead(float(payload.get("bias", 0.0)), parsed)
+
+
+def load_model_bundle(path: Path, *, expected_bundle_id: str | None = None) -> ModelBundle:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ModelBundleError("bundle must be a JSON object")
+    claimed_hash = str(payload.get("content_hash", ""))
+    hash_payload = dict(payload)
+    hash_payload.pop("content_hash", None)
+    actual_hash = Sha256HashProvider().digest_value(hash_payload)
+    if claimed_hash != actual_hash:
+        raise ModelBundleError("bundle content hash mismatch")
+    bundle_id = str(payload.get("bundle_id", ""))
+    if expected_bundle_id is not None and bundle_id != expected_bundle_id:
+        raise ModelBundleError("bundle ID mismatch")
+    normalizer_data = payload.get("normalizer", {})
+    estimators = tuple(
+        EstimatorSpec(
+            model_id=str(item["model_id"]), horizon_bars=int(item["horizon_bars"]),
+            long=_head(item["heads"]["long"]), short=_head(item["heads"]["short"]),
+            neutral=_head(item["heads"]["neutral"]), expected_return=_head(item["heads"]["expected_return"]),
+            tail_risk=_head(item["heads"]["tail_risk"]), qmae_q90=_head(item["heads"]["qmae_q90"]),
+            quality=_head(item["heads"]["quality"]),
+        )
+        for item in payload.get("estimators", ())
+    )
+    if not estimators or len({item.model_id for item in estimators}) != len(estimators):
+        raise ModelBundleError("bundle requires uniquely named estimators")
+    return ModelBundle(
+        bundle_id=bundle_id, schema_version=str(payload["schema_version"]),
+        feature_schema_version=str(payload["feature_schema_version"]), feature_hash=str(payload["feature_hash"]),
+        universe_id=str(payload["universe_id"]), symbol_set_hash=str(payload["symbol_set_hash"]), timeframe=str(payload["timeframe"]),
+        approved=bool(payload.get("approved", False)), content_hash=claimed_hash,
+        normalizer=FrozenNormalizer(
+            means={str(k): float(v) for k, v in normalizer_data.get("means", {}).items()},
+            scales={str(k): float(v) for k, v in normalizer_data.get("scales", {}).items()},
+            clip_absolute=float(normalizer_data.get("clip_absolute", 12.0)),
+        ),
+        estimators=estimators,
+    )
+
+
+def _sigmoid(value: float) -> float:
+    if value >= 0:
+        z = math.exp(-min(value, 700.0))
+        return 1.0 / (1.0 + z)
+    z = math.exp(max(value, -700.0))
+    return z / (1.0 + z)
+
+
+def _softmax(values: tuple[float, ...]) -> tuple[float, ...]:
+    maximum = max(values)
+    exponentials = tuple(math.exp(max(-700.0, value - maximum)) for value in values)
+    denominator = math.fsum(exponentials)
+    return tuple(value / denominator for value in exponentials)
+
+
+@dataclass(frozen=True)
+class DeterministicModelRuntime:
+    bundle: ModelBundle
+    direction_threshold: float = 0.50
+
+    @property
+    def bundle_id(self) -> str:
+        return self.bundle.bundle_id
+
     def predict(self, features: FeatureBatch) -> ModelPredictions:
-        """TODO: run an immutable approved bundle and expose all predictions."""
-        ...
+        if features.schema_version != self.bundle.feature_schema_version or features.feature_hash != self.bundle.feature_hash:
+            raise ModelBundleError("feature schema does not match model bundle")
+        predictions: list[ModelPrediction] = []
+        for row in features.rows:
+            values = dict(zip(features.feature_names, row.normalized_values))
+            for estimator in self.bundle.estimators:
+                probabilities = _softmax((estimator.long.evaluate(values), estimator.short.evaluate(values), estimator.neutral.evaluate(values)))
+                long_probability, short_probability, neutral_probability = probabilities
+                best = max(probabilities)
+                if best < self.direction_threshold or neutral_probability == best:
+                    side = TradeSide.NO_TRADE
+                else:
+                    side = TradeSide.LONG if long_probability >= short_probability else TradeSide.SHORT
+                predictions.append(ModelPrediction(
+                    model_id=estimator.model_id, symbol=row.symbol, horizon_bars=estimator.horizon_bars, side=side,
+                    long_probability=long_probability, short_probability=short_probability, neutral_probability=neutral_probability,
+                    expected_return=estimator.expected_return.evaluate(values), tail_risk_probability=_sigmoid(estimator.tail_risk.evaluate(values)),
+                    qmae_q90=max(0.0, estimator.qmae_q90.evaluate(values)), quality_probability=_sigmoid(estimator.quality.evaluate(values)),
+                    uncertainty=1.0 - best,
+                ))
+        return ModelPredictions(self.bundle.bundle_id, features.feature_hash, tuple(predictions))

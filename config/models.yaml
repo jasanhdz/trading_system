@@ -1,7 +1,7 @@
 schema_version: aegis-model-config-v1
-model_bundle_id: TODO_APPROVED_MODEL_BUNDLE
-feature_schema_version: TODO_FEATURE_SCHEMA
-artifact_registry: TODO_ARTIFACT_REGISTRY
+model_bundle_id: aegis-offline-reference-v1
+feature_schema_version: aegis-features-v1
+artifact_registry: bundles
 layers:
   - D3
   - RV2
@@ -9,5 +9,12 @@ layers:
   - QMAE
   - EQM
   - ECON1
-selection_policy: TODO_GLOBAL_SELECTION_POLICY
-decision_freeze: TODO_IMMUTABLE_DECISION_FREEZE
+thresholds:
+  direction_probability: 0.50
+  selection_score: 0.50
+  trrm_max_tail_probability: 0.70
+  qmae_max_fraction: 0.03
+  eqm_min_score: 0.0
+economics:
+  estimated_round_trip_cost_fraction: 0.0014
+maximum_decision_age_seconds: 30
