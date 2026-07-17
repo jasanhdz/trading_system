@@ -1,0 +1,13 @@
+schema_version: aegis-model-config-v1
+model_bundle_id: TODO_APPROVED_MODEL_BUNDLE
+feature_schema_version: TODO_FEATURE_SCHEMA
+artifact_registry: TODO_ARTIFACT_REGISTRY
+layers:
+  - D3
+  - RV2
+  - TRRM
+  - QMAE
+  - EQM
+  - ECON1
+selection_policy: TODO_GLOBAL_SELECTION_POLICY
+decision_freeze: TODO_IMMUTABLE_DECISION_FREEZE

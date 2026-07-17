@@ -1,0 +1,16 @@
+schema_version: aegis-brain-config-v1
+contract_version: aegis-clean-rebuild-v1
+runtime:
+  mode: scaffold
+  implementation_status: TODO
+  universe_config: universe.yaml
+  models_config: models.yaml
+api:
+  health: /health
+  ready: /ready
+  manifest: /manifest
+  evaluate: /v1/decisions/evaluate
+  outcome: /v1/evidence/outcome
+evidence:
+  recorder: TODO_APPEND_ONLY_RECORDER
+  persistence_enabled: false

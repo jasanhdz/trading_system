@@ -1,0 +1,25 @@
+{
+  "contract_version": "aegis-clean-rebuild-v1",
+  "universe_id": "aegis-operational-eleven-v1",
+  "symbols": [
+    "ETHUSDT",
+    "BTCUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "SUIUSDT",
+    "LTCUSDT"
+  ],
+  "symbol_set_hash": "TODO_COMPUTE_AND_HANDSHAKE",
+  "timeframe": "5m",
+  "config_version": "aegis-brain-config-v1",
+  "model_bundle_id": "TODO_APPROVED_MODEL_BUNDLE",
+  "feature_schema_version": "TODO_FEATURE_SCHEMA",
+  "capabilities": ["evaluate", "record_outcome"],
+  "build_id": "TODO_BUILD_ID",
+  "ready": false
+}
