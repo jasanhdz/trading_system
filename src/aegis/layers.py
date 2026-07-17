@@ -54,7 +54,7 @@ class OrderedScientificLayers:
                 results.append(self._unavailable(row.symbol))
                 continue
             features = dict(zip(context.features.feature_names, row.raw_values))
-            regime, d3_confidence = self._d3(features)
+            regime, d3_confidence = classify_regime(features)
             long_probability = _mean([item.long_probability for item in symbol_predictions])
             short_probability = _mean([item.short_probability for item in symbol_predictions])
             direction_probability = max(long_probability, short_probability)
@@ -118,25 +118,6 @@ class OrderedScientificLayers:
         return LayerOutputs(tuple(ScientificLayerName), tuple(results))
 
     @staticmethod
-    def _d3(features: dict[str, float]) -> tuple[Regime, float]:
-        trend = features["market_direction_6"]
-        volatility = features["range_mean_24"]
-        expansion = features["range_expansion"]
-        chop = features["chop_12"]
-        if volatility > 0.035 or expansion > 1.0:
-            regime = Regime.HIGH_VOLATILITY
-        elif chop > 0.70:
-            regime = Regime.RANGE
-        elif trend > 0.002:
-            regime = Regime.BULL_TREND
-        elif trend < -0.002:
-            regime = Regime.BEAR_TREND
-        else:
-            regime = Regime.TRANSITION
-        confidence = _clip(0.50 + min(0.45, abs(trend) * 25.0 + abs(expansion) * 0.10 + abs(chop - 0.5) * 0.20))
-        return regime, confidence
-
-    @staticmethod
     def _unavailable(symbol: str) -> LayerResult:
         return LayerResult(
             symbol=symbol, side=TradeSide.NO_TRADE, regime=Regime.UNKNOWN, d3_confidence=0.0,
@@ -144,3 +125,23 @@ class OrderedScientificLayers:
             eqm_score=0.0, model_disagreement=1.0, econ_edge=-1.0, calibrated_score=0.0,
             eligible=False, reason_codes=(ReasonCode.MODEL_UNAVAILABLE,),
         )
+
+
+def classify_regime(features: dict[str, float]) -> tuple[Regime, float]:
+    """Public pure D3 classification shared by inference and offline evaluation."""
+    trend = features["market_direction_6"]
+    volatility = features["range_mean_24"]
+    expansion = features["range_expansion"]
+    chop = features["chop_12"]
+    if volatility > 0.035 or expansion > 1.0:
+        regime = Regime.HIGH_VOLATILITY
+    elif chop > 0.70:
+        regime = Regime.RANGE
+    elif trend > 0.002:
+        regime = Regime.BULL_TREND
+    elif trend < -0.002:
+        regime = Regime.BEAR_TREND
+    else:
+        regime = Regime.TRANSITION
+    confidence = _clip(0.50 + min(0.45, abs(trend) * 25.0 + abs(expansion) * 0.10 + abs(chop - 0.5) * 0.20))
+    return regime, confidence

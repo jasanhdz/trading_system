@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Mapping, Protocol, Sequence
 
-from ..domain import MarketSnapshot
+from ..domain import MarketSnapshot, Regime
 from ..features import FeaturePipeline
 from ..utils import HashProvider
 
@@ -26,6 +26,7 @@ class TrainingRow:
     symbol: str
     features: tuple[float, ...]
     target: TrainingTarget
+    regime: Regime = Regime.UNKNOWN
 
 
 @dataclass(frozen=True)

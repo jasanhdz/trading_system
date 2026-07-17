@@ -1,0 +1,37 @@
+schema_version: aegis-candidate-experiment-v1
+experiment_id: aegis-clean-rebuild-phase2-v1
+data:
+  source: data/binance_candles.db
+  timeframe: 5m
+  start: '2026-01-01T00:00:00Z'
+  end: '2026-07-01T00:00:00Z'
+  history_bars: 60
+  horizon_bars: 12
+  sample_every_bars: 12
+protocol:
+  seed: 20260717
+  train_fraction: 0.60
+  validation_fraction: 0.20
+  test_fraction: 0.20
+  embargo_minutes: 120
+  friction_fraction: 0.0014
+  direction_threshold: 0.10
+  fold_count: 4
+promotion:
+  mandatory:
+    minimum_test_signals: 100
+    minimum_positive_folds: 3
+    minimum_profit_factor: 1.05
+    minimum_net_expectancy: 0.0
+    beat_best_directional_baseline_expectancy: true
+    maximum_symbol_signal_fraction: 0.30
+    require_no_known_leakage: true
+  desirable:
+    minimum_macro_f1: 0.34
+    maximum_brier: 0.25
+    positive_symbol_fraction: 0.60
+  informative:
+    - turnover
+    - exposure
+    - maximum_drawdown
+    - per_symbol_expectancy
