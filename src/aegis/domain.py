@@ -85,6 +85,13 @@ class OutcomeExecutionStatus(str, Enum):
     INCIDENT = "INCIDENT"
 
 
+class EvidenceMode(str, Enum):
+    OPERATIONAL = "OPERATIONAL"
+    PAPER = "PAPER"
+    SHADOW = "SHADOW"
+    REPLAY = "REPLAY"
+
+
 def _aware_utc(value: datetime, field_name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise DomainValidationError(f"{field_name} must be timezone-aware")
@@ -515,6 +522,8 @@ class DecisionOutcome:
     incidents: tuple[str, ...]
     reconciled: bool
     occurred_at: datetime
+    execution_mode: EvidenceMode = EvidenceMode.OPERATIONAL
+    hypothetical_details: Mapping[str, float | str | bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "occurred_at", _aware_utc(self.occurred_at, "occurred_at"))
@@ -524,6 +533,11 @@ class DecisionOutcome:
             _finite(self.realized_pnl, "realized_pnl")
         if self.executed and not self.accepted:
             raise DomainValidationError("an executed outcome must have been accepted")
+        if self.execution_mode in (EvidenceMode.SHADOW, EvidenceMode.REPLAY) and self.executed:
+            raise DomainValidationError("shadow/replay outcomes cannot be marked executed")
+        for key, value in self.hypothetical_details.items():
+            if isinstance(value, float):
+                _finite(value, f"hypothetical_details:{key}")
 
 
 @dataclass(frozen=True)
@@ -628,4 +642,6 @@ def decision_outcome_from_dict(payload: Mapping[str, Any]) -> DecisionOutcome:
         incidents=tuple(str(item) for item in payload.get("incidents", ())),
         reconciled=bool(payload.get("reconciled", False)),
         occurred_at=_parse_datetime(payload["occurred_at"], "occurred_at"),
+        execution_mode=EvidenceMode(payload.get("execution_mode", "OPERATIONAL")),
+        hypothetical_details={str(key): value for key, value in payload.get("hypothetical_details", {}).items()},
     )

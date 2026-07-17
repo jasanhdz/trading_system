@@ -24,3 +24,21 @@ class FixedUtcClock:
 
     def now(self) -> datetime:
         return self.value.astimezone(timezone.utc)
+
+
+@dataclass
+class MutableUtcClock:
+    """Explicit mutable clock used only by deterministic chronological replay."""
+
+    value: datetime
+
+    def __post_init__(self) -> None:
+        self.set(self.value)
+
+    def now(self) -> datetime:
+        return self.value
+
+    def set(self, value: datetime) -> None:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("MutableUtcClock requires a timezone-aware datetime")
+        self.value = value.astimezone(timezone.utc)
