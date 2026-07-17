@@ -56,6 +56,8 @@ class BrainRuntime:
     hashing: HashProvider
     clock: UtcClock
     metrics: RuntimeMetrics = field(default_factory=RuntimeMetrics)
+    _response_cache: dict[str, DecisionResponse] = field(default_factory=dict, init=False, repr=False)
+    _cache_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     @property
     def ready(self) -> bool:
@@ -79,6 +81,22 @@ class BrainRuntime:
     def evaluate(self, request: DecisionRequest) -> DecisionResponse:
         started = perf_counter()
         self.metrics.increment("requests")
+        request_hash = self.hashing.digest_value({
+            "request_id": request.request_id, "decision_cycle_id": request.decision_cycle_id,
+            "schema_version": request.schema_version, "contract_version": request.contract_version,
+            "config_version": request.config_version,
+            "snapshot": {
+                "closed_at": request.snapshot.closed_at, "timeframe": request.snapshot.timeframe,
+                "symbol_set_hash": request.snapshot.symbol_set_hash,
+                "series": tuple(sorted(request.snapshot.series, key=lambda item: item.symbol)),
+                "portfolio": request.snapshot.portfolio,
+            },
+        })
+        with self._cache_lock:
+            cached = self._response_cache.get(request_hash)
+        if cached is not None:
+            self.metrics.latency("total", perf_counter() - started)
+            return cached
         try:
             if request.contract_version != self.config.contract_version or request.config_version != self.config.config_version:
                 raise ValueError("request contract or configuration version mismatch")
@@ -98,7 +116,7 @@ class BrainRuntime:
         stage = perf_counter(); candidates = self.candidate_builder.build(request.decision_cycle_id, predictions, layers); self.metrics.latency("candidates", perf_counter() - stage)
         stage = perf_counter(); selection = self.selection_policy.select(candidates, request.snapshot.portfolio, now); self.metrics.latency("selection", perf_counter() - stage)
         evidence_payload = {
-            "request_hash": self.hashing.digest_value(request), "validation": "VALID",
+            "request_hash": request_hash, "validation": "VALID",
             "feature_batch": features, "predictions": predictions, "layers": layers,
             "candidates": candidates, "selection": selection,
         }
@@ -122,6 +140,9 @@ class BrainRuntime:
             decision_cycle_id=request.decision_cycle_id, event_type="DECISION_EVALUATED", occurred_at=now,
             payload={**evidence_payload, "frozen": frozen, "response": response},
         ))
+        with self._cache_lock:
+            self._response_cache.setdefault(request_hash, response)
+            response = self._response_cache[request_hash]
         self.metrics.increment("no_trade" if response.status.value == "NO_TRADE" else "selected")
         self.metrics.latency("total", perf_counter() - started)
         return response

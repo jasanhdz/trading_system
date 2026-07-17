@@ -51,5 +51,5 @@ def test_outcome_evidence_is_append_only_and_contains_no_policy_mutation(tmp_pat
     first = recorder.record_outcome(outcome)
     second = recorder.record_outcome(outcome)
     lines = (tmp_path / "events.jsonl").read_text().splitlines()
-    assert len(lines) == 2 and second.previous_event_hash == first.event_hash
+    assert len(lines) == 1 and second == first
     assert "policy" not in lines[0].lower() and "secret" not in lines[0].lower()

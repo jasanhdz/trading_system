@@ -209,6 +209,10 @@ class FeatureQuality:
     finite: bool
     history_rows: int
 
+    def __post_init__(self) -> None:
+        if min(self.missing_values, self.clipped_values, self.history_rows) < 0:
+            raise DomainValidationError("feature quality counters cannot be negative")
+
 
 @dataclass(frozen=True)
 class FeatureRow:
@@ -229,6 +233,8 @@ class FeatureBatch:
         expected = len(self.feature_names)
         if not expected or len(set(self.feature_names)) != expected:
             raise DomainValidationError("feature names must be non-empty and unique")
+        if len({row.symbol for row in self.rows}) != len(self.rows):
+            raise DomainValidationError("feature rows contain duplicate symbols")
         for row in self.rows:
             if len(row.raw_values) != expected or len(row.normalized_values) != expected:
                 raise DomainValidationError(f"feature dimension mismatch for {row.symbol}")
@@ -315,6 +321,18 @@ class LayerResult:
     reason_codes: tuple[ReasonCode, ...]
     diagnostics: tuple[tuple[str, float | str | bool], ...] = ()
 
+    def __post_init__(self) -> None:
+        bounded = ("d3_confidence", "rv2_tail_risk", "trrm_compatibility", "qmae_quality",
+                   "model_disagreement", "calibrated_score")
+        for name in bounded:
+            value = _finite(getattr(self, name), name)
+            if not 0.0 <= value <= 1.0:
+                raise DomainValidationError(f"{name} must be within [0, 1]")
+        if _finite(self.qmae_q90, "qmae_q90") < 0:
+            raise DomainValidationError("qmae_q90 cannot be negative")
+        _finite(self.eqm_score, "eqm_score")
+        _finite(self.econ_edge, "econ_edge")
+
 
 @dataclass(frozen=True)
 class LayerOutputs:
@@ -339,6 +357,15 @@ class RiskIntent:
     scientific_invalidation: str | None = None
     relative_priority: float | None = None
 
+    def __post_init__(self) -> None:
+        for name in ("stop_distance_fraction", "target_distance_fraction", "volatility_multiple",
+                     "target_risk_ratio", "relative_priority"):
+            value = getattr(self, name)
+            if value is not None and _finite(value, name) < 0:
+                raise DomainValidationError(f"{name} cannot be negative")
+        if self.maximum_holding_bars is not None and self.maximum_holding_bars <= 0:
+            raise DomainValidationError("maximum_holding_bars must be positive")
+
 
 @dataclass(frozen=True)
 class Candidate:
@@ -360,6 +387,17 @@ class Candidate:
     feature_hash: str
     candidate_hash: str
     eligible: bool
+
+    def __post_init__(self) -> None:
+        for name in ("raw_score", "calibrated_score", "confidence", "uncertainty", "compatibility"):
+            value = _finite(getattr(self, name), name)
+            if not 0.0 <= value <= 1.0:
+                raise DomainValidationError(f"{name} must be within [0, 1]")
+        _finite(self.expected_return, "expected_return")
+        if self.horizon_bars <= 0:
+            raise DomainValidationError("horizon_bars must be positive")
+        if not all((self.candidate_id, self.symbol, self.model_bundle_id, self.feature_hash, self.candidate_hash)):
+            raise DomainValidationError("candidate identifiers and hashes are required")
 
 
 @dataclass(frozen=True)
@@ -401,6 +439,12 @@ class FrozenDecision:
     config_hash: str
     evidence_hash: str
     decision_hash: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "generated_at", _aware_utc(self.generated_at, "generated_at"))
+        object.__setattr__(self, "expires_at", _aware_utc(self.expires_at, "expires_at"))
+        if self.expires_at <= self.generated_at:
+            raise DomainValidationError("frozen decision expiry must follow generation")
 
 
 @dataclass(frozen=True)

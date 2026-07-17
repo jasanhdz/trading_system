@@ -29,7 +29,8 @@ class AppendOnlyEvidenceRecorder:
         self._hashing = hashing
         self._path = path
         self._events: list[ScientificEvidenceEvent] = []
-        self._lock = threading.Lock()
+        self._outcomes: dict[str, ScientificEvidenceEvent] = {}
+        self._lock = threading.RLock()
 
     @property
     def events(self) -> tuple[ScientificEvidenceEvent, ...]:
@@ -47,11 +48,17 @@ class AppendOnlyEvidenceRecorder:
 
     def record_outcome(self, outcome: DecisionOutcome) -> ScientificEvidenceEvent:
         event_hash = self._hashing.digest_value(outcome)
-        return self.record(ScientificEvidenceEvent(
-            event_id=f"outcome-{event_hash[:24]}", decision_id=outcome.decision_id,
-            decision_cycle_id=outcome.decision_cycle_id, event_type="DECISION_OUTCOME",
-            occurred_at=outcome.occurred_at, payload={"outcome": outcome},
-        ))
+        with self._lock:
+            existing = self._outcomes.get(event_hash)
+            if existing is not None:
+                return existing
+            recorded = self.record(ScientificEvidenceEvent(
+                event_id=f"outcome-{event_hash[:24]}", decision_id=outcome.decision_id,
+                decision_cycle_id=outcome.decision_cycle_id, event_type="DECISION_OUTCOME",
+                occurred_at=outcome.occurred_at, payload={"outcome": outcome},
+            ))
+            self._outcomes[event_hash] = recorded
+            return recorded
 
     def _append(self, event: ScientificEvidenceEvent) -> None:
         assert self._path is not None

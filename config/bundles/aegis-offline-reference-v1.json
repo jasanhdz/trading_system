@@ -1,7 +1,7 @@
 {
   "approved": true,
   "bundle_id": "aegis-offline-reference-v1",
-  "content_hash": "86bf58a4c8f958f048a8547364e2858604a1a171e32ac39ab6366e50618d4b23",
+  "content_hash": "3f469d6a7137a544260e8070b1bc45463d57494b4cdf79b428f46a5f250ab0e0",
   "estimators": [
     {
       "heads": {
@@ -32,6 +32,23 @@
   ],
   "feature_hash": "9a6e74720e14ce52800033e14979c4309c2a7f3d3c49b0218e727f29fe64248d",
   "feature_schema_version": "aegis-features-v1",
+  "metadata": {
+    "calibration_method": "NONE_REFERENCE_ONLY",
+    "code_version": "cfe45cce9f87e2d4eef59be06b9cf14aa22959c8",
+    "feature_count": 39,
+    "framework": "aegis-deterministic-linear",
+    "framework_version": "1",
+    "purpose": "OFFLINE_REFERENCE_ONLY",
+    "seed": 0,
+    "test_window": null,
+    "thresholds": {
+      "direction_probability": 0.5,
+      "selection_score": 0.5
+    },
+    "trained": false,
+    "training_window": null,
+    "validation_window": null
+  },
   "normalizer": {"clip_absolute": 12.0, "means": {}, "scales": {}},
   "schema_version": "aegis-model-bundle-v1",
   "symbol_set_hash": "f6448e67daf1d017e16cc6b331f6494e97e178824474994fff08864303ccd348",

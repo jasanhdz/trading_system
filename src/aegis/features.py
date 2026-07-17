@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Mapping, Protocol, Sequence
 
-from .config import UniverseConfig
+from .config import CANONICAL_SYMBOLS, UniverseConfig
 from .domain import (
     Candle,
     FeatureBatch,
@@ -155,10 +155,10 @@ def _ema(values: Sequence[float], span: int) -> float:
 
 
 def _rank_fraction(value: float, values: Sequence[float]) -> float:
-    ordered = sorted((candidate, index) for index, candidate in enumerate(values))
-    ranks = {index: rank for rank, (_, index) in enumerate(ordered)}
-    index = next(index for index, candidate in enumerate(values) if candidate == value)
-    return ranks[index] / max(1, len(values) - 1)
+    lower = sum(candidate < value for candidate in values)
+    equal = sum(candidate == value for candidate in values)
+    average_rank = lower + (equal - 1) / 2.0
+    return average_rank / max(1, len(values) - 1)
 
 
 @dataclass(frozen=True)
@@ -172,7 +172,9 @@ class DeterministicFeaturePipeline:
 
     def transform(self, snapshot: MarketSnapshot) -> FeatureBatch:
         by_symbol = {series.symbol: series for series in snapshot.series}
-        local = {symbol: self._local_features(by_symbol[symbol].candles) for symbol in sorted(by_symbol)}
+        if set(by_symbol) != set(CANONICAL_SYMBOLS):
+            raise ValueError("feature pipeline requires the canonical eleven-symbol universe")
+        local = {symbol: self._local_features(by_symbol[symbol].candles) for symbol in CANONICAL_SYMBOLS}
         returns_6 = {symbol: values["ret_6"] for symbol, values in local.items()}
         returns_12 = {symbol: values["ret_12"] for symbol, values in local.items()}
         market_6 = tuple(returns_6.values())
@@ -184,7 +186,7 @@ class DeterministicFeaturePipeline:
         eth = returns_6.get("ETHUSDT", direction)
 
         rows: list[FeatureRow] = []
-        for symbol in sorted(by_symbol):
+        for symbol in CANONICAL_SYMBOLS:
             values = local[symbol]
             values.update({
                 "relative_return_6": returns_6[symbol] - direction,

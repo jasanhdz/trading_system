@@ -4,6 +4,9 @@ import pytest
 
 from aegis.config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
 from aegis.domain import Candle, DecisionRequest, FeedQuality, MarketSnapshot, PortfolioContext, SymbolSeries
+from aegis.decision import GlobalSelectionPolicy
+from aegis.models import BundleMetadata, EstimatorSpec, LinearHead, ModelBundle, DeterministicModelRuntime
+from aegis.features import FEATURE_HASH, FEATURE_SCHEMA_VERSION, FrozenNormalizer
 
 
 @pytest.fixture
@@ -34,3 +37,49 @@ def snapshot_factory():
 def decision_request(snapshot_factory):
     return DecisionRequest("request-1", "cycle-1", "aegis-decision-request-v1",
                            "aegis-clean-rebuild-v1", "aegis-scientific-config-v1", snapshot_factory())
+
+
+@pytest.fixture
+def scenario_bundle_factory():
+    def build(side: str) -> ModelBundle:
+        if side not in {"LONG", "SHORT", "NEUTRAL"}:
+            raise ValueError(side)
+        directional = 9.0 if side != "NEUTRAL" else -9.0
+        other = -9.0
+        long_bias = directional if side == "LONG" else other
+        short_bias = directional if side == "SHORT" else other
+        neutral_bias = 9.0 if side == "NEUTRAL" else -9.0
+        empty = {}
+        estimator = EstimatorSpec(
+            model_id=f"fixture-{side.lower()}-h12", horizon_bars=12,
+            long=LinearHead(long_bias, empty), short=LinearHead(short_bias, empty), neutral=LinearHead(neutral_bias, empty),
+            expected_return=LinearHead(0.03 if side == "LONG" else -0.03 if side == "SHORT" else 0.0, empty),
+            tail_risk=LinearHead(-9.0, empty), qmae_q90=LinearHead(0.0, empty), quality=LinearHead(9.0, empty),
+        )
+        return ModelBundle(
+            bundle_id=f"fixture-{side.lower()}-bundle", schema_version="aegis-model-bundle-v1",
+            feature_schema_version=FEATURE_SCHEMA_VERSION, feature_hash=FEATURE_HASH,
+            universe_id="aegis-operational-eleven-v1", symbol_set_hash=CANONICAL_SYMBOL_SET_HASH,
+            timeframe="5m", approved=True, content_hash="f" * 64,
+            normalizer=FrozenNormalizer(), estimators=(estimator,),
+            metadata=BundleMetadata("TEST_FIXTURE", False, None, None, None, 0, "fixture", "1", "tests", "NONE", 39, {}),
+        )
+    return build
+
+
+@pytest.fixture
+def scenario_runtime_factory(scenario_bundle_factory):
+    from pathlib import Path
+    from aegis.runtime import build_runtime
+    from aegis.utils import FixedUtcClock
+
+    def build(side: str, snapshot: MarketSnapshot):
+        runtime = build_runtime(Path(__file__).parents[1] / "config", clock=FixedUtcClock(snapshot.closed_at))
+        runtime.models = DeterministicModelRuntime(scenario_bundle_factory(side), 0.50)
+        runtime.config = __import__("dataclasses").replace(
+            runtime.config,
+            models=__import__("dataclasses").replace(runtime.config.models, model_bundle_id=f"fixture-{side.lower()}-bundle"),
+        )
+        runtime.selection_policy = GlobalSelectionPolicy(0.45)
+        return runtime
+    return build
