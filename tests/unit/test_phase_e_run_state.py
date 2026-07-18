@@ -148,6 +148,9 @@ def test_failure_state_depends_on_lockbox_boundary(tmp_path: Path) -> None:
     store.initialize()
     store.transition(PhaseEState.FAILED_TECHNICAL_BEFORE_LOCKBOX, {})
     assert store.state is PhaseEState.FAILED_TECHNICAL_BEFORE_LOCKBOX
+    checkpoint = _artifact(tmp_path / "before", "preflight.json")
+    store.transition(PhaseEState.PREFLIGHT_VALIDATED, {"preflight": checkpoint})
+    assert store.state is PhaseEState.PREFLIGHT_VALIDATED
 
     after = _store(tmp_path / "after")
     after.initialize()
@@ -162,6 +165,8 @@ def test_failure_state_depends_on_lockbox_boundary(tmp_path: Path) -> None:
         after.transition(target, {})
     after.transition(PhaseEState.FAILED_TECHNICAL_AFTER_LOCKBOX, {})
     assert after.state is PhaseEState.FAILED_TECHNICAL_AFTER_LOCKBOX
+    with pytest.raises(PhaseETechnicalError):
+        after.transition(PhaseEState.PREFLIGHT_VALIDATED, {})
     assert chain  # enum includes every declared state
 
 

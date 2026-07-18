@@ -114,6 +114,9 @@ for state in _LINEAR_TRANSITIONS:
     ALLOWED_TRANSITIONS[state] = ALLOWED_TRANSITIONS.get(state, frozenset()) | frozenset({
         failure, PhaseEState.FAILED_SCIENTIFIC,
     })
+ALLOWED_TRANSITIONS[PhaseEState.FAILED_TECHNICAL_BEFORE_LOCKBOX] = frozenset({
+    PhaseEState.PREFLIGHT_VALIDATED,
+})
 
 
 def utc_now() -> datetime:
@@ -373,4 +376,3 @@ class LockboxLease:
             or queries[0].get("purpose") != f"phase-e:{expected.run_id}"
         ):
             raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ACQUISITION_FAILED, "lease/budget content mismatch")
-
