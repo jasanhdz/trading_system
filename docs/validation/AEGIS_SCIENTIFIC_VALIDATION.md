@@ -58,7 +58,7 @@ All features are evaluated at the coordinated final candle `t`. Training and inf
 | `ema_gap_6_12` | `EMA6/EMA12-1` | max 48 bars | short trend; D3/models |
 | `ema_gap_12_24` | `EMA12/EMA24-1` | max 48 bars | medium trend; D3/models |
 | `ema_slope_12` | `EMA12[t]/EMA12[t-1]-1` | 25 bars | trend persistence; D3 |
-| `momentum_acceleration_3_12` | `ret3-ret12/4` | 12 bars | momentum acceleration; models |
+| `momentum_acceleration_3_12` | `ret3-ret12` | 12 bars | historical SHORT momentum acceleration restored; models |
 | `return_zscore_24` | `(ret1-mean(ret,24))/std(ret,24)` | 24 returns | return anomaly; models |
 | `persistence_6` | mean sign of last six returns | 6 returns | directional persistence; D3 |
 | `chop_12` | `1-min(1,abs(close[t]-close[t-12])/sum(abs(ret),12))` | 12 bars | range/trend context; D3 |
