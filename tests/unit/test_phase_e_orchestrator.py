@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -144,6 +146,20 @@ def test_full_run_without_exact_authorization_fails_before_preflight(tmp_path: P
         orchestrator(tmp_path, RunMode.FULL_RUN, authorization=authorization).run()
     assert captured.value.code is PhaseEErrorCode.PRECHECK_FAILED
     assert not (tmp_path / "fake-lockbox").exists()
+
+
+def test_cli_full_run_without_authorization_has_no_outputs(tmp_path: Path) -> None:
+    completed = subprocess.run(
+        [
+            sys.executable, str(ROOT / "scripts" / "run_aegis_candidate_experiment.py"),
+            "--mode", "full-run", "--reports-root", str(tmp_path / "reports"),
+        ],
+        cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert completed.returncode == 2
+    assert "FULL_RUN_OWNER_AUTHORIZATION_REQUIRED" in completed.stderr
+    assert not (tmp_path / "reports").exists()
 
 
 def test_fake_full_run_consumes_once_and_publishes_bound_candidate(tmp_path: Path) -> None:
