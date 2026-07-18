@@ -1,7 +1,9 @@
 schema_version: aegis-candidate-experiment-v1
 experiment_id: aegis-clean-rebuild-phase2-v1
 data:
-  source: data/binance_candles.db
+  source_kind: canonical_d3_series
+  source: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
   timeframe: 5m
   start: '2026-01-01T00:00:00Z'
   end: '2026-07-01T00:00:00Z'

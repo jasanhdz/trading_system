@@ -98,7 +98,7 @@ class ScientificCandidateBuilder:
                     target_distance_fraction=max(0.0, expected),
                     volatility_multiple=None, target_risk_ratio=None,
                     maximum_holding_bars=symbol_predictions[0].horizon_bars,
-                    scientific_invalidation="D3/RV2/TRRM/QMAE/EQM/ECON1 contract invalidated",
+                    scientific_invalidation="REGIME/RV2/TRRM/QMAE/EQM/ECON1 contract invalidated",
                     relative_priority=result.calibrated_score,
                 ),
                 reason_codes=result.reason_codes,

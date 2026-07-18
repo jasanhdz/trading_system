@@ -42,7 +42,7 @@ def _clip(value: float) -> float:
 
 @dataclass(frozen=True)
 class OrderedScientificLayers:
-    """Execute D3 -> RV2 -> TRRM -> QMAE -> EQM -> ECON1 deterministically."""
+    """Execute REGIME -> RV2 -> TRRM -> QMAE -> EQM -> ECON1 deterministically."""
 
     settings: LayerSettings
 
@@ -54,7 +54,7 @@ class OrderedScientificLayers:
                 results.append(self._unavailable(row.symbol))
                 continue
             features = dict(zip(context.features.feature_names, row.raw_values))
-            regime, d3_confidence = classify_regime(features)
+            regime, regime_confidence = classify_market_regime(features)
             long_probability = _mean([item.long_probability for item in symbol_predictions])
             short_probability = _mean([item.short_probability for item in symbol_predictions])
             direction_probability = max(long_probability, short_probability)
@@ -110,10 +110,10 @@ class OrderedScientificLayers:
                 * qmae_quality
                 * clean_probability
                 * (1.0 - min(1.0, disagreement))
-                * d3_confidence
+                * regime_confidence
             )
             results.append(LayerResult(
-                symbol=row.symbol, side=side, regime=regime, d3_confidence=d3_confidence,
+                symbol=row.symbol, side=side, regime=regime, regime_confidence=regime_confidence,
                 rv2_tail_risk=rv2_tail, trrm_compatibility=trrm_compatibility,
                 qmae_q90=qmae_q90, qmae_quality=qmae_quality, eqm_score=eqm_score,
                 model_disagreement=disagreement, econ_edge=econ_edge,
@@ -133,15 +133,15 @@ class OrderedScientificLayers:
     @staticmethod
     def _unavailable(symbol: str) -> LayerResult:
         return LayerResult(
-            symbol=symbol, side=TradeSide.NO_TRADE, regime=Regime.UNKNOWN, d3_confidence=0.0,
+            symbol=symbol, side=TradeSide.NO_TRADE, regime=Regime.UNKNOWN, regime_confidence=0.0,
             rv2_tail_risk=1.0, trrm_compatibility=0.0, qmae_q90=None, qmae_quality=0.0,
             eqm_score=0.0, model_disagreement=1.0, econ_edge=-1.0, calibrated_score=0.0,
             eligible=False, reason_codes=(ReasonCode.MODEL_UNAVAILABLE,),
         )
 
 
-def classify_regime(features: dict[str, float]) -> tuple[Regime, float]:
-    """Public pure D3 classification shared by inference and offline evaluation."""
+def classify_market_regime(features: dict[str, float]) -> tuple[Regime, float]:
+    """Classify market context without claiming the historical D3 data discipline."""
     trend = features["market_direction_6"]
     volatility = features["range_mean_24"]
     expansion = features["range_expansion"]

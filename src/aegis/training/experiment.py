@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import random
-import sqlite3
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -16,6 +15,7 @@ import numpy as np
 import yaml
 
 from ..config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
+from ..data import CanonicalBar, CanonicalSeriesSource, DataPurpose
 from ..decision import (
     GlobalSelectionPolicy, ScientificCandidateBuilder, ScientificPipelineResult,
     evaluate_scientific_pipeline,
@@ -25,7 +25,7 @@ from ..domain import (
     PortfolioContext, Regime, SymbolSeries, TradeSide,
 )
 from ..features import DeterministicFeaturePipeline, FEATURE_HASH, FEATURE_NAMES, FEATURE_SCHEMA_VERSION, FrozenNormalizer
-from ..layers import LayerSettings, OrderedScientificLayers, classify_regime
+from ..layers import LayerSettings, OrderedScientificLayers, classify_market_regime
 from ..models import DeterministicModelRuntime, ModelBundle, model_bundle_from_payload
 from ..utils import Sha256HashProvider, canonical_json
 from .dataset import TrainingDataset, TrainingRow, TrainingTarget, walk_forward_splits
@@ -36,14 +36,7 @@ class ExperimentDataError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class RawBar:
-    timestamp: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
+RawBar = CanonicalBar
 
 
 @dataclass(frozen=True)
@@ -124,11 +117,14 @@ def load_experiment_config(path: Path) -> Mapping[str, Any]:
     fractions = payload["protocol"]
     if not math.isclose(sum(float(fractions[key]) for key in ("train_fraction", "validation_fraction", "test_fraction")), 1.0):
         raise ValueError("temporal partition fractions must sum to one")
+    data = payload.get("data", {})
+    if data.get("source_kind") != "canonical_d3_series" or not data.get("manifest_sha256"):
+        raise ValueError("experiments require a hash-pinned canonical D3 series")
     return payload
 
 
 class LocalCandleDataset:
-    """Scientific-only loader; SQLite is always opened immutable/read-only."""
+    """Compatibility name for the canonical, hash-verified read-only source."""
 
     def __init__(self, path: Path) -> None:
         self.path = path.resolve()
@@ -140,38 +136,12 @@ class LocalCandleDataset:
         sample_every = int(data["sample_every_bars"])
         warmup = start - timedelta(minutes=5 * history_bars)
         future_end = end + timedelta(minutes=5 * horizon_bars)
-        uri = f"file:{self.path}?mode=ro&immutable=1"
-        connection = sqlite3.connect(uri, uri=True)
-        loaded: dict[str, list[RawBar]] = {}
-        duplicates = conflicts = rows_loaded = 0
-        try:
-            for symbol in CANONICAL_SYMBOLS:
-                database_symbol = symbol[:-4] + "/USDT"
-                rows = connection.execute(
-                    "SELECT timestamp,open,high,low,close,volume FROM ohlcv_data "
-                    "WHERE symbol=? AND timeframe='5m' AND timestamp>=? AND timestamp<? ORDER BY timestamp,id",
-                    (database_symbol, warmup.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S.%f"),
-                     future_end.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S.%f")),
-                )
-                by_time: dict[datetime, RawBar] = {}
-                for raw in rows:
-                    timestamp = _utc(str(raw[0]))
-                    bar = RawBar(timestamp, *(float(value) for value in raw[1:]))
-                    if not all(math.isfinite(value) for value in (bar.open, bar.high, bar.low, bar.close, bar.volume)):
-                        raise ExperimentDataError(f"non-finite OHLCV for {symbol} at {timestamp.isoformat()}")
-                    if min(bar.open, bar.high, bar.low, bar.close) <= 0 or bar.volume < 0 or bar.high < max(bar.open, bar.close) or bar.low > min(bar.open, bar.close):
-                        raise ExperimentDataError(f"invalid OHLCV for {symbol} at {timestamp.isoformat()}")
-                    if timestamp in by_time:
-                        duplicates += 1
-                        if by_time[timestamp] != bar:
-                            conflicts += 1
-                            by_time.pop(timestamp, None)
-                        continue
-                    by_time[timestamp] = bar
-                    rows_loaded += 1
-                loaded[symbol] = sorted(by_time.values(), key=lambda item: item.timestamp)
-        finally:
-            connection.close()
+        source = CanonicalSeriesSource(
+            self.path, DataPurpose.TRAINING, expected_manifest_sha256=str(data["manifest_sha256"]),
+        )
+        loaded = {symbol: list(rows) for symbol, rows in source.load(start=warmup, end=future_end).items()}
+        duplicates = conflicts = 0
+        rows_loaded = sum(len(rows) for rows in loaded.values())
         if any(not rows for rows in loaded.values()):
             raise ExperimentDataError("one or more canonical symbols have no local rows")
 
@@ -213,7 +183,7 @@ class LocalCandleDataset:
                 direction = 1.0 if forward_return > float(config["protocol"]["friction_fraction"]) else -1.0 if forward_return < -float(config["protocol"]["friction_fraction"]) else 0.0
                 adverse = (entry - min(bar.low for bar in future)) / entry if direction >= 0 else (max(bar.high for bar in future) - entry) / entry
                 target = TrainingTarget(direction, forward_return, float(adverse >= 0.03), max(0.0, adverse), float(direction != 0 and adverse < 0.03))
-                regime, _ = classify_regime(dict(zip(FEATURE_NAMES, feature_row.raw_values)))
+                regime, _ = classify_market_regime(dict(zip(FEATURE_NAMES, feature_row.raw_values)))
                 training_rows.append(TrainingRow(closed_at, feature_row.symbol, feature_row.raw_values, target, regime))
             accepted += 1
         if accepted < 100:

@@ -3,7 +3,7 @@ model_bundle_id: aegis-offline-reference-v1
 feature_schema_version: aegis-features-v1
 artifact_registry: bundles
 layers:
-  - D3
+  - REGIME
   - RV2
   - TRRM
   - QMAE

@@ -36,7 +36,7 @@ class ValidationStatus(str, Enum):
 
 
 class ScientificLayerName(str, Enum):
-    D3 = "D3"
+    REGIME = "REGIME"
     RV2 = "RV2"
     TRRM = "TRRM"
     QMAE = "QMAE"
@@ -333,7 +333,7 @@ class LayerResult:
     symbol: str
     side: TradeSide
     regime: Regime
-    d3_confidence: float
+    regime_confidence: float
     rv2_tail_risk: float
     trrm_compatibility: float
     qmae_q90: float | None
@@ -347,7 +347,7 @@ class LayerResult:
     diagnostics: tuple[tuple[str, float | str | bool], ...] = ()
 
     def __post_init__(self) -> None:
-        bounded = ("d3_confidence", "rv2_tail_risk", "trrm_compatibility", "qmae_quality",
+        bounded = ("regime_confidence", "rv2_tail_risk", "trrm_compatibility", "qmae_quality",
                    "model_disagreement", "calibrated_score")
         for name in bounded:
             value = _finite(getattr(self, name), name)

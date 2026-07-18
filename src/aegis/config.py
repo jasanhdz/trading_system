@@ -109,7 +109,7 @@ def load_brain_config(config_dir: Path) -> BrainConfig:
 
     layers = tuple(str(value) for value in models_data.get("layers", ()))
     if layers != EXPECTED_LAYERS:
-        raise ConfigurationError("scientific layer order must be D3/RV2/TRRM/QMAE/EQM/ECON1")
+        raise ConfigurationError("scientific layer order must be REGIME/RV2/TRRM/QMAE/EQM/ECON1")
     thresholds = _mapping(models_data.get("thresholds", {}), "models.thresholds")
     costs = _mapping(models_data.get("economics", {}), "models.economics")
     model_bundle_id = str(models_data.get("model_bundle_id", ""))
