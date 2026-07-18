@@ -23,8 +23,10 @@ from ..utils import Sha256HashProvider, canonical_json, sha256_file, to_primitiv
 from .competition import (
     QmaeQuantileResult, fit_calibrator_family, fit_qmae_refit,
     fit_selected_probabilistic_candidate, fit_selected_regression_candidate,
+    build_rank_based_eqm_population, load_scientific_competition_contract,
+    rank_based_survivor_indices,
     rank_stability_first, run_eqm_fold_competition, run_trrm_fold_competition,
-    fit_qmae_quantiles, summarize_stability,
+    fit_qmae_quantiles, summarize_stability, ScientificCompetitionContract,
 )
 from .dataset import (
     ExplicitFoldSplit, ExplicitFoldWindow, HourlyDatasetBuild, TrainingDataset,
@@ -320,6 +322,9 @@ class SimulatedScientificBackend:
         self.seed = seed
         self._fold_payloads: list[Mapping[str, Any]] = []
         self._last_qmae: QmaeQuantileResult | None = None
+        self._contract = load_scientific_competition_contract(
+            Path(__file__).resolve().parents[3] / "config" / "scientific_competition_v2.yaml",
+        )
 
     def build_dataset(self, preregistration: Mapping[str, Any], mode: RunMode) -> DatasetBuildResult:
         rng = np.random.default_rng(self.seed)
@@ -367,14 +372,17 @@ class SimulatedScientificBackend:
             train, calibration, score = slice(0, 100), slice(100, 140), slice(140, 180)
             trrm = run_trrm_fold_competition(
                 x[train], tail[train], x[calibration], tail[calibration], x[score], tail[score], names, seed=self.seed + fold.fold_id,
+                contract=self._contract, smoke=True,
             )
             clean_results, net_results = run_eqm_fold_competition(
                 x[train], clean[train], net[train], x[calibration], clean[calibration],
                 x[score], clean[score], net[score], names, seed=self.seed + fold.fold_id,
+                contract=self._contract, smoke=True,
             )
             qmae_result = fit_qmae_quantiles(
                 x[train], qmae[train], x[calibration], qmae[calibration],
                 x[score], qmae[score], names, seed=self.seed + fold.fold_id,
+                contract=self._contract, smoke=True,
             )
             self._last_qmae = qmae_result
             for item in trrm:
@@ -511,18 +519,32 @@ class SimulatedScientificBackend:
 
 
 class ProductionScientificBackend:
-    """E2 backend that coordinates the existing scientific APIs on canonical dev data."""
+    """E3 backend that coordinates hash-bound scientific APIs on canonical dev data."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, competition_path: Path | None = None) -> None:
         self._build: HourlyDatasetBuild | None = None
         self._splits: tuple[ExplicitFoldSplit, ...] = ()
         self._fold_payloads: dict[str, Any] = {}
         self._final_bundle: ExperimentalBundleResult | None = None
+        self._competition_path = competition_path
+        self._contract: ScientificCompetitionContract | None = None
 
-    @staticmethod
-    def _require_e2(preregistration: Mapping[str, Any]) -> None:
-        if int(preregistration.get("protocol_version", 0)) < 2:
+    def _require_e3(self, preregistration: Mapping[str, Any]) -> ScientificCompetitionContract:
+        if int(preregistration.get("protocol_version", 0)) < 3:
             raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "PROTOCOL_VERSION_NOT_EXECUTABLE")
+        competition = preregistration.get("models", {}).get("competition_protocol", {})
+        expected_path = Path(__file__).resolve().parents[3] / str(competition.get("path", ""))
+        path = self._competition_path or expected_path
+        if path.resolve() != expected_path.resolve():
+            raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "E3 competition path mismatch")
+        try:
+            contract = load_scientific_competition_contract(
+                path, expected_sha256=str(competition.get("physical_sha256", "")),
+            )
+        except (OSError, ValueError) as exc:
+            raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "E3 competition contract invalid") from exc
+        self._contract = contract
+        return contract
 
     @staticmethod
     def _matrix(dataset: TrainingDataset, indices: Sequence[int], normalizer: Any) -> np.ndarray:
@@ -536,7 +558,7 @@ class ProductionScientificBackend:
         return np.asarray([float(getattr(dataset.rows[index].target, name)) for index in indices], dtype=np.float64)
 
     def build_dataset(self, preregistration: Mapping[str, Any], mode: RunMode) -> DatasetBuildResult:
-        self._require_e2(preregistration)
+        self._require_e3(preregistration)
         source = CanonicalSeriesSource(
             Path(preregistration["source"]["path"]), DataPurpose.TRAINING,
             expected_manifest_sha256=str(preregistration["source"]["manifest_sha256"]),
@@ -544,7 +566,7 @@ class ProductionScientificBackend:
         try:
             self._build = load_and_build_e2_hourly_dataset(source, preregistration)
         except Exception as exc:
-            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "E2 canonical dataset build failed") from exc
+            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "E3 canonical dataset build failed") from exc
         built = self._build
         return DatasetBuildResult(
             built.dataset.artifact_hash, built.dataset.row_count, built.valid_cycle_count,
@@ -589,51 +611,99 @@ class ProductionScientificBackend:
         return tuple(results)
 
     def run_competition(self, preregistration: Mapping[str, Any], folds: Sequence[FoldTrainingResult]) -> ModelCompetitionResult:
-        if self._build is None or len(self._splits) != len(folds):
+        if self._build is None or len(self._splits) != len(folds) or self._contract is None:
             raise PhaseETechnicalError(PhaseEErrorCode.FOLD_INVALID, "fold data is unavailable")
         dataset = self._build.dataset; seed = int(preregistration["protocol"]["seed"])
+        contract = self._contract
         scores: dict[str, dict[str, list[float]]] = {"trrm": {}, "eqm_clean": {}, "eqm_net": {}}
         payloads: dict[str, Any] = {}
+        matrices: dict[str, Mapping[str, Any]] = {}
+
+        # TRRM is selected first. EQM populations are then derived from that frozen
+        # winner, preserving the historical train/scoring survivor contract.
         for split in self._splits:
             normalizer = fit_normalizer(dataset, split.train)
             x_train = self._matrix(dataset, split.train, normalizer)
             x_cal = self._matrix(dataset, split.calibration, normalizer)
             x_score = self._matrix(dataset, split.scoring, normalizer)
+            fold = str(split.window.fold_id)
             trrm = run_trrm_fold_competition(
                 x_train, self._target(dataset, split.train, "tail_event"),
                 x_cal, self._target(dataset, split.calibration, "tail_event"),
                 x_score, self._target(dataset, split.scoring, "tail_event"),
-                FEATURE_NAMES, seed=seed + split.window.fold_id,
-            )
-            clean, net = run_eqm_fold_competition(
-                x_train, self._target(dataset, split.train, "clean_quality"),
-                self._target(dataset, split.train, "net_quality_after_costs"),
-                x_cal, self._target(dataset, split.calibration, "clean_quality"),
-                x_score, self._target(dataset, split.scoring, "clean_quality"),
-                self._target(dataset, split.scoring, "net_quality_after_costs"),
-                FEATURE_NAMES, seed=seed + split.window.fold_id,
+                FEATURE_NAMES, seed=seed + split.window.fold_id, contract=contract,
             )
             qmae = fit_qmae_quantiles(
                 x_train, self._target(dataset, split.train, "qmae"),
                 x_cal, self._target(dataset, split.calibration, "qmae"),
                 x_score, self._target(dataset, split.scoring, "qmae"),
-                FEATURE_NAMES, seed=seed + split.window.fold_id,
+                FEATURE_NAMES, seed=seed + split.window.fold_id, contract=contract,
             )
             for item in trrm:
                 scores["trrm"].setdefault(item.candidate_id, []).append(item.average_precision)
-            for item in clean:
-                scores["eqm_clean"].setdefault(item.candidate_id, []).append(item.average_precision)
-            for item in net:
-                scores["eqm_net"].setdefault(item.candidate_id, []).append(-item.mean_absolute_error)
-            payloads[str(split.window.fold_id)] = {
-                "trrm": trrm, "eqm_clean": clean, "eqm_net": net, "qmae": qmae,
-                "normalizer": normalizer,
+            payloads[fold] = {"trrm": trrm, "qmae": qmae, "normalizer": normalizer}
+            matrices[fold] = {
+                "split": split, "x_train": x_train, "x_cal": x_cal, "x_score": x_score,
             }
+
+        trrm_stability = rank_stability_first(tuple(
+            summarize_stability(candidate, values, float(index + 1))
+            for index, (candidate, values) in enumerate(sorted(scores["trrm"].items()))
+        ))
+        selected_trrm = trrm_stability[0].candidate_id
+        veto_budget = float(contract.trrm_veto["veto_budget"])
+
+        for fold in sorted(matrices, key=int):
+            item = matrices[fold]; split = item["split"]
+            model, _ = fit_selected_probabilistic_candidate(
+                selected_trrm, item["x_train"], self._target(dataset, split.train, "tail_event"),
+                FEATURE_NAMES, seed=seed + split.window.fold_id, contract=contract,
+            )
+            selected_fold = next(value for value in payloads[fold]["trrm"] if value.candidate_id == selected_trrm)
+            train_raw = model.predict_proba(item["x_train"])[:, 1]
+            score_raw = model.predict_proba(item["x_score"])[:, 1]
+            train_probability = np.asarray([selected_fold.calibrator.apply(float(value)) for value in train_raw])
+            score_probability = np.asarray([selected_fold.calibrator.apply(float(value)) for value in score_raw])
+            population = build_rank_based_eqm_population(
+                train_probability, score_probability, veto_budget=veto_budget,
+            )
+            train_survivors = population.train_indices
+            score_survivors = population.scoring_indices
+            clean, net = run_eqm_fold_competition(
+                item["x_train"][train_survivors],
+                self._target(dataset, split.train, "clean_quality")[train_survivors],
+                self._target(dataset, split.train, "net_quality_after_costs")[train_survivors],
+                item["x_cal"], self._target(dataset, split.calibration, "clean_quality"),
+                item["x_score"][score_survivors],
+                self._target(dataset, split.scoring, "clean_quality")[score_survivors],
+                self._target(dataset, split.scoring, "net_quality_after_costs")[score_survivors],
+                FEATURE_NAMES, seed=seed + split.window.fold_id, contract=contract,
+            )
+            for result in clean:
+                scores["eqm_clean"].setdefault(result.candidate_id, []).append(result.average_precision)
+            for result in net:
+                scores["eqm_net"].setdefault(result.candidate_id, []).append(-result.mean_absolute_error)
+            payloads[fold].update({
+                "eqm_clean": clean, "eqm_net": net,
+                "population_evidence": {
+                    "fold_train": "TRRM_VETO_SURVIVORS_OF_FOLD_TRAIN",
+                    "fold_scoring": "TRRM_VETO_SURVIVORS_OF_FOLD_SCORING",
+                    "train_total": population.train_total, "train_survivors": len(train_survivors),
+                    "scoring_total": population.scoring_total, "scoring_survivors": len(score_survivors),
+                    "veto_budget": veto_budget,
+                },
+            })
+
         stability = {
-            task: rank_stability_first(tuple(
+            "trrm": trrm_stability,
+            "eqm_clean": rank_stability_first(tuple(
                 summarize_stability(candidate, values, float(index + 1))
-                for index, (candidate, values) in enumerate(sorted(candidates.items()))
-            )) for task, candidates in scores.items()
+                for index, (candidate, values) in enumerate(sorted(scores["eqm_clean"].items()))
+            )),
+            "eqm_net": rank_stability_first(tuple(
+                summarize_stability(candidate, values, float(index + 1))
+                for index, (candidate, values) in enumerate(sorted(scores["eqm_net"].items()))
+            )),
         }
         selected = {task: ranking[0].candidate_id for task, ranking in stability.items()}
         selected["qmae"] = "qmae_hist_gradient_boosting"
@@ -647,7 +717,10 @@ class ProductionScientificBackend:
             ) for task, baseline in baselines.items()
         )
         self._fold_payloads = payloads
-        document = {"folds": payloads, "selected": selected, "stability": stability, "model_not_beaten": not_beaten}
+        document = {
+            "folds": payloads, "selected": selected, "stability": stability,
+            "model_not_beaten": not_beaten, "competition_contract_sha256": contract.physical_sha256,
+        }
         return ModelCompetitionResult(selected, payloads, stability, not_beaten, Sha256HashProvider().digest_value(document))
 
     def _selected_fold_item(self, competition: ModelCompetitionResult, task: str, fold: str) -> Any:
@@ -732,8 +805,9 @@ class ProductionScientificBackend:
         self, preregistration: Mapping[str, Any], competition: ModelCompetitionResult,
         calibration: CalibrationResult, qmae: QMAEValidationResult, git_commit: str,
     ) -> ExperimentalBundleResult:
-        assert self._build is not None
+        assert self._build is not None and self._contract is not None
         dataset = self._build.dataset; refit = preregistration["refit"]
+        contract = self._contract
         parse = lambda value: datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         train = tuple(index for index, row in enumerate(dataset.rows) if parse(refit["final_train_start"]) <= row.timestamp <= parse(refit["final_train_end"]))
         reserve = tuple(index for index, row in enumerate(dataset.rows) if parse(refit["final_calibration_reserve_start"]) <= row.timestamp <= parse(refit["final_calibration_reserve_end"]))
@@ -742,24 +816,36 @@ class ProductionScientificBackend:
         normalizer = fit_normalizer(dataset, train); seed = int(preregistration["protocol"]["seed"])
         x_train = self._matrix(dataset, train, normalizer); x_reserve = self._matrix(dataset, reserve, normalizer)
         trrm_model, trrm_artifact = fit_selected_probabilistic_candidate(
-            competition.selected_models["trrm"], x_train, self._target(dataset, train, "tail_event"), FEATURE_NAMES, seed=seed,
+            competition.selected_models["trrm"], x_train, self._target(dataset, train, "tail_event"),
+            FEATURE_NAMES, seed=seed, contract=contract,
         )
         trrm_train = trrm_model.predict_proba(x_train)[:, 1]
         trrm_reserve = trrm_model.predict_proba(x_reserve)[:, 1]
-        train_survivors = np.flatnonzero(trrm_train <= 0.70); reserve_survivors = np.flatnonzero(trrm_reserve <= 0.70)
+        tail_method = self._calibrator_family(competition, self._fold_payloads, "trrm")
+        tail_calibrator = fit_calibrator_family(
+            tail_method, trrm_reserve, self._target(dataset, reserve, "tail_event"),
+        )
+        calibrated_train = np.asarray([tail_calibrator.apply(float(value)) for value in trrm_train])
+        calibrated_reserve = np.asarray([tail_calibrator.apply(float(value)) for value in trrm_reserve])
+        veto_budget = float(contract.trrm_veto["veto_budget"])
+        train_survivors = rank_based_survivor_indices(calibrated_train, veto_budget=veto_budget)
+        trrm_absolute_threshold = float(np.quantile(
+            calibrated_train, float(contract.trrm_veto["calibrated_survival_quantile"]), method="higher",
+        ))
+        reserve_survivors = np.flatnonzero(calibrated_reserve <= trrm_absolute_threshold)
         if len(train_survivors) < 100 or len(reserve_survivors) < 20:
-            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "insufficient TRRM survivors for E2 refit")
+            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "insufficient TRRM survivors for E3 refit")
         clean_model, clean_artifact = fit_selected_probabilistic_candidate(
             competition.selected_models["eqm_clean"], x_train[train_survivors],
-            self._target(dataset, train, "clean_quality")[train_survivors], FEATURE_NAMES, seed=seed,
+            self._target(dataset, train, "clean_quality")[train_survivors],
+            FEATURE_NAMES, seed=seed, contract=contract,
         )
         net_model, net_artifact = fit_selected_regression_candidate(
             competition.selected_models["eqm_net"], x_train[train_survivors],
-            self._target(dataset, train, "net_quality_after_costs")[train_survivors], FEATURE_NAMES, seed=seed,
+            self._target(dataset, train, "net_quality_after_costs")[train_survivors],
+            FEATURE_NAMES, seed=seed, contract=contract,
         )
-        tail_method = self._calibrator_family(competition, self._fold_payloads, "trrm")
         quality_method = self._calibrator_family(competition, self._fold_payloads, "eqm_clean")
-        tail_calibrator = fit_calibrator_family(tail_method, trrm_reserve, self._target(dataset, reserve, "tail_event"))
         quality_raw = clean_model.predict_proba(x_reserve[reserve_survivors])[:, 1]
         quality_calibrator = fit_calibrator_family(
             quality_method, quality_raw,
@@ -767,7 +853,7 @@ class ProductionScientificBackend:
         )
         qmae_final = fit_qmae_refit(
             x_train, self._target(dataset, train, "qmae"), x_reserve,
-            self._target(dataset, reserve, "qmae"), FEATURE_NAMES, seed=seed,
+            self._target(dataset, reserve, "qmae"), FEATURE_NAMES, seed=seed, contract=contract,
         )
         trees: list[Mapping[str, Any]] = []
         tail_head = self._head(trrm_artifact, trees, probability=True)
@@ -809,7 +895,7 @@ class ProductionScientificBackend:
                 }],
                 "calibration": calibration_payload,
                 "metadata": {
-                    "purpose": "PHASE_E_E2_PRE_LOCKBOX_VALIDATION", "trained": True,
+                    "purpose": "PHASE_E_E3_PRE_LOCKBOX_VALIDATION", "trained": True,
                     "training_window": [refit["final_train_start"], refit["final_train_end"]],
                     "validation_window": [refit["final_calibration_reserve_start"], refit["final_calibration_reserve_end"]],
                     "test_window": None, "seed": seed, "framework": "sklearn-json",
@@ -817,8 +903,17 @@ class ProductionScientificBackend:
                     "calibration_method": "OUT_OF_FOLD_FAMILY_REFIT_ON_RESERVE",
                     "feature_count": len(FEATURE_NAMES), "lifecycle_state": "EXPERIMENTAL",
                     "thresholds": {"direction": 0.50, "selection": selection,
-                                   "trrm_max_tail_probability": 0.70, "qmae_max_fraction": 0.03,
+                                   "trrm_max_tail_probability": trrm_absolute_threshold, "qmae_max_fraction": 0.03,
                                    "eqm_min_score": 0.0},
+                    "c4_contract": {
+                        "competition_sha256": contract.physical_sha256,
+                        "eqm_population": dict(contract.eqm_training_population),
+                        "trrm_veto": dict(contract.trrm_veto),
+                        "population_counts": {
+                            "final_train_total": len(train), "final_train_survivors": len(train_survivors),
+                            "reserve_total": len(reserve), "reserve_survivors": len(reserve_survivors),
+                        },
+                    },
                 },
                 "tree_ensembles": trees,
             }
@@ -838,7 +933,7 @@ class ProductionScientificBackend:
             )
             scores.extend(
                 item.eqm_score for item in result.layers.results
-                if item.side is TradeSide.SHORT and item.rv2_tail_risk <= 0.70 and item.eqm_score > 0.0
+                if item.side is TradeSide.SHORT and item.rv2_tail_risk <= trrm_absolute_threshold and item.eqm_score > 0.0
             )
         if not scores:
             raise PhaseEScientificRejection(PhaseEErrorCode.MODEL_NOT_BEATEN, "reserve contains no TRRM-veto survivors")
@@ -850,6 +945,7 @@ class ProductionScientificBackend:
         refit_hash = Sha256HashProvider().digest_value({
             "train": train, "reserve": reserve, "models": competition.selected_models,
             "calibrators": calibration_payload, "qmae": qmae_final, "threshold": threshold,
+            "trrm_threshold": trrm_absolute_threshold, "competition_sha256": contract.physical_sha256,
         })
         self._final_bundle = ExperimentalBundleResult(payload, loaded.content_hash, 0.0, threshold, refit_hash)
         return self._final_bundle

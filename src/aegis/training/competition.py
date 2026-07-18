@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+import yaml
 from sklearn.isotonic import IsotonicRegression
 
 from ..models import CalibrationMethod, CalibratorSpec
 from ..tree_models import DecisionTree, EnsembleAggregation, TreeEnsemble, TreeNode
-from ..utils import Sha256HashProvider
+from ..utils import Sha256HashProvider, sha256_file
 from .train import calibration_metrics, fit_platt_calibrator
 
 
@@ -64,6 +66,108 @@ class RegressionCandidateResult:
     candidate_id: str
     mean_absolute_error: float
     artifact: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ScientificCompetitionContract:
+    """Hash-bound model and governance parameters for productive competition."""
+
+    source_path: Path
+    physical_sha256: str
+    production_hyperparameters: Mapping[str, Mapping[str, Any]]
+    smoke_overrides: Mapping[str, Any]
+    eqm_training_population: Mapping[str, str]
+    trrm_veto: Mapping[str, Any]
+    econ_baselines: Mapping[str, Any]
+    base_seed: int
+
+    def parameters(self, candidate_id: str, *, smoke: bool = False) -> dict[str, Any]:
+        try:
+            values = dict(self.production_hyperparameters[candidate_id])
+        except KeyError as exc:
+            raise ValueError(f"candidate lacks frozen hyperparameters: {candidate_id}") from exc
+        if smoke:
+            if self.smoke_overrides.get("production_use") != "FORBIDDEN":
+                raise ValueError("smoke override governance is invalid")
+            for key in ("n_estimators", "max_iter"):
+                if key in values and key in self.smoke_overrides:
+                    values[key] = int(self.smoke_overrides[key])
+        return values
+
+
+@dataclass(frozen=True)
+class RankBasedPopulation:
+    train_indices: np.ndarray
+    scoring_indices: np.ndarray
+    train_total: int
+    scoring_total: int
+    veto_budget: float
+
+
+_REQUIRED_HYPERPARAMETERS = {
+    "trrm_logistic_baseline", "trrm_random_forest", "trrm_hist_gradient_boosting",
+    "eqm_linear_net_baseline", "eqm_extra_trees_net", "eqm_hgb_net",
+    "eqm_logistic_clean_baseline", "eqm_random_forest_clean", "eqm_hgb_clean",
+    "qmae_hist_gradient_boosting",
+}
+
+
+def load_scientific_competition_contract(
+    path: Path, *, expected_sha256: str | None = None,
+) -> ScientificCompetitionContract:
+    resolved = path.resolve()
+    physical = sha256_file(resolved)
+    if expected_sha256 is not None and physical != expected_sha256:
+        raise ValueError("scientific competition physical hash mismatch")
+    payload = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != "aegis-scientific-competition-v2":
+        raise ValueError("productive competition requires schema v2")
+    parameters = payload.get("production_hyperparameters")
+    if not isinstance(parameters, Mapping) or set(parameters) != _REQUIRED_HYPERPARAMETERS:
+        raise ValueError("productive competition hyperparameter matrix is incomplete")
+    smoke = payload.get("smoke_overrides")
+    if not isinstance(smoke, Mapping) or smoke.get("production_use") != "FORBIDDEN":
+        raise ValueError("productive competition must forbid smoke overrides")
+    population = payload.get("eqm_training_population")
+    if population != {
+        "fold_train": "TRRM_VETO_SURVIVORS_OF_FOLD_TRAIN",
+        "fold_scoring": "TRRM_VETO_SURVIVORS_OF_FOLD_SCORING",
+        "refit": "TRRM_VETO_SURVIVORS_OF_FINAL_TRAIN",
+    }:
+        raise ValueError("EQM population contract mismatch")
+    veto = payload.get("trrm_veto")
+    if not isinstance(veto, Mapping) or veto.get("mechanics") != "RANK_BASED_BUDGET" or float(veto.get("veto_budget", -1)) != 0.30:
+        raise ValueError("TRRM veto contract mismatch")
+    if veto.get("raw_probability_0_70") != "FORBIDDEN":
+        raise ValueError("raw TRRM probability 0.70 is forbidden")
+    baselines = payload.get("econ_baselines")
+    if not isinstance(baselines, Mapping):
+        raise ValueError("ECON baseline contract is missing")
+    return ScientificCompetitionContract(
+        resolved, physical, parameters, smoke, population, veto, baselines,
+        int(payload["base_seed"]),
+    )
+
+
+def rank_based_survivor_indices(probabilities: Sequence[float], *, veto_budget: float = 0.30) -> np.ndarray:
+    """Keep the lowest-risk rank budget with stable input-order tie breaking."""
+    values = np.asarray(probabilities, dtype=np.float64)
+    if values.ndim != 1 or not len(values) or not np.all(np.isfinite(values)):
+        raise ValueError("TRRM probabilities must be a finite non-empty vector")
+    if not 0.0 < veto_budget < 1.0:
+        raise ValueError("TRRM veto budget must be between zero and one")
+    keep = max(1, int(round((1.0 - veto_budget) * len(values))))
+    return np.argsort(values, kind="stable")[:keep]
+
+
+def build_rank_based_eqm_population(
+    train_probabilities: Sequence[float], scoring_probabilities: Sequence[float], *, veto_budget: float,
+) -> RankBasedPopulation:
+    return RankBasedPopulation(
+        rank_based_survivor_indices(train_probabilities, veto_budget=veto_budget),
+        rank_based_survivor_indices(scoring_probabilities, veto_budget=veto_budget),
+        len(train_probabilities), len(scoring_probabilities), veto_budget,
+    )
 
 
 def summarize_stability(candidate_id: str, scores: Sequence[float], compute_cost: float) -> StabilitySummary:
@@ -130,39 +234,35 @@ def fit_calibrator_family(
     )
 
 
-def _probabilistic_model(candidate_id: str, seed: int) -> Any:
+def _probabilistic_model(
+    candidate_id: str, seed: int, contract: ScientificCompetitionContract, *, smoke: bool = False,
+) -> Any:
     from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
 
+    parameters = contract.parameters(candidate_id, smoke=smoke)
     if candidate_id in {"trrm_logistic_baseline", "eqm_logistic_clean_baseline"}:
-        return LogisticRegression(C=1.0, max_iter=1000, random_state=seed)
+        return LogisticRegression(**parameters, random_state=seed)
     if candidate_id in {"trrm_random_forest", "eqm_random_forest_clean"}:
-        return RandomForestClassifier(
-            n_estimators=80, max_depth=8, min_samples_leaf=8, random_state=seed, n_jobs=1,
-        )
+        return RandomForestClassifier(**parameters, random_state=seed, n_jobs=1)
     if candidate_id in {"trrm_hist_gradient_boosting", "eqm_hgb_clean"}:
-        return HistGradientBoostingClassifier(
-            max_iter=80, max_depth=5, min_samples_leaf=10,
-            learning_rate=0.05, random_state=seed,
-        )
+        return HistGradientBoostingClassifier(**parameters, random_state=seed)
     raise ValueError(f"unknown probabilistic candidate: {candidate_id}")
 
 
-def _regression_model(candidate_id: str, seed: int) -> Any:
+def _regression_model(
+    candidate_id: str, seed: int, contract: ScientificCompetitionContract, *, smoke: bool = False,
+) -> Any:
     from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor
     from sklearn.linear_model import Ridge
 
+    parameters = contract.parameters(candidate_id, smoke=smoke)
     if candidate_id == "eqm_linear_net_baseline":
-        return Ridge(alpha=1.0)
+        return Ridge(**parameters)
     if candidate_id == "eqm_extra_trees_net":
-        return ExtraTreesRegressor(
-            n_estimators=80, max_depth=8, min_samples_leaf=5, random_state=seed, n_jobs=1,
-        )
+        return ExtraTreesRegressor(**parameters, random_state=seed, n_jobs=1)
     if candidate_id == "eqm_hgb_net":
-        return HistGradientBoostingRegressor(
-            max_iter=80, max_depth=5, min_samples_leaf=10,
-            learning_rate=0.05, random_state=seed,
-        )
+        return HistGradientBoostingRegressor(**parameters, random_state=seed)
     raise ValueError(f"unknown regression candidate: {candidate_id}")
 
 
@@ -176,28 +276,30 @@ def _export_fitted(model: Any, candidate_id: str, feature_names: Sequence[str], 
 
 def fit_selected_probabilistic_candidate(
     candidate_id: str, x_train: np.ndarray, y_train: np.ndarray,
-    feature_names: Sequence[str], *, seed: int,
+    feature_names: Sequence[str], *, seed: int, contract: ScientificCompetitionContract,
 ) -> tuple[Any, Mapping[str, Any]]:
-    model = _probabilistic_model(candidate_id, seed).fit(x_train, y_train)
+    model = _probabilistic_model(candidate_id, seed, contract).fit(x_train, y_train)
     return model, _export_fitted(model, candidate_id, feature_names, classifier=True)
 
 
 def fit_selected_regression_candidate(
     candidate_id: str, x_train: np.ndarray, y_train: np.ndarray,
-    feature_names: Sequence[str], *, seed: int,
+    feature_names: Sequence[str], *, seed: int, contract: ScientificCompetitionContract,
 ) -> tuple[Any, Mapping[str, Any]]:
-    model = _regression_model(candidate_id, seed).fit(x_train, y_train)
+    model = _regression_model(candidate_id, seed, contract).fit(x_train, y_train)
     return model, _export_fitted(model, candidate_id, feature_names, classifier=False)
 
 
 def fit_qmae_refit(
     x_train: np.ndarray, y_train: np.ndarray, x_reserve: np.ndarray,
     y_reserve: np.ndarray, feature_names: Sequence[str], *, seed: int,
+    contract: ScientificCompetitionContract,
 ) -> QmaeQuantileResult:
     """Fit final quantiles on train and conformal adjustment only on reserve."""
     from sklearn.ensemble import HistGradientBoostingRegressor
 
-    common = dict(max_iter=80, max_depth=4, min_samples_leaf=10, learning_rate=0.05, random_state=seed)
+    common = contract.parameters("qmae_hist_gradient_boosting")
+    common["random_state"] = seed
     q50_model = HistGradientBoostingRegressor(loss="quantile", quantile=0.50, **common).fit(x_train, y_train)
     q90_model = HistGradientBoostingRegressor(loss="quantile", quantile=0.90, **common).fit(x_train, y_train)
     residuals = y_reserve - q90_model.predict(x_reserve)
@@ -282,10 +384,12 @@ def pinball_loss(actual: Sequence[float], predicted: Sequence[float], quantile: 
 def fit_qmae_quantiles(
     x_train: np.ndarray, y_train: np.ndarray, x_calibration: np.ndarray, y_calibration: np.ndarray,
     x_score: np.ndarray, y_score: np.ndarray, feature_names: Sequence[str], *, seed: int,
+    contract: ScientificCompetitionContract, smoke: bool = False,
 ) -> QmaeQuantileResult:
     from sklearn.ensemble import HistGradientBoostingRegressor
 
-    common = dict(max_iter=80, max_depth=4, min_samples_leaf=10, learning_rate=0.05, random_state=seed)
+    common = contract.parameters("qmae_hist_gradient_boosting", smoke=smoke)
+    common["random_state"] = seed
     q50_model = HistGradientBoostingRegressor(loss="quantile", quantile=0.50, **common).fit(x_train, y_train)
     q90_model = HistGradientBoostingRegressor(loss="quantile", quantile=0.90, **common).fit(x_train, y_train)
     calibration_residuals = y_calibration - q90_model.predict(x_calibration)
@@ -317,11 +421,12 @@ def _linear_artifact(model: Any, artifact_id: str, feature_names: Sequence[str])
 def run_trrm_fold_competition(
     x_train: np.ndarray, y_train: np.ndarray, x_calibration: np.ndarray, y_calibration: np.ndarray,
     x_score: np.ndarray, y_score: np.ndarray, feature_names: Sequence[str], *, seed: int,
+    contract: ScientificCompetitionContract, smoke: bool = False,
 ) -> tuple[ProbabilisticCandidateResult, ...]:
     """Run every pre-registered TRRM family for one temporal fold."""
     from sklearn.metrics import average_precision_score
 
-    models = tuple((candidate_id, _probabilistic_model(candidate_id, seed)) for candidate_id in (
+    models = tuple((candidate_id, _probabilistic_model(candidate_id, seed, contract, smoke=smoke)) for candidate_id in (
         "trrm_logistic_baseline", "trrm_random_forest", "trrm_hist_gradient_boosting",
     ))
     reports = []
@@ -343,12 +448,13 @@ def run_eqm_fold_competition(
     x_train: np.ndarray, clean_train: np.ndarray, net_train: np.ndarray,
     x_calibration: np.ndarray, clean_calibration: np.ndarray,
     x_score: np.ndarray, clean_score: np.ndarray, net_score: np.ndarray,
-    feature_names: Sequence[str], *, seed: int,
+    feature_names: Sequence[str], *, seed: int, contract: ScientificCompetitionContract,
+    smoke: bool = False,
 ) -> tuple[tuple[ProbabilisticCandidateResult, ...], tuple[RegressionCandidateResult, ...]]:
     """Evaluate EQM clean classification and net-quality regression as separate tasks."""
     from sklearn.metrics import average_precision_score, mean_absolute_error
 
-    clean_models = tuple((candidate_id, _probabilistic_model(candidate_id, seed)) for candidate_id in (
+    clean_models = tuple((candidate_id, _probabilistic_model(candidate_id, seed, contract, smoke=smoke)) for candidate_id in (
         "eqm_logistic_clean_baseline", "eqm_random_forest_clean", "eqm_hgb_clean",
     ))
     clean_reports = []
@@ -366,7 +472,7 @@ def run_eqm_fold_competition(
             calibrator, calibration_report, artifact,
         ))
 
-    net_models = tuple((candidate_id, _regression_model(candidate_id, seed)) for candidate_id in (
+    net_models = tuple((candidate_id, _regression_model(candidate_id, seed, contract, smoke=smoke)) for candidate_id in (
         "eqm_linear_net_baseline", "eqm_extra_trees_net", "eqm_hgb_net",
     ))
     net_reports = []

@@ -23,11 +23,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config", type=Path,
-        default=ROOT / "config" / "experiments" / "aegis_short_candidate_e2.yaml",
+        default=ROOT / "config" / "experiments" / "aegis_short_candidate_e3.yaml",
     )
     parser.add_argument(
         "--competition-config", type=Path,
-        default=ROOT / "config" / "scientific_competition_v1.yaml",
+        default=ROOT / "config" / "scientific_competition_v2.yaml",
     )
     parser.add_argument("--mode", choices=[item.value for item in RunMode], default=RunMode.DRY_RUN.value)
     parser.add_argument("--owner-authorization")
@@ -50,7 +50,7 @@ def main() -> int:
     )
     backend = (
         SimulatedScientificBackend(approving=args.smoke_outcome == "candidate")
-        if mode is RunMode.SMOKE_RUN else ProductionScientificBackend()
+        if mode is RunMode.SMOKE_RUN else ProductionScientificBackend(competition_path=args.competition_config)
     )
     runner = PhaseEOrchestrator(
         preflight=preflight, backend=backend, reports_root=args.reports_root,

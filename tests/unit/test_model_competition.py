@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 from sklearn.ensemble import (
@@ -12,8 +13,14 @@ from sklearn.ensemble import (
 
 from aegis.training.competition import (
     export_hist_gradient_boosting, export_random_forest, fit_qmae_quantiles,
+    load_scientific_competition_contract,
     rank_stability_first, registered_candidate_families, run_eqm_fold_competition,
     run_trrm_fold_competition, select_calibrator, summarize_stability,
+)
+
+
+CONTRACT = load_scientific_competition_contract(
+    Path(__file__).resolve().parents[2] / "config" / "scientific_competition_v2.yaml",
 )
 from aegis.features import DeterministicFeaturePipeline, FEATURE_NAMES
 from aegis.models import DeterministicModelRuntime, TreeHead
@@ -122,7 +129,7 @@ def test_qmae_quantile_smoke_exports_models_and_reports_conformal_coverage() -> 
     y = np.maximum(0.0, 0.008 + 0.004 * np.abs(x[:, 0]) + rng.normal(scale=0.0015, size=len(x)))
     result = fit_qmae_quantiles(
         x[:300], y[:300], x[300:450], y[300:450], x[450:], y[450:],
-        ("a", "b", "c"), seed=11,
+        ("a", "b", "c"), seed=11, contract=CONTRACT, smoke=True,
     )
     q90 = np.asarray([result.q90.evaluate(row) + result.conformal_adjustment for row in x[450:]])
     assert abs(float(np.mean(y[450:] <= q90)) - result.empirical_coverage) <= 1e-15
@@ -144,7 +151,8 @@ def test_trrm_and_eqm_smoke_run_every_family_with_separate_targets() -> None:
     x, tail, net = _data(); clean = (net > np.median(net)).astype(int)
     names = tuple(f"f{index}" for index in range(x.shape[1]))
     trrm = run_trrm_fold_competition(
-        x[:120], tail[:120], x[120:180], tail[120:180], x[180:], tail[180:], names, seed=17,
+        x[:120], tail[:120], x[120:180], tail[120:180], x[180:], tail[180:], names,
+        seed=17, contract=CONTRACT, smoke=True,
     )
     assert {item.candidate_id for item in trrm} == {
         "trrm_logistic_baseline", "trrm_random_forest", "trrm_hist_gradient_boosting",
@@ -152,7 +160,7 @@ def test_trrm_and_eqm_smoke_run_every_family_with_separate_targets() -> None:
     assert all(set(item.calibration_report) == {"IDENTITY", "PLATT", "ISOTONIC"} for item in trrm)
     clean_results, net_results = run_eqm_fold_competition(
         x[:120], clean[:120], net[:120], x[120:180], clean[120:180],
-        x[180:], clean[180:], net[180:], names, seed=17,
+        x[180:], clean[180:], net[180:], names, seed=17, contract=CONTRACT, smoke=True,
     )
     assert {item.candidate_id for item in clean_results} == {
         "eqm_logistic_clean_baseline", "eqm_random_forest_clean", "eqm_hgb_clean",
