@@ -45,11 +45,11 @@ sole operational platform and `execution.enabledByConfig` remains `false`.
 - `threshold_value: null`, because it may only be derived by the authorized full run;
 - no automatic promotion and initial lifecycle `EXPERIMENTAL`.
 
-Validation command (executed in this phase):
+Dry-run command (executed after the orchestrator implementation):
 
 ```bash
 PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
-  scripts/run_aegis_candidate_experiment.py --validate-only
+  scripts/run_aegis_candidate_experiment.py --mode dry-run
 ```
 
 Owner-authorized full-run command (not executed in this phase):
@@ -57,13 +57,15 @@ Owner-authorized full-run command (not executed in this phase):
 ```bash
 PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
   scripts/run_aegis_candidate_experiment.py \
-  --execute-full --owner-authorization OWNER_AUTHORIZED_PHASE_E_FULL_RUN
+  --mode full-run --owner-authorization OWNER_AUTHORIZED_PHASE_E_FULL_RUN
 ```
 
-The command currently hard-stops after validation in this implementation-only stage. The
-full orchestration that consumes all pre-registered model families is an open technical
-criterion; therefore this report does not label Phase E execution-ready or claim
-`OFFLINE_PARITY_IMPLEMENTATION_READY`.
+The persistent state machine, exclusive lease, dry-run, smoke-run, validation stop, ECON,
+criteria, policy, freeze, and publication mechanics are implemented and covered by 43
+focused tests. A production scientific backend remains fail-closed because E1 does not
+freeze the subdivision between calibration and scoring inside each validation fold or the
+dataset sampling cadence. Those are scientific protocol inputs and were not invented in
+the orchestrator. The real full-run therefore remains unexecuted and Phase E remains open.
 
 Estimated owner-run envelope is 2-6 CPU hours and 16 GiB peak memory. This is a planning
 estimate, not measured evidence. Rollback is non-destructive: retain an immutable failed
@@ -106,7 +108,7 @@ Minimal synthetic report shape exercised by the fixtures:
 | 8 | arbitrary threshold | `2a3ecdf`, frozen policy; reference marked placeholder | drift/hash tests | PRODUCTIVE VALUE PENDING E |
 | 9 | terminal-only labels | `1d6452c`, SHORT V4 | path/gap/ambiguity tests | CLOSED |
 | 10 | no system freeze | `2a3ecdf` | required component/hash/lifecycle tests | CLOSED |
-| 11 | non-persistent evidence | `2a3ecdf` | restart, chain tamper, outcome dedupe | CLOSED offline; G-H N/A |
+| 11 | non-persistent evidence | `2a3ecdf`; Phase-E hash-chained run state and isolated evidence | restart, chain tamper, outcome dedupe, 43 orchestrator/state tests | CLOSED offline; G-H N/A |
 | 12 | score double counting | `2a3ecdf` | gate invariance and golden parity | CLOSED |
 | 13 | approved untrained bundle | `2a3ecdf` | bundle validation | CLOSED |
 | 14 | coordinated TS close absent | Phase G | not in offline scope | N/A-OFFLINE |
@@ -119,4 +121,5 @@ Minimal synthetic report shape exercised by the fixtures:
 - TypeScript: 625 tests passed outside the sandbox restriction; TypeScript build passed.
 - Coverage tooling was not installed in the repository environment. No dependency was
   installed merely to generate a percentage.
+- Phase-E dry-run and two fixture smoke-runs completed. The real lockbox was not consumed.
 - No full Phase-E experiment or Phase-F benchmark was executed.
