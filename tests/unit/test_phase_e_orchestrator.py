@@ -134,9 +134,11 @@ def test_smoke_rejection_preserves_reports_without_candidate_artifacts(tmp_path:
 
 def test_validation_run_stops_before_lockbox(tmp_path: Path) -> None:
     result = orchestrator(tmp_path, RunMode.VALIDATION_RUN).run()
-    assert result.state is PhaseEState.QMAE_VALIDATED
+    assert result.state is PhaseEState.VALIDATION_COMPLETED
     assert result.lockbox_consumed is False
     assert (Path(result.run_dir) / "experimental_bundle.json").is_file()
+    assert (Path(result.run_dir) / "threshold_draft.json").is_file()
+    assert (Path(result.run_dir) / "econ_report.json").is_file()
     assert not (tmp_path / "fake-lockbox" / "budget.json").exists()
 
 

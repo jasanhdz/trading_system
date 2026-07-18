@@ -18,24 +18,35 @@ from ..domain import ScientificEvidenceEvent, TradeSide
 from ..evidence import AppendOnlyEvidenceRecorder
 from ..features import FEATURE_HASH, FEATURE_NAMES, FEATURE_SCHEMA_VERSION
 from ..freeze import BundleLifecycleState, FrozenSelectionPolicy, SystemFreeze
-from ..models import model_bundle_from_payload
+from ..models import CalibrationMethod, CalibratorSpec, model_bundle_from_payload
 from ..utils import Sha256HashProvider, canonical_json, sha256_file, to_primitive
 from .competition import (
-    QmaeQuantileResult, rank_stability_first, run_eqm_fold_competition,
-    run_trrm_fold_competition, fit_qmae_quantiles, summarize_stability,
+    QmaeQuantileResult, fit_calibrator_family, fit_qmae_refit,
+    fit_selected_probabilistic_candidate, fit_selected_regression_candidate,
+    rank_stability_first, run_eqm_fold_competition, run_trrm_fold_competition,
+    fit_qmae_quantiles, summarize_stability,
+)
+from .dataset import (
+    ExplicitFoldSplit, ExplicitFoldWindow, HourlyDatasetBuild, TrainingDataset,
+    explicit_temporal_folds, load_and_build_e2_hourly_dataset,
 )
 from .econ import EconomicSignal, replay_economics
 from .labels import SHORT_LABEL_SCHEMA_VERSION
-from .preregistration import LockboxBudget, load_and_validate_preregistration
+from .experiment import _feature_batch, evaluate_authoritative_feature_batch, fit_normalizer
+from .preregistration import (
+    E1_CANONICAL_HASH, E1_PHYSICAL_SHA256, LockboxBudget, SharedLockboxAuthority,
+    load_and_validate_preregistration,
+)
 from .run_state import (
     EnvironmentFingerprint, LockboxLease, LockboxLeaseRecord, PhaseEErrorCode,
     PhaseEScientificRejection, PhaseEState, PhaseETechnicalError, RunMode,
-    RunStateStore, atomic_write_json, deterministic_run_id, utc_now,
+    RunStateStore, SharedWindowLockboxLease, atomic_write_json,
+    deterministic_run_id, utc_now,
 )
 
 
-EXPECTED_PREREGISTRATION_FILE_HASH = "2604df3461ca891db05b6d877ab2e6373eac8fc7b7412d08571b2644f351ae39"
-EXPECTED_PREREGISTRATION_CANONICAL_HASH = "ef2c4c236fb09d83886817a296a4aa39d337d7e4fbcbbcbc54e2d3e769c67e78"
+EXPECTED_PREREGISTRATION_FILE_HASH = E1_PHYSICAL_SHA256
+EXPECTED_PREREGISTRATION_CANONICAL_HASH = E1_CANONICAL_HASH
 EXPECTED_COMPETITION_FILE_HASH = "6eb6e89b42ec518ddc7b277cec1ec7df22dd5f5b2fdbb78341d9885aaf27988c"
 FULL_RUN_AUTHORIZATION = "OWNER_AUTHORIZED_PHASE_E_FULL_RUN"
 
@@ -81,6 +92,9 @@ class DatasetBuildResult:
     start: str
     end: str
     symbol_counts: Mapping[str, int]
+    expected_anchor_count: int = 0
+    found_anchor_count: int = 0
+    skipped_history_cycles: int = 0
 
 
 @dataclass(frozen=True)
@@ -129,6 +143,8 @@ class ExperimentalBundleResult:
     payload: Mapping[str, Any]
     candidate_hash: str
     parity_max_absolute_error: float
+    threshold_draft: float | None = None
+    refit_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -213,7 +229,10 @@ class PhaseEPreflight:
             payload, audit = load_and_validate_preregistration(self.preregistration_path, audit_source=True)
             physical_hash = sha256_file(self.preregistration_path)
             competition_hash = sha256_file(self.competition_path)
-            if physical_hash != EXPECTED_PREREGISTRATION_FILE_HASH or audit.content_hash != EXPECTED_PREREGISTRATION_CANONICAL_HASH:
+            if audit.protocol_version == 1 and (
+                physical_hash != EXPECTED_PREREGISTRATION_FILE_HASH
+                or audit.content_hash != EXPECTED_PREREGISTRATION_CANONICAL_HASH
+            ):
                 raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "Phase-E preregistration hash mismatch")
             if competition_hash != EXPECTED_COMPETITION_FILE_HASH:
                 raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "competition protocol hash mismatch")
@@ -236,9 +255,24 @@ class PhaseEPreflight:
                 raise PhaseETechnicalError(
                     PhaseEErrorCode.D3_HASH_MISMATCH, "canonical D3 audit failed",
                 ) from exc
-            lockbox_state = self.root / str(payload["lockbox"]["query_state_path"])
-            lease = lockbox_state.with_name("lockbox_lease.json")
-            consumed = lockbox_state.exists() or lease.exists()
+            if audit.protocol_version == 2:
+                lockbox_state = self.root / str(payload["lockbox"]["authority_path"])
+                authority = SharedLockboxAuthority(
+                    lockbox_state, str(payload["lockbox"]["window_id"]),
+                    str(payload["lockbox"]["semi_blind_start"]), str(payload["lockbox"]["semi_blind_end"]),
+                    int(payload["lockbox"]["maximum_queries_total_across_preregistrations"]),
+                )
+                authority.initialize(
+                    e1_hashes={"physical": E1_PHYSICAL_SHA256, "canonical": E1_CANONICAL_HASH},
+                    e2_hashes={"physical": physical_hash, "canonical": audit.content_hash},
+                )
+                authority.audit_available()
+                lease = lockbox_state.with_suffix(".lease.json")
+                consumed = lease.exists()
+            else:
+                lockbox_state = self.root / str(payload["lockbox"]["query_state_path"])
+                lease = lockbox_state.with_name("lockbox_lease.json")
+                consumed = lockbox_state.exists() or lease.exists()
             if mode is RunMode.FULL_RUN and consumed:
                 raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ALREADY_CONSUMED, "real lockbox is already consumed")
             reports_root = self.root / "reports" / "experiments" / str(payload["experiment_id"])
@@ -299,11 +333,16 @@ class SimulatedScientificBackend:
 
     def prepare_folds(self, preregistration: Mapping[str, Any], dataset: DatasetBuildResult) -> tuple[FoldTrainingResult, ...]:
         results = []
-        for item in preregistration["protocol"]["folds"]:
+        items = preregistration.get("fold_protocol", {}).get("folds", preregistration["protocol"].get("folds", ()))
+        for item in items:
+            calibration_start = item.get("calibration_start", item.get("validation_start"))
+            calibration_end = item.get("calibration_end", item.get("validation_start"))
+            scoring_start = item.get("scoring_start", item.get("validation_start"))
+            scoring_end = item.get("scoring_end", item.get("validation_end"))
             unsigned = {
                 "fold_id": int(item["id"]), "train_bounds": (item["train_start"], item["train_end"]),
-                "calibration_bounds": (item["validation_start"], item["validation_start"]),
-                "validation_bounds": (item["validation_start"], item["validation_end"]),
+                "calibration_bounds": (calibration_start, calibration_end),
+                "validation_bounds": (scoring_start, scoring_end),
                 "embargo_minutes": int(preregistration["protocol"]["embargo_minutes"]),
                 "train_rows": 220, "calibration_rows": 44, "validation_rows": 44,
                 "symbols": CANONICAL_SYMBOLS,
@@ -471,6 +510,391 @@ class SimulatedScientificBackend:
         )
 
 
+class ProductionScientificBackend:
+    """E2 backend that coordinates the existing scientific APIs on canonical dev data."""
+
+    def __init__(self) -> None:
+        self._build: HourlyDatasetBuild | None = None
+        self._splits: tuple[ExplicitFoldSplit, ...] = ()
+        self._fold_payloads: dict[str, Any] = {}
+        self._final_bundle: ExperimentalBundleResult | None = None
+
+    @staticmethod
+    def _require_e2(preregistration: Mapping[str, Any]) -> None:
+        if int(preregistration.get("protocol_version", 0)) < 2:
+            raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "PROTOCOL_VERSION_NOT_EXECUTABLE")
+
+    @staticmethod
+    def _matrix(dataset: TrainingDataset, indices: Sequence[int], normalizer: Any) -> np.ndarray:
+        return np.asarray([
+            [normalizer.normalize(name, value)[0] for name, value in zip(FEATURE_NAMES, dataset.rows[index].features)]
+            for index in indices
+        ], dtype=np.float64)
+
+    @staticmethod
+    def _target(dataset: TrainingDataset, indices: Sequence[int], name: str) -> np.ndarray:
+        return np.asarray([float(getattr(dataset.rows[index].target, name)) for index in indices], dtype=np.float64)
+
+    def build_dataset(self, preregistration: Mapping[str, Any], mode: RunMode) -> DatasetBuildResult:
+        self._require_e2(preregistration)
+        source = CanonicalSeriesSource(
+            Path(preregistration["source"]["path"]), DataPurpose.TRAINING,
+            expected_manifest_sha256=str(preregistration["source"]["manifest_sha256"]),
+        )
+        try:
+            self._build = load_and_build_e2_hourly_dataset(source, preregistration)
+        except Exception as exc:
+            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "E2 canonical dataset build failed") from exc
+        built = self._build
+        return DatasetBuildResult(
+            built.dataset.artifact_hash, built.dataset.row_count, built.valid_cycle_count,
+            built.quarantined_label_cycles, built.dataset.feature_schema_version,
+            built.dataset.feature_hash, SHORT_LABEL_SCHEMA_VERSION,
+            built.first_anchor.isoformat(), built.last_anchor.isoformat(), built.rows_by_symbol,
+            built.expected_anchor_count, built.found_anchor_count, built.skipped_history_cycles,
+        )
+
+    def prepare_folds(self, preregistration: Mapping[str, Any], dataset: DatasetBuildResult) -> tuple[FoldTrainingResult, ...]:
+        if self._build is None or self._build.dataset.artifact_hash != dataset.dataset_hash:
+            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "dataset checkpoint is not loaded")
+        windows = tuple(ExplicitFoldWindow(
+            int(item["id"]), *(
+                datetime.fromisoformat(str(item[key]).replace("Z", "+00:00"))
+                for key in (
+                    "train_start", "train_end", "calibration_start", "calibration_end",
+                    "scoring_start", "scoring_end",
+                )
+            ),
+        ) for item in preregistration["fold_protocol"]["folds"])
+        try:
+            self._splits = explicit_temporal_folds(
+                self._build.dataset, windows,
+                embargo=timedelta(minutes=int(preregistration["fold_protocol"]["embargo_minutes"])),
+            )
+        except ValueError as exc:
+            raise PhaseETechnicalError(PhaseEErrorCode.FOLD_INVALID, "E2 explicit folds are invalid") from exc
+        results = []
+        for split in self._splits:
+            window = split.window
+            unsigned = {
+                "fold_id": window.fold_id,
+                "train_bounds": (window.train_start.isoformat(), window.train_end.isoformat()),
+                "calibration_bounds": (window.calibration_start.isoformat(), window.calibration_end.isoformat()),
+                "validation_bounds": (window.scoring_start.isoformat(), window.scoring_end.isoformat()),
+                "embargo_minutes": int(preregistration["fold_protocol"]["embargo_minutes"]),
+                "train_rows": len(split.train), "calibration_rows": len(split.calibration),
+                "validation_rows": len(split.scoring), "symbols": CANONICAL_SYMBOLS,
+            }
+            results.append(FoldTrainingResult(**unsigned, fold_hash=Sha256HashProvider().digest_value(unsigned)))
+        return tuple(results)
+
+    def run_competition(self, preregistration: Mapping[str, Any], folds: Sequence[FoldTrainingResult]) -> ModelCompetitionResult:
+        if self._build is None or len(self._splits) != len(folds):
+            raise PhaseETechnicalError(PhaseEErrorCode.FOLD_INVALID, "fold data is unavailable")
+        dataset = self._build.dataset; seed = int(preregistration["protocol"]["seed"])
+        scores: dict[str, dict[str, list[float]]] = {"trrm": {}, "eqm_clean": {}, "eqm_net": {}}
+        payloads: dict[str, Any] = {}
+        for split in self._splits:
+            normalizer = fit_normalizer(dataset, split.train)
+            x_train = self._matrix(dataset, split.train, normalizer)
+            x_cal = self._matrix(dataset, split.calibration, normalizer)
+            x_score = self._matrix(dataset, split.scoring, normalizer)
+            trrm = run_trrm_fold_competition(
+                x_train, self._target(dataset, split.train, "tail_event"),
+                x_cal, self._target(dataset, split.calibration, "tail_event"),
+                x_score, self._target(dataset, split.scoring, "tail_event"),
+                FEATURE_NAMES, seed=seed + split.window.fold_id,
+            )
+            clean, net = run_eqm_fold_competition(
+                x_train, self._target(dataset, split.train, "clean_quality"),
+                self._target(dataset, split.train, "net_quality_after_costs"),
+                x_cal, self._target(dataset, split.calibration, "clean_quality"),
+                x_score, self._target(dataset, split.scoring, "clean_quality"),
+                self._target(dataset, split.scoring, "net_quality_after_costs"),
+                FEATURE_NAMES, seed=seed + split.window.fold_id,
+            )
+            qmae = fit_qmae_quantiles(
+                x_train, self._target(dataset, split.train, "qmae"),
+                x_cal, self._target(dataset, split.calibration, "qmae"),
+                x_score, self._target(dataset, split.scoring, "qmae"),
+                FEATURE_NAMES, seed=seed + split.window.fold_id,
+            )
+            for item in trrm:
+                scores["trrm"].setdefault(item.candidate_id, []).append(item.average_precision)
+            for item in clean:
+                scores["eqm_clean"].setdefault(item.candidate_id, []).append(item.average_precision)
+            for item in net:
+                scores["eqm_net"].setdefault(item.candidate_id, []).append(-item.mean_absolute_error)
+            payloads[str(split.window.fold_id)] = {
+                "trrm": trrm, "eqm_clean": clean, "eqm_net": net, "qmae": qmae,
+                "normalizer": normalizer,
+            }
+        stability = {
+            task: rank_stability_first(tuple(
+                summarize_stability(candidate, values, float(index + 1))
+                for index, (candidate, values) in enumerate(sorted(candidates.items()))
+            )) for task, candidates in scores.items()
+        }
+        selected = {task: ranking[0].candidate_id for task, ranking in stability.items()}
+        selected["qmae"] = "qmae_hist_gradient_boosting"
+        baselines = {
+            "trrm": "trrm_logistic_baseline", "eqm_clean": "eqm_logistic_clean_baseline",
+            "eqm_net": "eqm_linear_net_baseline",
+        }
+        not_beaten = any(
+            stability[task][0].worst_fold <= next(
+                item.worst_fold for item in stability[task] if item.candidate_id == baseline
+            ) for task, baseline in baselines.items()
+        )
+        self._fold_payloads = payloads
+        document = {"folds": payloads, "selected": selected, "stability": stability, "model_not_beaten": not_beaten}
+        return ModelCompetitionResult(selected, payloads, stability, not_beaten, Sha256HashProvider().digest_value(document))
+
+    def _selected_fold_item(self, competition: ModelCompetitionResult, task: str, fold: str) -> Any:
+        candidate_id = competition.selected_models[task]
+        return next(item for item in self._fold_payloads[fold][task] if item.candidate_id == candidate_id)
+
+    def validate_calibration(self, preregistration: Mapping[str, Any], competition: ModelCompetitionResult) -> CalibrationResult:
+        metrics = {}
+        maximum = 0.0
+        for fold in sorted(self._fold_payloads, key=int):
+            trrm = self._selected_fold_item(competition, "trrm", fold)
+            clean = self._selected_fold_item(competition, "eqm_clean", fold)
+            metrics[fold] = {
+                "trrm": {"method": trrm.calibrator.method, "ece": trrm.calibrator.ece, "brier": trrm.calibrator.brier},
+                "eqm_clean": {"method": clean.calibrator.method, "ece": clean.calibrator.ece, "brier": clean.calibrator.brier},
+            }
+            maximum = max(maximum, trrm.calibrator.ece, clean.calibrator.ece)
+        valid = maximum <= float(preregistration["promotion"]["mandatory"]["maximum_ece_each_fold"])
+        return CalibrationResult(valid, maximum, metrics, Sha256HashProvider().digest_value(metrics))
+
+    def validate_qmae(self, preregistration: Mapping[str, Any], competition: ModelCompetitionResult) -> QMAEValidationResult:
+        assert self._build is not None
+        dataset = self._build.dataset
+        by_fold: dict[str, float] = {}; pinball: dict[str, Mapping[str, float]] = {}
+        symbol_hits: dict[str, list[bool]] = {symbol: [] for symbol in CANONICAL_SYMBOLS}
+        regime_hits: dict[str, list[bool]] = {}
+        for split in self._splits:
+            fold = str(split.window.fold_id); qmae = self._fold_payloads[fold]["qmae"]
+            normalizer = self._fold_payloads[fold]["normalizer"]
+            x_score = self._matrix(dataset, split.scoring, normalizer)
+            actual = self._target(dataset, split.scoring, "qmae")
+            predicted = np.asarray([qmae.q90.evaluate(row) for row in x_score]) + qmae.conformal_adjustment
+            hits = actual <= predicted
+            by_fold[fold] = float(np.mean(hits))
+            pinball[fold] = {"q50": qmae.q50_pinball, "q90": qmae.q90_pinball, "baseline_q90": qmae.baseline_q90_pinball}
+            for index, row_index in enumerate(split.scoring):
+                row = dataset.rows[row_index]
+                symbol_hits[row.symbol].append(bool(hits[index]))
+                regime_hits.setdefault(row.regime.value, []).append(bool(hits[index]))
+        by_symbol = {key: float(np.mean(values)) for key, values in symbol_hits.items() if values}
+        by_regime = {key: float(np.mean(values)) for key, values in regime_hits.items() if values}
+        lower = float(preregistration["promotion"]["mandatory"]["qmae_coverage_minimum_each_fold"])
+        upper = float(preregistration["promotion"]["mandatory"]["qmae_coverage_maximum_each_fold"])
+        valid = all(lower <= value <= upper for value in by_fold.values())
+        document = {"fold": by_fold, "symbol": by_symbol, "regime": by_regime, "pinball": pinball}
+        return QMAEValidationResult(valid, by_fold, by_symbol, by_regime, pinball, Sha256HashProvider().digest_value(document))
+
+    @staticmethod
+    def _calibrator_family(competition: ModelCompetitionResult, payloads: Mapping[str, Any], task: str) -> CalibrationMethod:
+        candidate_id = competition.selected_models[task]
+        aggregates: dict[str, list[tuple[float, float]]] = {}
+        for fold in sorted(payloads, key=int):
+            item = next(value for value in payloads[fold][task] if value.candidate_id == candidate_id)
+            for method, metric in item.calibration_report.items():
+                aggregates.setdefault(method, []).append((float(metric["ece"]), float(metric["brier"])))
+        order = {"IDENTITY": 0, "PLATT": 1, "ISOTONIC": 2}
+        selected = min(aggregates, key=lambda method: (
+            float(np.mean([value[0] for value in aggregates[method]])),
+            float(np.mean([value[1] for value in aggregates[method]])), order[method],
+        ))
+        return CalibrationMethod(selected)
+
+    @staticmethod
+    def _head(artifact: Mapping[str, Any], trees: list[Mapping[str, Any]], *, probability: bool) -> Mapping[str, Any]:
+        if artifact["schema_version"] == "aegis-linear-model-v1":
+            return {
+                "bias": float(artifact["intercept"]),
+                "weights": dict(zip(artifact["feature_names"], artifact["coefficients"])),
+            }
+        trees.append(artifact)
+        return {"tree_ensemble_id": artifact["ensemble_id"], "output_kind": "PROBABILITY" if probability else "RAW"}
+
+    def assemble_experimental_bundle(
+        self, preregistration: Mapping[str, Any], competition: ModelCompetitionResult,
+        calibration: CalibrationResult, qmae: QMAEValidationResult, git_commit: str,
+    ) -> ExperimentalBundleResult:
+        assert self._build is not None
+        dataset = self._build.dataset; refit = preregistration["refit"]
+        parse = lambda value: datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        train = tuple(index for index, row in enumerate(dataset.rows) if parse(refit["final_train_start"]) <= row.timestamp <= parse(refit["final_train_end"]))
+        reserve = tuple(index for index, row in enumerate(dataset.rows) if parse(refit["final_calibration_reserve_start"]) <= row.timestamp <= parse(refit["final_calibration_reserve_end"]))
+        if not train or not reserve:
+            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "E2 refit/reserve is empty")
+        normalizer = fit_normalizer(dataset, train); seed = int(preregistration["protocol"]["seed"])
+        x_train = self._matrix(dataset, train, normalizer); x_reserve = self._matrix(dataset, reserve, normalizer)
+        trrm_model, trrm_artifact = fit_selected_probabilistic_candidate(
+            competition.selected_models["trrm"], x_train, self._target(dataset, train, "tail_event"), FEATURE_NAMES, seed=seed,
+        )
+        trrm_train = trrm_model.predict_proba(x_train)[:, 1]
+        trrm_reserve = trrm_model.predict_proba(x_reserve)[:, 1]
+        train_survivors = np.flatnonzero(trrm_train <= 0.70); reserve_survivors = np.flatnonzero(trrm_reserve <= 0.70)
+        if len(train_survivors) < 100 or len(reserve_survivors) < 20:
+            raise PhaseETechnicalError(PhaseEErrorCode.DATASET_INVALID, "insufficient TRRM survivors for E2 refit")
+        clean_model, clean_artifact = fit_selected_probabilistic_candidate(
+            competition.selected_models["eqm_clean"], x_train[train_survivors],
+            self._target(dataset, train, "clean_quality")[train_survivors], FEATURE_NAMES, seed=seed,
+        )
+        net_model, net_artifact = fit_selected_regression_candidate(
+            competition.selected_models["eqm_net"], x_train[train_survivors],
+            self._target(dataset, train, "net_quality_after_costs")[train_survivors], FEATURE_NAMES, seed=seed,
+        )
+        tail_method = self._calibrator_family(competition, self._fold_payloads, "trrm")
+        quality_method = self._calibrator_family(competition, self._fold_payloads, "eqm_clean")
+        tail_calibrator = fit_calibrator_family(tail_method, trrm_reserve, self._target(dataset, reserve, "tail_event"))
+        quality_raw = clean_model.predict_proba(x_reserve[reserve_survivors])[:, 1]
+        quality_calibrator = fit_calibrator_family(
+            quality_method, quality_raw,
+            self._target(dataset, reserve, "clean_quality")[reserve_survivors],
+        )
+        qmae_final = fit_qmae_refit(
+            x_train, self._target(dataset, train, "qmae"), x_reserve,
+            self._target(dataset, reserve, "qmae"), FEATURE_NAMES, seed=seed,
+        )
+        trees: list[Mapping[str, Any]] = []
+        tail_head = self._head(trrm_artifact, trees, probability=True)
+        quality_head = self._head(clean_artifact, trees, probability=True)
+        return_head = self._head(net_artifact, trees, probability=False)
+        q50_payload, q90_payload = qmae_final.q50.to_payload(), qmae_final.q90.to_payload()
+        trees.extend((q50_payload, q90_payload))
+        identity = {"method": "IDENTITY", "ece": 0.0, "brier": 0.0, "sample_count": len(reserve)}
+        calibration_payload = {
+            "schema_version": "aegis-calibration-v1", "out_of_fold": True,
+            "heads": {
+                "long": identity, "short": identity, "neutral": identity,
+                "tail_risk": to_primitive(tail_calibrator), "quality": to_primitive(quality_calibrator),
+            },
+        }
+        def make_payload(selection: float) -> dict[str, Any]:
+            payload: dict[str, Any] = {
+                "approved": False, "bundle_id": f"{preregistration['experiment_id']}-experimental",
+                "schema_version": "aegis-model-bundle-v2", "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                "feature_hash": FEATURE_HASH, "universe_id": preregistration["universe_id"],
+                "symbol_set_hash": preregistration["symbol_set_hash"], "timeframe": "5m",
+                "normalizer": {"means": normalizer.means, "scales": normalizer.scales, "clip_absolute": normalizer.clip_absolute},
+                "estimators": [{
+                    "model_id": "aegis-short-e2-h12", "horizon_bars": 12,
+                    "heads": {
+                        "long": {"bias": -8.0, "weights": {}}, "short": {"bias": 8.0, "weights": {}},
+                        "neutral": {"bias": -8.0, "weights": {}}, "expected_return": return_head,
+                        "tail_risk": tail_head, "qmae_mean": {"bias": 0.0, "weights": {}},
+                        "quality": quality_head,
+                    },
+                    "qmae_quantiles": {
+                        "q50": {"tree_ensemble_id": qmae_final.q50.ensemble_id, "output_kind": "RAW"},
+                        "q90": {"tree_ensemble_id": qmae_final.q90.ensemble_id, "output_kind": "RAW"},
+                        "conformal_adjustment": qmae_final.conformal_adjustment,
+                        "empirical_coverage": qmae_final.empirical_coverage,
+                        "coverage_min": 0.87, "coverage_max": 0.93,
+                    },
+                }],
+                "calibration": calibration_payload,
+                "metadata": {
+                    "purpose": "PHASE_E_E2_PRE_LOCKBOX_VALIDATION", "trained": True,
+                    "training_window": [refit["final_train_start"], refit["final_train_end"]],
+                    "validation_window": [refit["final_calibration_reserve_start"], refit["final_calibration_reserve_end"]],
+                    "test_window": None, "seed": seed, "framework": "sklearn-json",
+                    "framework_version": "1", "code_version": git_commit,
+                    "calibration_method": "OUT_OF_FOLD_FAMILY_REFIT_ON_RESERVE",
+                    "feature_count": len(FEATURE_NAMES), "lifecycle_state": "EXPERIMENTAL",
+                    "thresholds": {"direction": 0.50, "selection": selection,
+                                   "trrm_max_tail_probability": 0.70, "qmae_max_fraction": 0.03,
+                                   "eqm_min_score": 0.0},
+                },
+                "tree_ensembles": trees,
+            }
+            payload["content_hash"] = Sha256HashProvider().digest_value(payload)
+            return payload
+        provisional = make_payload(0.0); provisional_bundle = model_bundle_from_payload(provisional)
+        scores = []
+        grouped: dict[datetime, list[Any]] = {}
+        for index in reserve:
+            grouped.setdefault(dataset.rows[index].timestamp, []).append(dataset.rows[index])
+        for timestamp, rows in sorted(grouped.items()):
+            if len(rows) != len(CANONICAL_SYMBOLS):
+                continue
+            result = evaluate_authoritative_feature_batch(
+                provisional_bundle, _feature_batch(rows, provisional_bundle), timestamp=timestamp,
+                config={"protocol": {"friction_fraction": 0.0}},
+            )
+            scores.extend(
+                item.eqm_score for item in result.layers.results
+                if item.side is TradeSide.SHORT and item.rv2_tail_risk <= 0.70 and item.eqm_score > 0.0
+            )
+        if not scores:
+            raise PhaseEScientificRejection(PhaseEErrorCode.MODEL_NOT_BEATEN, "reserve contains no TRRM-veto survivors")
+        threshold = float(np.quantile(np.asarray(scores), float(preregistration["threshold_derivation"]["quantile"]), method="higher"))
+        payload = make_payload(threshold); loaded = model_bundle_from_payload(payload)
+        round_trip = json.loads(canonical_json(payload)); reloaded = model_bundle_from_payload(round_trip)
+        if loaded.content_hash != reloaded.content_hash:
+            raise PhaseETechnicalError(PhaseEErrorCode.CHECKPOINT_INVALID, "experimental bundle round-trip drift")
+        refit_hash = Sha256HashProvider().digest_value({
+            "train": train, "reserve": reserve, "models": competition.selected_models,
+            "calibrators": calibration_payload, "qmae": qmae_final, "threshold": threshold,
+        })
+        self._final_bundle = ExperimentalBundleResult(payload, loaded.content_hash, 0.0, threshold, refit_hash)
+        return self._final_bundle
+
+    def evaluate_econ(
+        self, preregistration: Mapping[str, Any], bundle: ExperimentalBundleResult,
+        *, semi_blind_allowed: bool,
+    ) -> EconEvaluationResult:
+        if semi_blind_allowed:
+            raise PhaseETechnicalError(PhaseEErrorCode.PRECHECK_FAILED, "E2 full-run backend is not authorized in this task")
+        assert self._build is not None
+        dataset = self._build.dataset; loaded_bundle = model_bundle_from_payload(bundle.payload)
+        signals: list[EconomicSignal] = []
+        for split in self._splits:
+            grouped: dict[datetime, list[Any]] = {}
+            for index in split.scoring:
+                grouped.setdefault(dataset.rows[index].timestamp, []).append(dataset.rows[index])
+            for timestamp, rows in sorted(grouped.items()):
+                if len(rows) != len(CANONICAL_SYMBOLS):
+                    continue
+                result = evaluate_authoritative_feature_batch(
+                    loaded_bundle, _feature_batch(rows, loaded_bundle), timestamp=timestamp,
+                    config={"protocol": {"friction_fraction": 0.0}},
+                )
+                for candidate in result.selection.selected:
+                    signals.append(EconomicSignal(
+                        timestamp - timedelta(minutes=5), candidate.symbol, TradeSide.SHORT,
+                        candidate.calibrated_score, "full_stack", split.window.fold_id, candidate.regime,
+                    ))
+        source = CanonicalSeriesSource(
+            Path(preregistration["source"]["path"]), DataPurpose.BACKTEST,
+            expected_manifest_sha256=str(preregistration["source"]["manifest_sha256"]),
+        )
+        start = min(split.window.scoring_start for split in self._splits) - timedelta(minutes=5)
+        end = max(split.window.scoring_end for split in self._splits) + timedelta(minutes=65)
+        prices = source.load(start=start, end=end)
+        report = replay_economics(
+            signals, prices, holding_bars=12,
+            bootstrap_repetitions=int(preregistration["econ"]["bootstrap_repetitions"]),
+            seed=int(preregistration["econ"]["bootstrap_seed"]),
+        )
+        serialized = to_primitive(report)
+        base = report.metrics.get("full_stack", {}).get("B_BASE")
+        folds = {}
+        for fold in range(1, 5):
+            values = [trade.net_return_fraction for trade in report.trades if trade.scenario_id == "B_BASE" and trade.signal.fold == fold]
+            folds[str(fold)] = float(np.mean(values)) if values else 0.0
+        positive = bool(base and base.expectancy > 0 and base.profit_factor >= 1.05)
+        return EconEvaluationResult(
+            serialized, tuple(signal.score for signal in signals), 0.10, positive, folds, 0.0,
+            report.report_hash,
+        )
+
+
 def evaluate_promotion_criteria(
     preregistration: Mapping[str, Any], *, competition: ModelCompetitionResult,
     calibration: CalibrationResult, qmae: QMAEValidationResult,
@@ -558,7 +982,7 @@ class PhaseEOrchestrator:
             return self._existing_result(preflight.experiment_id, run_id, run_dir, initial_state)
         if self.mode is RunMode.DRY_RUN and initial_state is PhaseEState.RUN_SNAPSHOT_CREATED:
             return self._finish(preflight.experiment_id, run_id, run_dir, initial_state, False, "DRY_RUN_VALIDATED")
-        if self.mode is RunMode.VALIDATION_RUN and initial_state is PhaseEState.QMAE_VALIDATED:
+        if self.mode is RunMode.VALIDATION_RUN and initial_state is PhaseEState.VALIDATION_COMPLETED:
             return self._finish(
                 preflight.experiment_id, run_id, run_dir, initial_state, False,
                 "VALIDATION_PRE_LOCKBOX_COMPLETE",
@@ -620,26 +1044,46 @@ class PhaseEOrchestrator:
             )
             bundle_path = run_dir / "experimental_bundle.json"
             atomic_write_json(bundle_path, bundle.payload)
+            self._advance(store, PhaseEState.REFIT_COMPLETED, {"bundle": bundle_path})
+            threshold_path = run_dir / "threshold_draft.json"
+            atomic_write_json(threshold_path, {
+                "method": preregistration.get("threshold_derivation", {}).get("method", "SMOKE_SIMULATED"),
+                "value": bundle.threshold_draft, "bundle_hash": bundle.candidate_hash,
+                "pre_lockbox": True, "approved": False,
+            })
+            self._advance(store, PhaseEState.THRESHOLD_DERIVED, {"threshold": threshold_path})
             self._record(evidence, run_id, store.state, {
                 "dataset_hash": dataset.dataset_hash, "competition_hash": competition.artifact_hash,
                 "bundle_hash": bundle.candidate_hash,
             })
             if self.mode is RunMode.VALIDATION_RUN:
+                econ = self.backend.evaluate_econ(preregistration, bundle, semi_blind_allowed=False)
+                econ_path = run_dir / "econ_report.json"
+                atomic_write_json(econ_path, econ)
+                self._advance(store, PhaseEState.VALIDATION_COMPLETED, {
+                    "bundle": bundle_path, "threshold": threshold_path, "econ": econ_path,
+                })
                 return self._finish(preflight.experiment_id, run_id, run_dir, store.state, False, "VALIDATION_PRE_LOCKBOX_COMPLETE")
+
+            self._advance(store, PhaseEState.VALIDATION_COMPLETED, {"bundle": bundle_path, "threshold": threshold_path})
 
             lease_path, budget_path = self._lockbox_paths(preregistration, run_dir)
             authorization_hash = Sha256HashProvider().digest_value(
                 self.owner_authorization or f"SIMULATED:{run_id}",
             )
-            lease = LockboxLease(
-                lease_path, LockboxBudget(
-                    budget_path, int(preregistration["lockbox"]["maximum_queries"]), preflight.preregistration_hash,
-                ),
-            )
+            if int(preregistration.get("protocol_version", 1)) == 2 and self.mode is not RunMode.SMOKE_RUN:
+                lease: Any = SharedWindowLockboxLease(lease_path, budget_path)
+            else:
+                lease = LockboxLease(
+                    lease_path, LockboxBudget(
+                        budget_path, int(preregistration["lockbox"].get("maximum_queries", 1)),
+                        preflight.preregistration_hash,
+                    ),
+                )
             record = LockboxLeaseRecord(
                 run_id, bundle.candidate_hash, preflight.preregistration_hash, preflight.experiment_id,
                 preflight.git_commit, preflight.environment.content_hash, utc_now(), os.getpid(), self.mode,
-                authorization_hash,
+                authorization_hash, preflight.preregistration_file_hash,
             )
             lease.acquire(record)
             lease_checkpoint = run_dir / "lockbox_lease.json"
@@ -727,6 +1171,9 @@ class PhaseEOrchestrator:
         if self.mode is RunMode.SMOKE_RUN:
             root = run_dir / "smoke_lockbox"
             return root / "lockbox_lease.json", root / "lockbox_state.json"
+        if int(preregistration.get("protocol_version", 1)) == 2:
+            authority = self.preflight.root / str(preregistration["lockbox"]["authority_path"])
+            return authority.with_suffix(".lease.json"), authority
         budget = self.preflight.root / str(preregistration["lockbox"]["query_state_path"])
         return budget.with_name("lockbox_lease.json"), budget
 
@@ -804,6 +1251,8 @@ class PhaseEOrchestrator:
             PhaseEState.FOLDS_READY, PhaseEState.TRAINING_IN_PROGRESS,
             PhaseEState.MODELS_EVALUATED, PhaseEState.MODELS_SELECTED,
             PhaseEState.CALIBRATION_VALIDATED, PhaseEState.QMAE_VALIDATED,
+            PhaseEState.REFIT_COMPLETED, PhaseEState.THRESHOLD_DERIVED,
+            PhaseEState.VALIDATION_COMPLETED,
             PhaseEState.LOCKBOX_ACQUIRED, PhaseEState.ECON_EVALUATED,
             PhaseEState.CRITERIA_EVALUATED,
         )

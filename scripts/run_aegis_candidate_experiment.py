@@ -13,27 +13,17 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from aegis.training.phase_e import (
     FULL_RUN_AUTHORIZATION, PhaseEOrchestrator, PhaseEPreflight,
-    SimulatedScientificBackend,
+    ProductionScientificBackend, SimulatedScientificBackend,
 )
 from aegis.training.run_state import PhaseEErrorCode, PhaseETechnicalError, RunMode
 from aegis.utils import to_primitive
-
-
-class ProductionBackendNotConfigured:
-    """Fail-closed marker until the preregistered calibration split is unambiguous."""
-
-    def __getattr__(self, name: str):
-        raise PhaseETechnicalError(
-            PhaseEErrorCode.PRECHECK_FAILED,
-            "production Phase-E backend is not configured; calibration split and sampling contract are incomplete",
-        )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config", type=Path,
-        default=ROOT / "config" / "experiments" / "aegis_short_candidate_e1.yaml",
+        default=ROOT / "config" / "experiments" / "aegis_short_candidate_e2.yaml",
     )
     parser.add_argument(
         "--competition-config", type=Path,
@@ -60,7 +50,7 @@ def main() -> int:
     )
     backend = (
         SimulatedScientificBackend(approving=args.smoke_outcome == "candidate")
-        if mode is RunMode.SMOKE_RUN else ProductionBackendNotConfigured()
+        if mode is RunMode.SMOKE_RUN else ProductionScientificBackend()
     )
     runner = PhaseEOrchestrator(
         preflight=preflight, backend=backend, reports_root=args.reports_root,

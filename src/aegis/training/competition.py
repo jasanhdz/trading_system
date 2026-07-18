@@ -109,6 +109,113 @@ def select_calibrator(
     return selected, report
 
 
+def fit_calibrator_family(
+    method: CalibrationMethod, probabilities: Sequence[float], labels: Sequence[int],
+) -> CalibratorSpec:
+    """Refit a previously selected calibrator family without model selection."""
+    values = np.asarray(probabilities, dtype=np.float64)
+    actual = np.asarray(labels, dtype=np.float64)
+    if method is CalibrationMethod.IDENTITY:
+        ece, brier = calibration_metrics(values, actual)
+        return CalibratorSpec(method, ece, brier, len(values))
+    if method is CalibrationMethod.PLATT:
+        return fit_platt_calibrator(values, actual)
+    model = IsotonicRegression(out_of_bounds="clip").fit(values, actual)
+    predicted = np.asarray(model.predict(values), dtype=np.float64)
+    ece, brier = calibration_metrics(predicted, actual)
+    return CalibratorSpec(
+        CalibrationMethod.ISOTONIC, ece, brier, len(values),
+        x=tuple(float(value) for value in model.X_thresholds_),
+        y=tuple(float(value) for value in model.y_thresholds_),
+    )
+
+
+def _probabilistic_model(candidate_id: str, seed: int) -> Any:
+    from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+
+    if candidate_id in {"trrm_logistic_baseline", "eqm_logistic_clean_baseline"}:
+        return LogisticRegression(C=1.0, max_iter=1000, random_state=seed)
+    if candidate_id in {"trrm_random_forest", "eqm_random_forest_clean"}:
+        return RandomForestClassifier(
+            n_estimators=80, max_depth=8, min_samples_leaf=8, random_state=seed, n_jobs=1,
+        )
+    if candidate_id in {"trrm_hist_gradient_boosting", "eqm_hgb_clean"}:
+        return HistGradientBoostingClassifier(
+            max_iter=80, max_depth=5, min_samples_leaf=10,
+            learning_rate=0.05, random_state=seed,
+        )
+    raise ValueError(f"unknown probabilistic candidate: {candidate_id}")
+
+
+def _regression_model(candidate_id: str, seed: int) -> Any:
+    from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor
+    from sklearn.linear_model import Ridge
+
+    if candidate_id == "eqm_linear_net_baseline":
+        return Ridge(alpha=1.0)
+    if candidate_id == "eqm_extra_trees_net":
+        return ExtraTreesRegressor(
+            n_estimators=80, max_depth=8, min_samples_leaf=5, random_state=seed, n_jobs=1,
+        )
+    if candidate_id == "eqm_hgb_net":
+        return HistGradientBoostingRegressor(
+            max_iter=80, max_depth=5, min_samples_leaf=10,
+            learning_rate=0.05, random_state=seed,
+        )
+    raise ValueError(f"unknown regression candidate: {candidate_id}")
+
+
+def _export_fitted(model: Any, candidate_id: str, feature_names: Sequence[str], *, classifier: bool) -> Mapping[str, Any]:
+    if "logistic" in candidate_id or "linear" in candidate_id:
+        return _linear_artifact(model, candidate_id, feature_names)
+    if "random_forest" in candidate_id or "extra_trees" in candidate_id:
+        return export_random_forest(model, candidate_id, feature_names, classifier=classifier).to_payload()
+    return export_hist_gradient_boosting(model, candidate_id, feature_names, classifier=classifier).to_payload()
+
+
+def fit_selected_probabilistic_candidate(
+    candidate_id: str, x_train: np.ndarray, y_train: np.ndarray,
+    feature_names: Sequence[str], *, seed: int,
+) -> tuple[Any, Mapping[str, Any]]:
+    model = _probabilistic_model(candidate_id, seed).fit(x_train, y_train)
+    return model, _export_fitted(model, candidate_id, feature_names, classifier=True)
+
+
+def fit_selected_regression_candidate(
+    candidate_id: str, x_train: np.ndarray, y_train: np.ndarray,
+    feature_names: Sequence[str], *, seed: int,
+) -> tuple[Any, Mapping[str, Any]]:
+    model = _regression_model(candidate_id, seed).fit(x_train, y_train)
+    return model, _export_fitted(model, candidate_id, feature_names, classifier=False)
+
+
+def fit_qmae_refit(
+    x_train: np.ndarray, y_train: np.ndarray, x_reserve: np.ndarray,
+    y_reserve: np.ndarray, feature_names: Sequence[str], *, seed: int,
+) -> QmaeQuantileResult:
+    """Fit final quantiles on train and conformal adjustment only on reserve."""
+    from sklearn.ensemble import HistGradientBoostingRegressor
+
+    common = dict(max_iter=80, max_depth=4, min_samples_leaf=10, learning_rate=0.05, random_state=seed)
+    q50_model = HistGradientBoostingRegressor(loss="quantile", quantile=0.50, **common).fit(x_train, y_train)
+    q90_model = HistGradientBoostingRegressor(loss="quantile", quantile=0.90, **common).fit(x_train, y_train)
+    residuals = y_reserve - q90_model.predict(x_reserve)
+    rank = min(len(residuals) - 1, math.ceil((len(residuals) + 1) * 0.90) - 1)
+    adjustment = max(0.0, float(np.sort(residuals)[rank]))
+    q50_values = q50_model.predict(x_reserve)
+    q90_values = q90_model.predict(x_reserve) + adjustment
+    baseline = float(np.quantile(y_train, 0.90, method="higher"))
+    return QmaeQuantileResult(
+        export_hist_gradient_boosting(q50_model, "qmae-final-q50", feature_names, classifier=False),
+        export_hist_gradient_boosting(q90_model, "qmae-final-q90", feature_names, classifier=False),
+        adjustment, float(np.mean(y_reserve <= q90_values)),
+        pinball_loss(y_reserve, q50_values, 0.50),
+        pinball_loss(y_reserve, q90_values, 0.90),
+        pinball_loss(y_reserve, np.full(len(y_reserve), baseline), 0.90),
+    )
+
+
 def _tree_nodes(tree: Any, *, classifier: bool) -> tuple[TreeNode, ...]:
     state = tree.tree_
     missing = getattr(state, "missing_go_to_left", np.zeros(state.node_count, dtype=np.uint8))
@@ -212,19 +319,11 @@ def run_trrm_fold_competition(
     x_score: np.ndarray, y_score: np.ndarray, feature_names: Sequence[str], *, seed: int,
 ) -> tuple[ProbabilisticCandidateResult, ...]:
     """Run every pre-registered TRRM family for one temporal fold."""
-    from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
-    from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import average_precision_score
 
-    models = (
-        ("trrm_logistic_baseline", LogisticRegression(C=1.0, max_iter=1000, random_state=seed)),
-        ("trrm_random_forest", RandomForestClassifier(
-            n_estimators=80, max_depth=8, min_samples_leaf=8, random_state=seed, n_jobs=1,
-        )),
-        ("trrm_hist_gradient_boosting", HistGradientBoostingClassifier(
-            max_iter=80, max_depth=5, min_samples_leaf=10, learning_rate=0.05, random_state=seed,
-        )),
-    )
+    models = tuple((candidate_id, _probabilistic_model(candidate_id, seed)) for candidate_id in (
+        "trrm_logistic_baseline", "trrm_random_forest", "trrm_hist_gradient_boosting",
+    ))
     reports = []
     for candidate_id, model in models:
         model.fit(x_train, y_train)
@@ -232,12 +331,7 @@ def run_trrm_fold_competition(
         score_raw = model.predict_proba(x_score)[:, 1]
         calibrator, calibration_report = select_calibrator(calibration_raw, y_calibration, score_raw, y_score)
         calibrated = np.asarray([calibrator.apply(float(value)) for value in score_raw])
-        if candidate_id.endswith("logistic_baseline"):
-            artifact = _linear_artifact(model, candidate_id, feature_names)
-        elif candidate_id.endswith("random_forest"):
-            artifact = export_random_forest(model, candidate_id, feature_names, classifier=True).to_payload()
-        else:
-            artifact = export_hist_gradient_boosting(model, candidate_id, feature_names, classifier=True).to_payload()
+        artifact = _export_fitted(model, candidate_id, feature_names, classifier=True)
         reports.append(ProbabilisticCandidateResult(
             candidate_id, float(average_precision_score(y_score, calibrated)), float(np.mean(y_score)),
             calibrator, calibration_report, artifact,
@@ -252,22 +346,11 @@ def run_eqm_fold_competition(
     feature_names: Sequence[str], *, seed: int,
 ) -> tuple[tuple[ProbabilisticCandidateResult, ...], tuple[RegressionCandidateResult, ...]]:
     """Evaluate EQM clean classification and net-quality regression as separate tasks."""
-    from sklearn.ensemble import (
-        ExtraTreesRegressor, HistGradientBoostingClassifier, HistGradientBoostingRegressor,
-        RandomForestClassifier,
-    )
-    from sklearn.linear_model import LogisticRegression, Ridge
     from sklearn.metrics import average_precision_score, mean_absolute_error
 
-    clean_models = (
-        ("eqm_logistic_clean_baseline", LogisticRegression(C=1.0, max_iter=1000, random_state=seed)),
-        ("eqm_random_forest_clean", RandomForestClassifier(
-            n_estimators=80, max_depth=8, min_samples_leaf=8, random_state=seed, n_jobs=1,
-        )),
-        ("eqm_hgb_clean", HistGradientBoostingClassifier(
-            max_iter=80, max_depth=5, min_samples_leaf=10, learning_rate=0.05, random_state=seed,
-        )),
-    )
+    clean_models = tuple((candidate_id, _probabilistic_model(candidate_id, seed)) for candidate_id in (
+        "eqm_logistic_clean_baseline", "eqm_random_forest_clean", "eqm_hgb_clean",
+    ))
     clean_reports = []
     for candidate_id, model in clean_models:
         model.fit(x_train, clean_train)
@@ -277,36 +360,20 @@ def run_eqm_fold_competition(
             calibration_raw, clean_calibration, score_raw, clean_score,
         )
         calibrated = np.asarray([calibrator.apply(float(value)) for value in score_raw])
-        if "logistic" in candidate_id:
-            artifact = _linear_artifact(model, candidate_id, feature_names)
-        elif "random_forest" in candidate_id:
-            artifact = export_random_forest(model, candidate_id, feature_names, classifier=True).to_payload()
-        else:
-            artifact = export_hist_gradient_boosting(model, candidate_id, feature_names, classifier=True).to_payload()
+        artifact = _export_fitted(model, candidate_id, feature_names, classifier=True)
         clean_reports.append(ProbabilisticCandidateResult(
             candidate_id, float(average_precision_score(clean_score, calibrated)), float(np.mean(clean_score)),
             calibrator, calibration_report, artifact,
         ))
 
-    net_models = (
-        ("eqm_linear_net_baseline", Ridge(alpha=1.0)),
-        ("eqm_extra_trees_net", ExtraTreesRegressor(
-            n_estimators=80, max_depth=8, min_samples_leaf=5, random_state=seed, n_jobs=1,
-        )),
-        ("eqm_hgb_net", HistGradientBoostingRegressor(
-            max_iter=80, max_depth=5, min_samples_leaf=10, learning_rate=0.05, random_state=seed,
-        )),
-    )
+    net_models = tuple((candidate_id, _regression_model(candidate_id, seed)) for candidate_id in (
+        "eqm_linear_net_baseline", "eqm_extra_trees_net", "eqm_hgb_net",
+    ))
     net_reports = []
     for candidate_id, model in net_models:
         model.fit(x_train, net_train)
         predicted = model.predict(x_score)
-        if "linear" in candidate_id:
-            artifact = _linear_artifact(model, candidate_id, feature_names)
-        elif "extra_trees" in candidate_id:
-            artifact = export_random_forest(model, candidate_id, feature_names, classifier=False).to_payload()
-        else:
-            artifact = export_hist_gradient_boosting(model, candidate_id, feature_names, classifier=False).to_payload()
+        artifact = _export_fitted(model, candidate_id, feature_names, classifier=False)
         net_reports.append(RegressionCandidateResult(
             candidate_id, float(mean_absolute_error(net_score, predicted)), artifact,
         ))
