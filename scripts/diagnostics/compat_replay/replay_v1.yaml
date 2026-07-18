@@ -1,0 +1,23 @@
+schema_version: aegis-compatibility-replay-config-v1
+replay_id: aegis-gen2-compatibility-replay-v1
+lifecycle: DIAGNOSTIC_DEV_ONLY
+scope:
+  dev_end: "2026-04-26T23:59:59Z"
+  semi_blind: FORBIDDEN
+  lockbox: FORBIDDEN
+inputs:
+  dataset: {path: /home/jasan/Develop/aegis_gen2/d3/datasets/d3-v1-build_b/dense.csv, sha256: 86be5a15d88e4e79e9cafd13607ac58f7f8b4516aed6862a26c77b4b52a47e45}
+  rv2_pickle: {path: /home/jasan/Develop/aegis_gen2/rv2/20260711T171832Z/rv2_candidate.pkl, sha256: 69c03e12ea8aad36b05410ee716ffbf5ae3a80d3d274be8d6d1b87f95ff9e4e4}
+  eqm_pickle: {path: /home/jasan/Develop/aegis_gen2/eqm1/20260711T201456Z/eqm1_candidate.pkl, sha256: 77887b7c33c5a472f51fe168564f4972d48a8c5b094b01080261d6896b1cf3fa}
+  econ_report: {path: /home/jasan/Develop/aegis_gen2/econ1/20260711T202626Z/econ1_report.json, sha256: ea0b6c6fd0baf808da3ec8f2d963874280256940cfc63d54b7bb8808e45a9b85}
+  trades: {path: /home/jasan/Develop/aegis_gen2/econ1/20260711T202626Z/trades.csv, sha256: 4f25ecfadd523f58b3527c18df7373305f8bd1ec8d575ba7119e7598553b2954}
+  series_manifest: {path: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1/series_manifest.json, sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916}
+stages: [STAGE_0, STAGE_1, STAGE_2, STAGE_3, STAGE_4, STAGE_5]
+reference:
+  strategy: eqm_plus_trrm
+  scenario: B_base
+  trades: 688
+  profit_factor: 1.7408239691566603
+  expectancy: 0.1401245909604157
+  per_fold_expectancy: [0.03610976555338908, 0.1097694565109066, 0.12335853655958834, 0.29126060521777875]
+output_root: reports/compatibility_replay/aegis-gen2-compatibility-replay-v1
