@@ -159,6 +159,8 @@ def test_failure_state_depends_on_lockbox_boundary(tmp_path: Path) -> None:
         PhaseEState.PREFLIGHT_VALIDATED, PhaseEState.RUN_SNAPSHOT_CREATED, PhaseEState.DATASET_BUILT,
         PhaseEState.FOLDS_READY, PhaseEState.TRAINING_IN_PROGRESS, PhaseEState.MODELS_EVALUATED,
         PhaseEState.MODELS_SELECTED, PhaseEState.CALIBRATION_VALIDATED, PhaseEState.QMAE_VALIDATED,
+        PhaseEState.REFIT_COMPLETED, PhaseEState.THRESHOLD_DERIVED,
+        PhaseEState.VALIDATION_COMPLETED,
         PhaseEState.LOCKBOX_ACQUIRED,
     ]
     for target in targets:

@@ -70,6 +70,9 @@ class PhaseEState(str, Enum):
     MODELS_SELECTED = "MODELS_SELECTED"
     CALIBRATION_VALIDATED = "CALIBRATION_VALIDATED"
     QMAE_VALIDATED = "QMAE_VALIDATED"
+    REFIT_COMPLETED = "REFIT_COMPLETED"
+    THRESHOLD_DERIVED = "THRESHOLD_DERIVED"
+    VALIDATION_COMPLETED = "VALIDATION_COMPLETED"
     LOCKBOX_ACQUIRED = "LOCKBOX_ACQUIRED"
     ECON_EVALUATED = "ECON_EVALUATED"
     CRITERIA_EVALUATED = "CRITERIA_EVALUATED"
@@ -94,7 +97,9 @@ _LINEAR_TRANSITIONS = (
     PhaseEState.RUN_SNAPSHOT_CREATED, PhaseEState.DATASET_BUILT, PhaseEState.FOLDS_READY,
     PhaseEState.TRAINING_IN_PROGRESS, PhaseEState.MODELS_EVALUATED,
     PhaseEState.MODELS_SELECTED, PhaseEState.CALIBRATION_VALIDATED,
-    PhaseEState.QMAE_VALIDATED, PhaseEState.LOCKBOX_ACQUIRED,
+    PhaseEState.QMAE_VALIDATED, PhaseEState.REFIT_COMPLETED,
+    PhaseEState.THRESHOLD_DERIVED, PhaseEState.VALIDATION_COMPLETED,
+    PhaseEState.LOCKBOX_ACQUIRED,
     PhaseEState.ECON_EVALUATED, PhaseEState.CRITERIA_EVALUATED,
 )
 ALLOWED_TRANSITIONS: dict[PhaseEState, frozenset[PhaseEState]] = {
@@ -318,6 +323,7 @@ class LockboxLeaseRecord:
     pid: int
     mode: RunMode
     owner_authorization_hash: str
+    physical_preregistration_hash: str = ""
 
 
 class LockboxLease:
@@ -376,3 +382,55 @@ class LockboxLease:
             or queries[0].get("purpose") != f"phase-e:{expected.run_id}"
         ):
             raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ACQUISITION_FAILED, "lease/budget content mismatch")
+
+
+class SharedWindowLockboxLease:
+    """Exclusive lease and single query record for a semi-blind window lineage."""
+
+    def __init__(self, lease_path: Path, authority_path: Path) -> None:
+        self.lease_path = lease_path
+        self.authority_path = authority_path
+
+    def acquire(self, record: LockboxLeaseRecord) -> LockboxLeaseRecord:
+        if not self.authority_path.is_file():
+            raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ACQUISITION_FAILED, "shared authority is missing")
+        self.lease_path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = (canonical_json(record) + "\n").encode("utf-8")
+        try:
+            descriptor = os.open(self.lease_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError as exc:
+            raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ALREADY_CONSUMED, "shared lockbox lease exists") from exc
+        try:
+            os.write(descriptor, encoded); os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        authority = json.loads(self.authority_path.read_text(encoding="utf-8"))
+        if authority.get("consumed_queries") or authority.get("status") != "NOT_CONSUMED":
+            raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ALREADY_CONSUMED, "shared window was consumed")
+        lease_hash = Sha256HashProvider().digest_bytes(encoded)
+        authority["consumed_queries"] = [{
+            "experiment_id": record.experiment_id,
+            "physical_hash": record.physical_preregistration_hash,
+            "canonical_hash": record.preregistration_hash,
+            "run_id": record.run_id, "candidate_hash": record.candidate_hash,
+            "timestamp": record.acquired_at, "lease_hash": lease_hash,
+        }]
+        authority["status"] = "CONSUMED"
+        atomic_write_json(self.authority_path, authority, immutable=False)
+        self.validate_coherence(record)
+        return record
+
+    def validate_coherence(self, expected: LockboxLeaseRecord) -> None:
+        if not self.lease_path.is_file() or not self.authority_path.is_file():
+            raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ACQUISITION_FAILED, "shared lease/authority missing")
+        lease = json.loads(self.lease_path.read_text(encoding="utf-8"))
+        authority = json.loads(self.authority_path.read_text(encoding="utf-8"))
+        queries = authority.get("consumed_queries", [])
+        if (
+            len(queries) != 1 or authority.get("status") != "CONSUMED"
+            or lease.get("run_id") != expected.run_id
+            or queries[0].get("run_id") != expected.run_id
+            or queries[0].get("candidate_hash") != expected.candidate_hash
+            or queries[0].get("canonical_hash") != expected.preregistration_hash
+        ):
+            raise PhaseETechnicalError(PhaseEErrorCode.LOCKBOX_ACQUISITION_FAILED, "shared lockbox coherence mismatch")
