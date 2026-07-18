@@ -33,15 +33,19 @@ sole operational platform and `execution.enabledByConfig` remains `false`.
 
 ## Phase E preregistration
 
-`config/experiments/aegis_short_candidate_e1.yaml` freezes:
+E1 remains byte-identical and was never executed. E2 supersedes it before any semi-blind
+query because E1 did not freeze sampling or the CALIBRATION/SCORING subdivision.
+`config/experiments/aegis_short_candidate_e2.yaml` freezes:
 
 - canonical D3 manifest and read-only finality gate;
-- four expanding temporal folds and 120-minute embargo;
+- exact hourly close anchors, stride H12, no jitter, and no overlapping labels;
+- four expanding temporal folds with literal TRAIN/CALIBRATION/SCORING dates and 120-minute embargo;
+- final refit reserve used only for calibrators, conformal adjustment, and threshold;
 - model families and stability-first competition protocol;
 - QMAE coverage `[0.87, 0.93]`, per-fold ECE maximum `0.08`;
 - ECON methodology, costs, weekly bootstrap, and seed;
 - mandatory promotion criteria and side-separated metrics;
-- one-query persistent lockbox;
+- one shared query authority for the E1/E2 semi-blind window;
 - `threshold_value: null`, because it may only be derived by the authorized full run;
 - no automatic promotion and initial lifecycle `EXPERIMENTAL`.
 
@@ -60,12 +64,14 @@ PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
   --mode full-run --owner-authorization OWNER_AUTHORIZED_PHASE_E_FULL_RUN
 ```
 
-The persistent state machine, exclusive lease, dry-run, smoke-run, validation stop, ECON,
-criteria, policy, freeze, and publication mechanics are implemented and covered by 43
-focused tests. A production scientific backend remains fail-closed because E1 does not
-freeze the subdivision between calibration and scoring inside each validation fold or the
-dataset sampling cadence. Those are scientific protocol inputs and were not invented in
-the orchestrator. The real full-run therefore remains unexecuted and Phase E remains open.
+The production backend completed two independent pre-lockbox validation runs with
+byte-identical scientific artifacts. It evaluated 172,480 dev rows across all four folds,
+refit on the frozen final train block, calibrated on the final reserve, and derived the same
+draft threshold twice. The real full-run remains unexecuted and Phase E remains open.
+
+The dev diagnostics did not demonstrate economic merit: base PF was `0.5383978` and base
+expectancy `-0.0014500047` over 1,277 selected signals. No criterion was changed, no final
+promotion decision was made, and no CANDIDATE, approved policy, or approved freeze exists.
 
 Estimated owner-run envelope is 2-6 CPU hours and 16 GiB peak memory. This is a planning
 estimate, not measured evidence. Rollback is non-destructive: retain an immutable failed
@@ -121,5 +127,7 @@ Minimal synthetic report shape exercised by the fixtures:
 - TypeScript: 625 tests passed outside the sandbox restriction; TypeScript build passed.
 - Coverage tooling was not installed in the repository environment. No dependency was
   installed merely to generate a percentage.
-- Phase-E dry-run and two fixture smoke-runs completed. The real lockbox was not consumed.
+- Phase-E E2 dry-run, two fixture smoke-runs, and two full dev-only validation-runs completed.
+  The scientific artifacts of the two validation runs matched byte-for-byte. The real
+  lockbox authority remains `NOT_CONSUMED` with an empty query list.
 - No full Phase-E experiment or Phase-F benchmark was executed.

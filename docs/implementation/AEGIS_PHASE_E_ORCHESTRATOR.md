@@ -34,7 +34,8 @@ The main path is:
 ```text
 PRE_REGISTERED -> PREFLIGHT_VALIDATED -> RUN_SNAPSHOT_CREATED -> DATASET_BUILT
 -> FOLDS_READY -> TRAINING_IN_PROGRESS -> MODELS_EVALUATED -> MODELS_SELECTED
--> CALIBRATION_VALIDATED -> QMAE_VALIDATED -> LOCKBOX_ACQUIRED
+-> CALIBRATION_VALIDATED -> QMAE_VALIDATED -> REFIT_COMPLETED
+-> THRESHOLD_DERIVED -> VALIDATION_COMPLETED -> LOCKBOX_ACQUIRED
 -> ECON_EVALUATED -> CRITERIA_EVALUATED
 -> CANDIDATE | REJECTED_EXPERIMENT | CANDIDATE_SIMULATED | REJECTED_SIMULATED
 ```
@@ -57,7 +58,9 @@ idempotently rather than re-executed.
 
 ## Lockbox
 
-`LockboxLease` creates the lease with `O_CREAT | O_EXCL | O_WRONLY`. Lease acquisition is
+`LockboxLease` creates the lease with `O_CREAT | O_EXCL | O_WRONLY`. E2 additionally uses
+`SharedWindowLockboxLease`, whose authority is keyed by the semi-blind window rather than
+the experiment ID. E1 and E2 therefore share one query budget. Lease acquisition is
 the instant of consumption. Only after the lease is fsynced does `LockboxBudget.consume`
 write the query audit. Both records bind the same run, candidate, preregistration, commit,
 environment, timestamp, mode, and authorization hash. Presence or content mismatch fails
@@ -100,12 +103,16 @@ Smoke outcomes are mechanics evidence only. They are never evidence of scientifi
 
 ### Validation-run
 
-The state path stops at `QMAE_VALIDATED`, before any lease. Its orchestration path is tested
-with the same reduced API-backed fixture backend. A production validation backend is not
-enabled because the immutable E1 preregistration says only
-`temporally_held_out_within_fold` and does not freeze the calibration/scoring subdivision
-or dataset sampling cadence. Choosing either value in code would change the scientific
-protocol after preregistration. This is the remaining technical blocker.
+E2 supersedes the incomplete, never-executed E1 protocol. E2 freezes exact hourly close
+anchors, H12 non-overlap, literal TRAIN/CALIBRATION/SCORING dates, final reserve use,
+pre-lockbox threshold derivation, and the shared semi-blind authority. The production
+backend uses the existing feature, label, competition, calibrator, QMAE, runtime, and ECON
+APIs. It stops at `VALIDATION_COMPLETED`, before any lease.
+
+Two independent runs at commit `2d2518e685d3a1e2c615c943bb3cecea6a24ff97` completed in
+841.44 s and 841.42 s. Their dataset, folds, competition, calibration, QMAE, bundle,
+threshold, and ECON files were byte-identical. Dataset evidence was 15,680/15,680 hourly
+anchors, 172,480 rows, zero skipped cycles, and zero quarantined labels.
 
 ### Full-run
 
@@ -118,7 +125,7 @@ OWNER_AUTHORIZED_PHASE_E_FULL_RUN
 Without it, the CLI exits before preflight, training, artifacts, or lockbox access. The
 path after the lockbox includes ECON, explicit mandatory checks, candidate/rejection,
 absolute policy derivation, `SystemFreeze.validate`, and immutable registry publication.
-It remains fail-closed behind the unresolved production backend and was not executed.
+It remains fail-closed behind exact owner authorization and was not executed.
 
 ## Promotion and publication
 
@@ -141,11 +148,21 @@ unpublished.
 - Rollback is non-destructive: stop invoking the CLI and retain immutable reports. No
   operational configuration is changed by this implementation.
 
+## E2 diagnostic evidence
+
+- Provisional winners: TRRM random forest, EQM clean HGB, EQM net Extra Trees, QMAE HGB.
+- Maximum fold ECE: `0.027179098915491584` (limit `0.08`).
+- QMAE fold coverage: `0.9099166`, `0.9095863`, `0.9052509`, `0.8976112`.
+- Draft reserve threshold: `4.047730415717134e-05`.
+- Experimental bundle: `5ac8d61c489d089c27d874ebf0390022f89923edd7dd599a8b8aa7e9fb992d73`;
+  `trained=true`, `approved=false`, lifecycle `EXPERIMENTAL`.
+- Dev ECON base: 1,277 trades, expectancy `-0.0014500047`, PF `0.5383978`; every fold
+  expectancy was negative. This is diagnostic dev evidence, not a lockbox verdict and not
+  a CANDIDATE or REJECTED_EXPERIMENT result.
+
 ## Resources and risks
 
-The preregistration estimates 2-6 CPU hours and 16 GiB peak memory for a future full-run.
-That estimate was copied into the dry-run manifest and was not measured here. The open risk
-is the missing frozen calibration/scoring split and sample cadence for the production
-dataset adapter. Until resolved by a new owner-approved preregistration decision, the CLI
-fails closed for production validation/full execution.
-
+Each production validation consumed about 841 s wall, 1,100 s user CPU, 2.7 s system CPU,
+and 46 MiB of persisted reports. Peak RSS was not captured because `/usr/bin/time` is not
+installed; this is an observability gap, not inferred data. The open scientific risk is the
+negative dev ECON result. The full run remains prohibited until separately authorized.
