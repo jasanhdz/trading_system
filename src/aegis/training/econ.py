@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -65,7 +65,7 @@ class EconomicTrade:
 class EconomicMetrics:
     trades: int
     expectancy: float
-    profit_factor: float
+    profit_factor: float | None
     win_rate: float
     maximum_drawdown: float
     cvar_05: float
@@ -84,10 +84,45 @@ class EconomicReplayReport:
     report_hash: str
 
 
+@dataclass(frozen=True)
+class RawBaselineIndicators:
+    ret_12: float
+    close_to_ema24: float
+    volatility_24: float
+
+
+@dataclass(frozen=True)
+class EconomicBaselineCycle:
+    timestamp: datetime
+    fold: int
+    histories: Mapping[str, tuple[CanonicalBar, ...]]
+    regimes: Mapping[str, Regime]
+    trrm_probabilities: Mapping[str, float]
+    eqm_scores: Mapping[str, float]
+    trrm_survivors: tuple[str, ...]
+    gated_symbols: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EconomicBaselineSelection:
+    signals: Mapping[str, tuple[EconomicSignal, ...]]
+    fold_budgets: Mapping[int, int]
+    eligible_counts: Mapping[str, Mapping[int, int]]
+    selected_counts: Mapping[str, Mapping[int, int]]
+    fold_status: Mapping[str, Mapping[int, str]]
+    content_hash: str
+
+
+BASELINE_STRATEGIES = (
+    "no_trade", "random_directional_with_gates", "momentum_rule",
+    "mean_reversion_rule", "volatility_rule", "eqm_only", "trrm_only",
+)
+
+
 def _metrics(trades: Sequence[EconomicTrade], *, bootstrap_repetitions: int, seed: int) -> EconomicMetrics:
     values = np.asarray([trade.net_return_fraction for trade in trades], dtype=np.float64)
     if not len(values):
-        return EconomicMetrics(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, (0.0, 0.0))
+        return EconomicMetrics(0, 0.0, None, 0.0, 0.0, 0.0, 0.0, 0, 0.0, (0.0, 0.0))
     gains = float(values[values > 0].sum()); losses = float(-values[values < 0].sum())
     equity = np.cumsum(values); peaks = np.maximum.accumulate(np.concatenate(([0.0], equity)))
     drawdown = float(np.max(peaks[1:] - equity))
@@ -117,6 +152,7 @@ def replay_economics(
     signals: Sequence[EconomicSignal], prices: Mapping[str, Sequence[CanonicalBar]], *,
     holding_bars: int = 12, scenarios: Sequence[CostScenario] = COST_SCENARIOS,
     bootstrap_repetitions: int = 200, seed: int = 42,
+    strategy_ids: Sequence[str] = (),
 ) -> EconomicReplayReport:
     """Replay equal-budget signals at next-bar-open and fixed H12 close."""
     if holding_bars <= 0 or bootstrap_repetitions <= 0:
@@ -143,7 +179,7 @@ def replay_economics(
                 signal, scenario.scenario_id, entry_bar.timestamp, exit_bar.timestamp,
                 entry, exit_price, gross, cost, gross - cost, mfe, mae,
             ))
-    strategies = sorted({trade.signal.strategy_id for trade in trades})
+    strategies = sorted({trade.signal.strategy_id for trade in trades} | set(strategy_ids))
     scenario_ids = tuple(item.scenario_id for item in scenarios)
     metrics = {
         strategy: {
@@ -169,3 +205,110 @@ def equal_budget(signals_by_strategy: Mapping[str, Sequence[EconomicSignal]]) ->
         strategy: tuple(sorted(signals, key=lambda item: (-item.score, item.timestamp, item.symbol))[:budget])
         for strategy, signals in sorted(signals_by_strategy.items())
     }
+
+
+def raw_baseline_indicators(history: Sequence[CanonicalBar]) -> RawBaselineIndicators | None:
+    """Compute frozen ECON rule inputs directly from 288 contiguous raw bars."""
+    if len(history) != 288:
+        return None
+    rows = tuple(history)
+    if any(rows[index].timestamp - rows[index - 1].timestamp != timedelta(minutes=5) for index in range(1, len(rows))):
+        return None
+    closes = np.asarray([bar.close for bar in rows], dtype=np.float64)
+    if not np.all(np.isfinite(closes)) or np.any(closes <= 0.0):
+        return None
+    ret_12 = float(closes[-1] / closes[-13] - 1.0)
+    alpha = 2.0 / 25.0
+    ema = float(closes[0])
+    for close in closes[1:]:
+        ema = alpha * float(close) + (1.0 - alpha) * ema
+    true_ranges = []
+    for index in range(len(rows) - 24, len(rows)):
+        bar = rows[index]; previous_close = rows[index - 1].close
+        true_range = max(bar.high - bar.low, abs(bar.high - previous_close), abs(bar.low - previous_close))
+        true_ranges.append(true_range / bar.close)
+    return RawBaselineIndicators(
+        ret_12, float(closes[-1] / ema - 1.0), float(np.mean(true_ranges)),
+    )
+
+
+def _signal(cycle: EconomicBaselineCycle, symbol: str, score: float, strategy: str) -> EconomicSignal:
+    return EconomicSignal(
+        cycle.timestamp, symbol, TradeSide.SHORT, float(score), strategy, cycle.fold,
+        cycle.regimes.get(symbol, Regime.UNKNOWN),
+    )
+
+
+def select_competition_baselines(
+    cycles: Sequence[EconomicBaselineCycle], fold_budgets: Mapping[int, int], *, seed: int = 20260718,
+) -> EconomicBaselineSelection:
+    """Select the closed E3 baseline set with per-fold equal-budget caps."""
+    if seed != 20260718:
+        raise ValueError("ECON baseline seed is frozen at 20260718")
+    rng = np.random.Generator(np.random.PCG64(seed))
+    candidates: dict[str, list[EconomicSignal]] = {name: [] for name in BASELINE_STRATEGIES}
+    eligible_counts = {name: {int(fold): 0 for fold in fold_budgets} for name in BASELINE_STRATEGIES}
+
+    for cycle in sorted(cycles, key=lambda item: (item.timestamp, item.fold)):
+        indicators = {
+            symbol: value for symbol in sorted(cycle.histories)
+            if (value := raw_baseline_indicators(cycle.histories[symbol])) is not None
+        }
+        if not indicators:
+            continue
+        survivor_set = set(cycle.trrm_survivors)
+        gate_set = set(cycle.gated_symbols)
+        rules: dict[str, list[tuple[float, str]]] = {
+            "momentum_rule": [
+                (-value.ret_12, symbol) for symbol, value in indicators.items()
+                if value.ret_12 < 0.0 and value.close_to_ema24 < 0.0
+            ],
+            "mean_reversion_rule": [
+                (value.ret_12, symbol) for symbol, value in indicators.items() if value.ret_12 > 0.0
+            ],
+            "volatility_rule": [(value.volatility_24, symbol) for symbol, value in indicators.items()],
+            "eqm_only": [
+                (float(cycle.eqm_scores[symbol]), symbol) for symbol in indicators
+                if symbol in cycle.eqm_scores
+            ],
+            "trrm_only": [
+                (1.0 - float(cycle.trrm_probabilities[symbol]), symbol) for symbol in indicators
+                if symbol in survivor_set and symbol in cycle.trrm_probabilities
+            ],
+        }
+        random_eligible = [symbol for symbol in sorted(indicators) if symbol in gate_set]
+        random_rows = [(float(rng.random()), symbol) for symbol in random_eligible]
+        rules["random_directional_with_gates"] = random_rows
+        for strategy, rows in rules.items():
+            eligible_counts[strategy].setdefault(cycle.fold, 0)
+            eligible_counts[strategy][cycle.fold] += len(rows)
+            if rows:
+                score, symbol = sorted(rows, key=lambda item: (-item[0], item[1]))[0]
+                candidates[strategy].append(_signal(cycle, symbol, score, strategy))
+
+    selected: dict[str, tuple[EconomicSignal, ...]] = {"no_trade": ()}
+    statuses: dict[str, dict[int, str]] = {name: {} for name in BASELINE_STRATEGIES}
+    selected_counts: dict[str, dict[int, int]] = {name: {} for name in BASELINE_STRATEGIES}
+    for strategy in BASELINE_STRATEGIES:
+        if strategy == "no_trade":
+            for fold, budget in sorted(fold_budgets.items()):
+                statuses[strategy][fold] = "NO_TRADE_FOLD" if budget == 0 else "PERMANENT_ABSTENTION"
+                selected_counts[strategy][fold] = 0
+            continue
+        chosen = []
+        for fold, budget in sorted(fold_budgets.items()):
+            fold_rows = [row for row in candidates[strategy] if row.fold == fold]
+            ranked = sorted(fold_rows, key=lambda item: (-item.score, item.symbol, item.timestamp))
+            count = min(int(budget), len(ranked))
+            chosen.extend(ranked[:count])
+            selected_counts[strategy][fold] = count
+            statuses[strategy][fold] = "NO_TRADE_FOLD" if budget == 0 else ("BUDGET_FILLED" if count == budget else "ELIGIBILITY_DEFICIT")
+        selected[strategy] = tuple(sorted(chosen, key=lambda item: (item.timestamp, item.symbol)))
+    payload = {
+        "signals": selected, "fold_budgets": dict(fold_budgets), "eligible_counts": eligible_counts,
+        "selected_counts": selected_counts, "fold_status": statuses, "seed": seed,
+    }
+    return EconomicBaselineSelection(
+        selected, dict(fold_budgets), eligible_counts, selected_counts, statuses,
+        Sha256HashProvider().digest_value(payload),
+    )

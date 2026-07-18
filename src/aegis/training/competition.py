@@ -141,8 +141,13 @@ def load_scientific_competition_contract(
     if veto.get("raw_probability_0_70") != "FORBIDDEN":
         raise ValueError("raw TRRM probability 0.70 is forbidden")
     baselines = payload.get("econ_baselines")
-    if not isinstance(baselines, Mapping):
+    if not isinstance(baselines, Mapping) or tuple(baselines.get("directional", ())) != (
+        "no_trade", "random_directional_with_veto", "momentum_rule",
+        "mean_reversion_rule", "volatility_rule",
+    ) or tuple(baselines.get("diagnostic", ())) != ("eqm_only", "trrm_only"):
         raise ValueError("ECON baseline contract is missing")
+    if not all(bool(baselines.get(key)) for key in ("same_costs", "same_holding_period", "same_selection_budget")):
+        raise ValueError("ECON baseline equality contract is incomplete")
     return ScientificCompetitionContract(
         resolved, physical, parameters, smoke, population, veto, baselines,
         int(payload["base_seed"]),

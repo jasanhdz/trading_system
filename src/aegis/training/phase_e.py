@@ -32,7 +32,10 @@ from .dataset import (
     ExplicitFoldSplit, ExplicitFoldWindow, HourlyDatasetBuild, TrainingDataset,
     explicit_temporal_folds, load_and_build_e2_hourly_dataset,
 )
-from .econ import EconomicSignal, replay_economics
+from .econ import (
+    BASELINE_STRATEGIES, EconomicBaselineCycle, EconomicSignal,
+    replay_economics, select_competition_baselines,
+)
 from .labels import SHORT_LABEL_SCHEMA_VERSION
 from .experiment import _feature_batch, evaluate_authoritative_feature_batch, fit_normalizer
 from .preregistration import (
@@ -955,10 +958,11 @@ class ProductionScientificBackend:
         *, semi_blind_allowed: bool,
     ) -> EconEvaluationResult:
         if semi_blind_allowed:
-            raise PhaseETechnicalError(PhaseEErrorCode.PRECHECK_FAILED, "E2 full-run backend is not authorized in this task")
-        assert self._build is not None
+            raise PhaseETechnicalError(PhaseEErrorCode.PRECHECK_FAILED, "E3 full-run backend is not authorized in this task")
+        assert self._build is not None and self._contract is not None
         dataset = self._build.dataset; loaded_bundle = model_bundle_from_payload(bundle.payload)
         signals: list[EconomicSignal] = []
+        cycle_layers: list[tuple[ExplicitFoldSplit, datetime, Sequence[Any], Any]] = []
         for split in self._splits:
             grouped: dict[datetime, list[Any]] = {}
             for index in split.scoring:
@@ -970,6 +974,7 @@ class ProductionScientificBackend:
                     loaded_bundle, _feature_batch(rows, loaded_bundle), timestamp=timestamp,
                     config={"protocol": {"friction_fraction": 0.0}},
                 )
+                cycle_layers.append((split, timestamp, rows, result.layers))
                 for candidate in result.selection.selected:
                     signals.append(EconomicSignal(
                         timestamp - timedelta(minutes=5), candidate.symbol, TradeSide.SHORT,
@@ -979,23 +984,72 @@ class ProductionScientificBackend:
             Path(preregistration["source"]["path"]), DataPurpose.BACKTEST,
             expected_manifest_sha256=str(preregistration["source"]["manifest_sha256"]),
         )
-        start = min(split.window.scoring_start for split in self._splits) - timedelta(minutes=5)
+        start = min(split.window.scoring_start for split in self._splits) - timedelta(minutes=5 * 289)
         end = max(split.window.scoring_end for split in self._splits) + timedelta(minutes=65)
         prices = source.load(start=start, end=end)
+        by_timestamp = {
+            symbol: {bar.timestamp: index for index, bar in enumerate(rows)}
+            for symbol, rows in prices.items()
+        }
+        baseline_cycles = []
+        veto_budget = float(self._contract.trrm_veto["veto_budget"])
+        qmae_limit = float(loaded_bundle.metadata.thresholds["qmae_max_fraction"])
+        for split, timestamp, rows, layers in cycle_layers:
+            signal_time = timestamp - timedelta(minutes=5)
+            layer_by_symbol = {item.symbol: item for item in layers.results}
+            symbols = tuple(sorted(layer_by_symbol))
+            probabilities = [layer_by_symbol[symbol].rv2_tail_risk for symbol in symbols]
+            survivor_local = rank_based_survivor_indices(probabilities, veto_budget=veto_budget)
+            survivors = tuple(symbols[int(index)] for index in survivor_local)
+            gated = tuple(symbol for symbol in survivors if (
+                layer_by_symbol[symbol].qmae_q90 is not None
+                and layer_by_symbol[symbol].qmae_q90 <= qmae_limit
+            ))
+            histories = {}
+            for symbol in symbols:
+                index = by_timestamp.get(symbol, {}).get(signal_time)
+                if index is not None and index >= 287:
+                    histories[symbol] = tuple(prices[symbol][index - 287:index + 1])
+            baseline_cycles.append(EconomicBaselineCycle(
+                signal_time, split.window.fold_id, histories,
+                {row.symbol: row.regime for row in rows},
+                {symbol: layer_by_symbol[symbol].rv2_tail_risk for symbol in symbols},
+                {symbol: layer_by_symbol[symbol].eqm_score for symbol in symbols},
+                survivors, gated,
+            ))
+        fold_budgets = {
+            fold: sum(signal.fold == fold for signal in signals) for fold in range(1, 5)
+        }
+        baselines = select_competition_baselines(
+            baseline_cycles, fold_budgets, seed=int(self._contract.econ_baselines["seed"]),
+        )
+        all_signals = tuple(signals) + tuple(
+            signal for strategy in BASELINE_STRATEGIES for signal in baselines.signals[strategy]
+        )
         report = replay_economics(
-            signals, prices, holding_bars=12,
+            all_signals, prices, holding_bars=12,
             bootstrap_repetitions=int(preregistration["econ"]["bootstrap_repetitions"]),
             seed=int(preregistration["econ"]["bootstrap_seed"]),
+            strategy_ids=("full_stack", *BASELINE_STRATEGIES),
         )
         serialized = to_primitive(report)
+        serialized["baseline_selection"] = to_primitive(baselines)
         base = report.metrics.get("full_stack", {}).get("B_BASE")
         folds = {}
         for fold in range(1, 5):
             values = [trade.net_return_fraction for trade in report.trades if trade.scenario_id == "B_BASE" and trade.signal.fold == fold]
             folds[str(fold)] = float(np.mean(values)) if values else 0.0
         positive = bool(base and base.expectancy > 0 and base.profit_factor >= 1.05)
+        directional = tuple(self._contract.econ_baselines["best_directional_baseline"]["candidates"])
+        runtime_name = {
+            "random_directional_with_veto": "random_directional_with_gates",
+        }
+        directional_expectancies = [
+            report.metrics[runtime_name.get(name, name)]["B_BASE"].expectancy for name in directional
+        ]
         return EconEvaluationResult(
-            serialized, tuple(signal.score for signal in signals), 0.10, positive, folds, 0.0,
+            serialized, tuple(signal.score for signal in signals), 0.10, positive, folds,
+            max(directional_expectancies),
             report.report_hash,
         )
 
