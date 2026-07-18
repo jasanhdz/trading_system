@@ -98,7 +98,7 @@ class ScientificCandidateBuilder:
                     target_distance_fraction=max(0.0, expected),
                     volatility_multiple=None, target_risk_ratio=None,
                     maximum_holding_bars=symbol_predictions[0].horizon_bars,
-                    scientific_invalidation="REGIME/RV2/TRRM/QMAE/EQM/ECON1 contract invalidated",
+                    scientific_invalidation="REGIME/RV2/TRRM/QMAE contract invalidated",
                     relative_priority=result.calibrated_score,
                 ),
                 reason_codes=result.reason_codes,
@@ -114,6 +114,12 @@ class GlobalSelectionPolicy:
     selection_threshold: float
     maximum_selected: int = 1
 
+    @classmethod
+    def from_frozen(cls, policy: "FrozenSelectionPolicy", maximum_selected: int = 1) -> "GlobalSelectionPolicy":
+        if policy.side is not TradeSide.SHORT or policy.score_unit != "EXPECTED_CLEAN_RETURN_FRACTION":
+            raise ValueError("frozen selection policy is incompatible with the runtime")
+        return cls(policy.threshold, maximum_selected)
+
     def select(self, candidates: CandidateSet, context: PortfolioContext, now: datetime) -> SelectionResult:
         evaluated: list[Candidate] = []
         for candidate in candidates.candidates:
@@ -124,7 +130,7 @@ class GlobalSelectionPolicy:
                 reasons.append(ReasonCode.SIDE_NOT_ENABLED)
             if candidate.calibrated_score < self.selection_threshold:
                 eligible = False
-                reasons.append(ReasonCode.NO_TRADE_THRESHOLD)
+                reasons.append(ReasonCode.BELOW_FROZEN_THRESHOLD)
             if candidate.symbol in context.blocked_symbols:
                 eligible = False
                 reasons.append(ReasonCode.SYMBOL_BLOCKED)

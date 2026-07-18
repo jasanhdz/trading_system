@@ -11,6 +11,7 @@ from typing import Any, Mapping, Protocol
 
 from .domain import FeatureBatch, ModelPrediction, ModelPredictions, TradeSide
 from .features import FrozenNormalizer, feature_contract
+from .freeze import BundleLifecycleState
 from .tree_models import TreeEnsemble, TreeModelError
 from .utils import Sha256HashProvider
 
@@ -158,6 +159,8 @@ class BundleMetadata:
     calibration_method: str
     feature_count: int
     thresholds: Mapping[str, float]
+    lifecycle_state: BundleLifecycleState = BundleLifecycleState.EXPERIMENTAL
+    system_freeze_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -338,14 +341,21 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
         framework_version=str(metadata_data["framework_version"]), code_version=str(metadata_data["code_version"]),
         calibration_method=str(metadata_data["calibration_method"]), feature_count=int(metadata_data["feature_count"]),
         thresholds={str(key): float(value) for key, value in thresholds_data.items()},
+        lifecycle_state=BundleLifecycleState(str(metadata_data.get("lifecycle_state", "EXPERIMENTAL"))),
+        system_freeze_hash=str(metadata_data["system_freeze_hash"]) if metadata_data.get("system_freeze_hash") else None,
     )
     if metadata.feature_count != len(feature_names):
         raise ModelBundleError("bundle feature count mismatch")
+    approved = bool(payload.get("approved", False))
+    if approved and not metadata.trained:
+        raise ModelBundleError("untrained bundles cannot be approved")
+    if approved and metadata.lifecycle_state not in {BundleLifecycleState.SHADOW_APPROVED, BundleLifecycleState.LIVE_APPROVED}:
+        raise ModelBundleError("approved bundle lifecycle state is invalid")
     return ModelBundle(
         bundle_id=bundle_id, schema_version=str(payload["schema_version"]),
         feature_schema_version=str(payload["feature_schema_version"]), feature_hash=str(payload["feature_hash"]),
         universe_id=str(payload["universe_id"]), symbol_set_hash=str(payload["symbol_set_hash"]), timeframe=str(payload["timeframe"]),
-        approved=bool(payload.get("approved", False)), content_hash=claimed_hash,
+        approved=approved, content_hash=claimed_hash,
         normalizer=FrozenNormalizer(
             means=means,
             scales=scales,

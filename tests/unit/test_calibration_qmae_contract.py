@@ -12,7 +12,7 @@ from aegis.utils import Sha256HashProvider
 
 
 def _layers(snapshot, features, predictions):
-    return OrderedScientificLayers(LayerSettings(0.70, 0.03, 0.0, 0.0014, 0.50)).apply(
+    return OrderedScientificLayers(LayerSettings(0.70, 0.03, 0.0, 0.50)).apply(
         predictions,
         ScientificContext("request", "cycle", snapshot.closed_at, "5m", snapshot.portfolio, features),
     )

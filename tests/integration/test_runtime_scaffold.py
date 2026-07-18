@@ -1,14 +1,15 @@
 from datetime import timedelta
-from pathlib import Path
-
 from aegis.api import BrainApi, create_app
 from aegis.domain import DecisionStatus
-from aegis.runtime import build_runtime
-from aegis.utils import FixedUtcClock
 
 
-def test_end_to_end_scientific_pipeline_is_deterministic_and_global(decision_request) -> None:
-    runtime = build_runtime(Path(__file__).parents[2] / "config", clock=FixedUtcClock(decision_request.snapshot.closed_at + timedelta(minutes=1)))
+def test_end_to_end_scientific_pipeline_is_deterministic_and_global(
+    decision_request, scenario_runtime_factory,
+) -> None:
+    runtime = scenario_runtime_factory("SHORT", decision_request.snapshot)
+    runtime.clock = __import__("aegis.utils", fromlist=["FixedUtcClock"]).FixedUtcClock(
+        decision_request.snapshot.closed_at + timedelta(minutes=1),
+    )
     first = runtime.evaluate(decision_request)
     second = runtime.evaluate(decision_request)
     assert first == second
@@ -21,8 +22,8 @@ def test_end_to_end_scientific_pipeline_is_deterministic_and_global(decision_req
     assert {"validation", "features", "models", "layers", "candidates", "selection", "total"} <= set(metrics["mean_latency_seconds"])
 
 
-def test_api_health_manifest_and_routes(decision_request) -> None:
-    runtime = build_runtime(Path(__file__).parents[2] / "config", clock=FixedUtcClock(decision_request.snapshot.closed_at + timedelta(minutes=1)))
+def test_api_health_manifest_and_routes(decision_request, scenario_runtime_factory) -> None:
+    runtime = scenario_runtime_factory("SHORT", decision_request.snapshot)
     api = BrainApi(runtime)
     assert api.health() == {"status": "alive"}
     assert api.manifest().ready is True and len(api.manifest().symbols) == 11

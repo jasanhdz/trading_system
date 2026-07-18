@@ -41,7 +41,6 @@ class ScientificLayerName(str, Enum):
     TRRM = "TRRM"
     QMAE = "QMAE"
     EQM = "EQM"
-    ECON1 = "ECON1"
 
 
 class Regime(str, Enum):
@@ -70,7 +69,7 @@ class ReasonCode(str, Enum):
     CALIBRATION_MISSING = "CALIBRATION_MISSING"
     SIDE_NOT_ENABLED = "SIDE_NOT_ENABLED"
     EQM_QUALITY_LOW = "EQM_QUALITY_LOW"
-    ECON1_EDGE_BELOW_COST = "ECON1_EDGE_BELOW_COST"
+    BELOW_FROZEN_THRESHOLD = "BELOW_FROZEN_THRESHOLD"
     SYMBOL_BLOCKED = "SYMBOL_BLOCKED"
     SYMBOL_OCCUPIED = "SYMBOL_OCCUPIED"
     ACTIVE_COOLDOWN = "ACTIVE_COOLDOWN"
@@ -340,7 +339,6 @@ class LayerResult:
     qmae_quality: float
     eqm_score: float
     model_disagreement: float
-    econ_edge: float
     calibrated_score: float
     eligible: bool
     reason_codes: tuple[ReasonCode, ...]
@@ -356,7 +354,6 @@ class LayerResult:
         if self.qmae_q90 is not None and _finite(self.qmae_q90, "qmae_q90") < 0:
             raise DomainValidationError("qmae_q90 cannot be negative")
         _finite(self.eqm_score, "eqm_score")
-        _finite(self.econ_edge, "econ_edge")
 
 
 @dataclass(frozen=True)

@@ -11,7 +11,7 @@ from aegis.utils import Sha256HashProvider, canonical_json
 
 def test_contract_enums_keep_no_trade_and_layer_order_explicit() -> None:
     assert TradeSide.NO_TRADE.value == DecisionStatus.NO_TRADE.value
-    assert tuple(layer.value for layer in ScientificLayerName) == ("REGIME", "RV2", "TRRM", "QMAE", "EQM", "ECON1")
+    assert tuple(layer.value for layer in ScientificLayerName) == ("REGIME", "RV2", "TRRM", "QMAE", "EQM")
 
 
 def test_domain_is_immutable_and_rejects_non_finite_values() -> None:

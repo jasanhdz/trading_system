@@ -41,12 +41,12 @@ def _predictions(features, *, tail: float, qmae: float, expected: float = 0.03, 
     return ModelPredictions("bundle", features.feature_hash, tuple(rows))
 
 
-def _apply(snapshot, features, predictions, *, cost=0.0014):
-    layers = OrderedScientificLayers(LayerSettings(0.7, 0.03, 0.0, cost, 0.5))
+def _apply(snapshot, features, predictions):
+    layers = OrderedScientificLayers(LayerSettings(0.7, 0.03, 0.0, 0.5))
     return layers.apply(predictions, ScientificContext("r", "c", snapshot.closed_at, "5m", snapshot.portfolio, features))
 
 
-def test_trrm_qmae_eqm_and_econ_monotonic_properties(snapshot_factory) -> None:
+def test_trrm_qmae_and_eqm_runtime_properties(snapshot_factory) -> None:
     snapshot = snapshot_factory()
     features = DeterministicFeaturePipeline().transform(snapshot)
     low_tail = _apply(snapshot, features, _predictions(features, tail=0.1, qmae=0.005))
@@ -56,8 +56,7 @@ def test_trrm_qmae_eqm_and_econ_monotonic_properties(snapshot_factory) -> None:
     high_qmae = _apply(snapshot, features, _predictions(features, tail=0.1, qmae=0.04))
     assert high_qmae.results[0].qmae_quality < low_tail.results[0].qmae_quality
     assert ReasonCode.QMAE_ADVERSE_EXCURSION_HIGH in high_qmae.results[0].reason_codes
-    expensive = _apply(snapshot, features, _predictions(features, tail=0.1, qmae=0.005), cost=0.05)
-    assert expensive.results[0].econ_edge < low_tail.results[0].econ_edge
-    assert ReasonCode.ECON1_EDGE_BELOW_COST in expensive.results[0].reason_codes
+    assert high_tail.results[0].calibrated_score == low_tail.results[0].calibrated_score
+    assert high_qmae.results[0].calibrated_score == low_tail.results[0].calibrated_score
     disagreement = _apply(snapshot, features, _predictions(features, tail=0.1, qmae=0.005, disagreement=True))
     assert disagreement.results[0].calibrated_score <= low_tail.results[0].calibrated_score

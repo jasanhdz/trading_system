@@ -1,9 +1,9 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from aegis.domain import DecisionOutcome, FillOutcome, OutcomeExecutionStatus
+from aegis.domain import DecisionOutcome, FillOutcome, OutcomeExecutionStatus, ScientificEvidenceEvent
 from aegis.evidence import AppendOnlyEvidenceRecorder, EvidencePersistenceError, InMemoryEvidenceRecorder
 from aegis.features import DeterministicFeaturePipeline
 from aegis.training import CausalDatasetBuilder, DeterministicLinearTrainer, FileArtifactRegistry, OfflineModelEvaluator, TrainingTarget, walk_forward_splits
@@ -53,3 +53,28 @@ def test_outcome_evidence_is_append_only_and_contains_no_policy_mutation(tmp_pat
     lines = (tmp_path / "events.jsonl").read_text().splitlines()
     assert len(lines) == 1 and second == first
     assert "policy" not in lines[0].lower() and "secret" not in lines[0].lower()
+
+    recovered = AppendOnlyEvidenceRecorder(hashing, tmp_path / "events.jsonl")
+    assert len(recovered.events) == 1
+    assert recovered.events[0].event_hash == first.event_hash
+    assert recovered.record_outcome(outcome).event_hash == first.event_hash
+    assert len((tmp_path / "events.jsonl").read_text().splitlines()) == 1
+
+
+def test_evidence_recovery_reanchors_chain_and_rejects_tampering(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    hashing = Sha256HashProvider()
+    recorder = AppendOnlyEvidenceRecorder(hashing, path)
+    first = recorder.record(ScientificEvidenceEvent(
+        "event-1", "decision-1", "cycle-1", "DECISION",
+        datetime(2026, 7, 17, tzinfo=timezone.utc), {"value": 1},
+    ))
+    recovered = AppendOnlyEvidenceRecorder(hashing, path)
+    second = recovered.record(ScientificEvidenceEvent(
+        "event-2", "decision-2", "cycle-2", "DECISION",
+        datetime(2026, 7, 18, tzinfo=timezone.utc), {"value": 2},
+    ))
+    assert second.previous_event_hash == first.event_hash
+    path.write_text(path.read_text().replace('"value":1', '"value":9'), encoding="utf-8")
+    with pytest.raises(EvidencePersistenceError, match="hash mismatch"):
+        AppendOnlyEvidenceRecorder(hashing, path)

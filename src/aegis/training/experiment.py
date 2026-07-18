@@ -281,7 +281,6 @@ def _layer_settings(bundle: ModelBundle, config: Mapping[str, Any]) -> LayerSett
         trrm_max_tail_probability=float(thresholds.get("trrm_max_tail_probability", 0.70)),
         qmae_max_fraction=float(thresholds.get("qmae_max_fraction", 0.03)),
         eqm_min_score=float(thresholds.get("eqm_min_score", 0.0)),
-        estimated_round_trip_cost_fraction=float(config["protocol"]["friction_fraction"]),
         direction_threshold=float(thresholds["direction"]),
     )
 
@@ -400,7 +399,7 @@ def build_candidate_bundle(artifact: ModelArtifact, normalizer: FrozenNormalizer
     def head(name: str, sign: float = 1.0) -> dict[str, Any]:
         return {"bias": sign * artifact.intercepts[name], "weights": {feature: sign * value for feature, value in zip(FEATURE_NAMES, weights[name])}}
     payload: dict[str, Any] = {
-        "approved": classification == "APPROVED_FOR_SHADOW",
+        "approved": False,
         "bundle_id": f"aegis-candidate-{artifact.artifact_hash[:16]}", "estimators": [{
             "model_id": "candidate-linear-h12", "horizon_bars": int(config["data"]["horizon_bars"]),
             "heads": {"long": head("direction"), "short": head("direction", -1), "neutral": {"bias": 0.0, "weights": {}},
@@ -408,11 +407,12 @@ def build_candidate_bundle(artifact: ModelArtifact, normalizer: FrozenNormalizer
                       "qmae_mean": head("qmae"), "quality": head("clean_quality")},
         }],
         "feature_hash": FEATURE_HASH, "feature_schema_version": FEATURE_SCHEMA_VERSION,
-        "metadata": {"purpose": "SHADOW_CANDIDATE" if classification == "APPROVED_FOR_SHADOW" else "REJECTED_EXPERIMENT",
+        "metadata": {"purpose": "EXPERIMENTAL_SMOKE",
                      "trained": True, "training_window": list(partition.train_window), "validation_window": list(partition.validation_window),
                      "test_window": list(partition.test_window), "seed": int(config["protocol"]["seed"]),
                      "framework": "numpy-linear-ridge", "framework_version": np.__version__, "code_version": "phase2-working-tree",
                      "calibration_method": "HELD_OUT_VALIDATION_FIXED_THRESHOLD", "feature_count": len(FEATURE_NAMES),
+                     "lifecycle_state": "EXPERIMENTAL",
                      "thresholds": {"direction": float(config["protocol"]["direction_threshold"]), "selection": 0.50,
                                     "trrm_max_tail_probability": 0.70, "qmae_max_fraction": 0.03,
                                     "eqm_min_score": 0.0}},
@@ -466,7 +466,7 @@ def run_experiment(config_path: Path) -> ExperimentResult:
         "maximum_symbol_signal_fraction": concentration <= float(criteria["maximum_symbol_signal_fraction"]),
         "require_no_known_leakage": True,
     }
-    classification = "APPROVED_FOR_SHADOW" if all(checks.values()) else "REJECTED"
+    classification = "EXPERIMENTAL_SMOKE_CRITERIA_MET" if all(checks.values()) else "EXPERIMENTAL_SMOKE_REJECTED"
     bundle = build_candidate_bundle(artifact, normalizer, partition, config, classification)
     return ExperimentResult(str(config["experiment_id"]), dataset.artifact_hash, audit, partition, FEATURE_HASH,
                             artifact.artifact_id, artifact.artifact_hash, baselines, tuple(fold_metrics), checks,

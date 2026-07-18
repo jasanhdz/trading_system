@@ -28,7 +28,6 @@ class LayerSettings:
     trrm_max_tail_probability: float
     qmae_max_fraction: float
     eqm_min_score: float
-    estimated_round_trip_cost_fraction: float
     direction_threshold: float
 
 
@@ -42,7 +41,7 @@ def _clip(value: float) -> float:
 
 @dataclass(frozen=True)
 class OrderedScientificLayers:
-    """Execute REGIME -> RV2 -> TRRM -> QMAE -> EQM -> ECON1 deterministically."""
+    """Apply runtime context and scientific gates; ECON is an offline program."""
 
     settings: LayerSettings
 
@@ -82,7 +81,6 @@ class OrderedScientificLayers:
                 for item in symbol_predictions
             ]
             disagreement = statistics.pstdev(directional_probabilities) if len(directional_probabilities) > 1 else 0.0
-            econ_edge = expected_edge - self.settings.estimated_round_trip_cost_fraction
 
             reasons: list[ReasonCode] = []
             if side is TradeSide.NO_TRADE:
@@ -99,25 +97,16 @@ class OrderedScientificLayers:
                 reasons.append(ReasonCode.QMAE_ADVERSE_EXCURSION_HIGH)
             if eqm_score < self.settings.eqm_min_score:
                 reasons.append(ReasonCode.EQM_QUALITY_LOW)
-            if econ_edge <= 0:
-                reasons.append(ReasonCode.ECON1_EDGE_BELOW_COST)
             eligible = not reasons
             if eligible:
                 reasons.append(ReasonCode.ELIGIBLE)
-            calibrated_score = _clip(
-                direction_probability
-                * trrm_compatibility
-                * qmae_quality
-                * clean_probability
-                * (1.0 - min(1.0, disagreement))
-                * regime_confidence
-            )
+            # Score unit: expected clean directional return as a price fraction.
+            calibrated_score = _clip(eqm_score)
             results.append(LayerResult(
                 symbol=row.symbol, side=side, regime=regime, regime_confidence=regime_confidence,
                 rv2_tail_risk=rv2_tail, trrm_compatibility=trrm_compatibility,
                 qmae_q90=qmae_q90, qmae_quality=qmae_quality, eqm_score=eqm_score,
-                model_disagreement=disagreement, econ_edge=econ_edge,
-                calibrated_score=calibrated_score, eligible=eligible,
+                model_disagreement=disagreement, calibrated_score=calibrated_score, eligible=eligible,
                 reason_codes=tuple(reasons),
                 diagnostics=(
                     ("direction_probability", direction_probability),
@@ -125,7 +114,7 @@ class OrderedScientificLayers:
                     ("qmae_mean", _mean([item.qmae_mean for item in symbol_predictions])),
                     ("qmae_quantile_valid", qmae_valid),
                     ("expected_directional_return", expected_edge),
-                    ("estimated_round_trip_cost", self.settings.estimated_round_trip_cost_fraction),
+                    ("score_unit", "EXPECTED_CLEAN_RETURN_FRACTION"),
                 ),
             ))
         return LayerOutputs(tuple(ScientificLayerName), tuple(results))
@@ -135,7 +124,7 @@ class OrderedScientificLayers:
         return LayerResult(
             symbol=symbol, side=TradeSide.NO_TRADE, regime=Regime.UNKNOWN, regime_confidence=0.0,
             rv2_tail_risk=1.0, trrm_compatibility=0.0, qmae_q90=None, qmae_quality=0.0,
-            eqm_score=0.0, model_disagreement=1.0, econ_edge=-1.0, calibrated_score=0.0,
+            eqm_score=0.0, model_disagreement=1.0, calibrated_score=0.0,
             eligible=False, reason_codes=(ReasonCode.MODEL_UNAVAILABLE,),
         )
 

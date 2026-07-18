@@ -8,13 +8,10 @@ layers:
   - TRRM
   - QMAE
   - EQM
-  - ECON1
 thresholds:
   direction_probability: 0.50
   selection_score: 0.50
   trrm_max_tail_probability: 0.70
   qmae_max_fraction: 0.03
   eqm_min_score: 0.0
-economics:
-  estimated_round_trip_cost_fraction: 0.0014
 maximum_decision_age_seconds: 30

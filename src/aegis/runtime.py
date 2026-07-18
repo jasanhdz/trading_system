@@ -171,7 +171,6 @@ def build_runtime(config_dir: Path, *, clock: UtcClock | None = None, persist_ev
     settings = LayerSettings(
         trrm_max_tail_probability=config.models.trrm_max_tail_probability,
         qmae_max_fraction=config.models.qmae_max_fraction, eqm_min_score=config.models.eqm_min_score,
-        estimated_round_trip_cost_fraction=config.models.estimated_round_trip_cost_fraction,
         direction_threshold=config.models.direction_threshold,
     )
     return BrainRuntime(

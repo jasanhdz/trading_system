@@ -49,7 +49,6 @@ class ModelConfig:
     trrm_max_tail_probability: float
     qmae_max_fraction: float
     eqm_min_score: float
-    estimated_round_trip_cost_fraction: float
     maximum_decision_age_seconds: int
 
 
@@ -109,9 +108,8 @@ def load_brain_config(config_dir: Path) -> BrainConfig:
 
     layers = tuple(str(value) for value in models_data.get("layers", ()))
     if layers != EXPECTED_LAYERS:
-        raise ConfigurationError("scientific layer order must be REGIME/RV2/TRRM/QMAE/EQM/ECON1")
+        raise ConfigurationError("scientific layer order must be REGIME/RV2/TRRM/QMAE/EQM")
     thresholds = _mapping(models_data.get("thresholds", {}), "models.thresholds")
-    costs = _mapping(models_data.get("economics", {}), "models.economics")
     model_bundle_id = str(models_data.get("model_bundle_id", ""))
     if not model_bundle_id or model_bundle_id.startswith("TODO"):
         raise ConfigurationError("an explicit approved model_bundle_id is required")
@@ -140,7 +138,6 @@ def load_brain_config(config_dir: Path) -> BrainConfig:
         trrm_max_tail_probability=_fraction(thresholds.get("trrm_max_tail_probability", 0.70), "trrm_max_tail_probability"),
         qmae_max_fraction=_fraction(thresholds.get("qmae_max_fraction", 0.03), "qmae_max_fraction"),
         eqm_min_score=_fraction(thresholds.get("eqm_min_score", 0.0), "eqm_min_score"),
-        estimated_round_trip_cost_fraction=_fraction(costs.get("estimated_round_trip_cost_fraction", 0.0014), "estimated_round_trip_cost_fraction"),
         maximum_decision_age_seconds=int(models_data.get("maximum_decision_age_seconds", 30)),
     )
     if models.maximum_decision_age_seconds <= 0:

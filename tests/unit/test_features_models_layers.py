@@ -18,8 +18,7 @@ def _components():
     models = DeterministicModelRuntime(bundle, config.models.direction_threshold)
     layers = OrderedScientificLayers(LayerSettings(
         config.models.trrm_max_tail_probability, config.models.qmae_max_fraction,
-        config.models.eqm_min_score, config.models.estimated_round_trip_cost_fraction,
-        config.models.direction_threshold,
+        config.models.eqm_min_score, config.models.direction_threshold,
     ))
     return config, features, models, layers
 
@@ -58,7 +57,7 @@ def test_layers_emit_all_six_semantics_and_fail_closed(snapshot_factory) -> None
     predictions = models.predict(features)
     outputs = layers.apply(predictions, ScientificContext("r", "c", snapshot.closed_at, "5m", snapshot.portfolio, features))
     assert len(outputs.results) == 11
-    assert tuple(layer.value for layer in outputs.ordered_layers) == ("REGIME", "RV2", "TRRM", "QMAE", "EQM", "ECON1")
+    assert tuple(layer.value for layer in outputs.ordered_layers) == ("REGIME", "RV2", "TRRM", "QMAE", "EQM")
     assert all(0 <= result.trrm_compatibility <= 1 for result in outputs.results)
     with pytest.raises(ModelBundleError):
         models.predict(replace(features, feature_hash="tampered"))

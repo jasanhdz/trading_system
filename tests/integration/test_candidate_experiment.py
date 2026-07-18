@@ -78,7 +78,7 @@ def test_candidate_experiment_is_read_only_temporal_and_reproducible(tmp_path: P
     assert first.source_audit.accepted_cycles >= 100
     assert first.partition.train_window[1] < first.partition.validation_window[0] < first.partition.test_window[0]
     assert {"no_trade", "random", "momentum", "mean_reversion", "last_candle", "model_no_layers", "model_full_layers"} == set(first.baselines)
-    assert first.classification in {"REJECTED", "APPROVED_FOR_SHADOW"}
+    assert first.classification in {"EXPERIMENTAL_SMOKE_REJECTED", "EXPERIMENTAL_SMOKE_CRITERIA_MET"}
     assert all(metric.profit_factor < float("inf") for metric in first.baselines.values())
     bundle_path = tmp_path / "candidate.json"
     bundle_path.write_text(json.dumps(first.candidate_bundle), encoding="utf-8")

@@ -73,7 +73,7 @@ def scenario_bundle_factory():
                 "TEST_FIXTURE", True, None, None, None, 0, "fixture", "1", "tests", "FIXED_FIXTURE", 39,
                 {
                     "direction": 0.50,
-                    "selection": 0.45,
+                    "selection": 0.02,
                     "trrm_max_tail_probability": 0.70,
                     "qmae_max_fraction": 0.03,
                     "eqm_min_score": 0.0,
@@ -100,6 +100,6 @@ def scenario_runtime_factory(scenario_bundle_factory):
             runtime.config,
             models=__import__("dataclasses").replace(runtime.config.models, model_bundle_id=f"fixture-{side.lower()}-bundle"),
         )
-        runtime.selection_policy = GlobalSelectionPolicy(0.45)
+        runtime.selection_policy = GlobalSelectionPolicy(0.02)
         return runtime
     return build

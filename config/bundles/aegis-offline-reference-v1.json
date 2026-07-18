@@ -1,7 +1,7 @@
 {
-  "approved": true,
+  "approved": false,
   "bundle_id": "aegis-offline-reference-v1",
-  "content_hash": "b1b674183bf87ac9899fa2783da469a4b7e9e9bd9dd38d809b335f219dacbf68",
+  "content_hash": "fe60895ce1acb2e503d996a32264bf5da925834330810af6aa7fa2f36ea0ddc0",
   "estimators": [
     {
       "heads": {
@@ -38,6 +38,7 @@
     "feature_count": 39,
     "framework": "aegis-deterministic-linear",
     "framework_version": "1",
+    "lifecycle_state": "EXPERIMENTAL",
     "purpose": "OFFLINE_REFERENCE_ONLY",
     "seed": 0,
     "test_window": null,

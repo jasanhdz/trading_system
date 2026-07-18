@@ -22,7 +22,7 @@ def _write_bundle(tmp_path: Path, payload: dict) -> Path:
 def test_reference_bundle_is_explicitly_untrained_reference_only() -> None:
     path = Path(__file__).parents[2] / "config" / "bundles" / "aegis-offline-reference-v1.json"
     bundle = load_model_bundle(path)
-    assert bundle.approved is True
+    assert bundle.approved is False
     assert bundle.metadata.trained is False
     assert bundle.metadata.purpose == "OFFLINE_REFERENCE_ONLY"
 
