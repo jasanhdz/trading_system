@@ -9,6 +9,7 @@ from aegis.config import CANONICAL_SYMBOLS
 from aegis.data import CanonicalBar
 from aegis.training.dataset import build_e2_hourly_short_dataset, load_and_build_e2_hourly_dataset
 from aegis.training.phase_e import ProductionScientificBackend
+from aegis.models import CalibrationMethod, CalibratorSpec
 from aegis.training.preregistration import (
     E1_CANONICAL_HASH, E1_PHYSICAL_SHA256, PreregistrationError,
     SharedLockboxAuthority, load_and_validate_preregistration,
@@ -231,3 +232,12 @@ def test_e2_block_hashes_are_recordable() -> None:
         "threshold_derivation", "lockbox",
     )}
     assert audit.content_hash and len(set(hashes.values())) == len(hashes)
+
+
+def test_production_calibrator_payload_round_trips_as_json_contract() -> None:
+    spec = CalibratorSpec(
+        CalibrationMethod.PLATT, 0.02, 0.15, 100, parameters=(1.2, -0.1),
+    )
+    payload = ProductionScientificBackend._calibrator_payload(spec)
+    assert payload["method"] == "PLATT"
+    assert json.loads(json.dumps(payload))["parameters"] == [1.2, -0.1]

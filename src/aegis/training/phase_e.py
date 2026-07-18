@@ -720,6 +720,14 @@ class ProductionScientificBackend:
         trees.append(artifact)
         return {"tree_ensemble_id": artifact["ensemble_id"], "output_kind": "PROBABILITY" if probability else "RAW"}
 
+    @staticmethod
+    def _calibrator_payload(spec: CalibratorSpec) -> Mapping[str, Any]:
+        return {
+            "method": spec.method.value, "ece": spec.ece, "brier": spec.brier,
+            "sample_count": spec.sample_count, "parameters": list(spec.parameters),
+            "x": list(spec.x), "y": list(spec.y),
+        }
+
     def assemble_experimental_bundle(
         self, preregistration: Mapping[str, Any], competition: ModelCompetitionResult,
         calibration: CalibrationResult, qmae: QMAEValidationResult, git_commit: str,
@@ -772,7 +780,8 @@ class ProductionScientificBackend:
             "schema_version": "aegis-calibration-v1", "out_of_fold": True,
             "heads": {
                 "long": identity, "short": identity, "neutral": identity,
-                "tail_risk": to_primitive(tail_calibrator), "quality": to_primitive(quality_calibrator),
+                "tail_risk": self._calibrator_payload(tail_calibrator),
+                "quality": self._calibrator_payload(quality_calibrator),
             },
         }
         def make_payload(selection: float) -> dict[str, Any]:
