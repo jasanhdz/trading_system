@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
@@ -15,6 +16,12 @@ from .utils import Sha256HashProvider
 
 class ModelBundleError(ValueError):
     pass
+
+
+class CalibrationMethod(str, Enum):
+    IDENTITY = "IDENTITY"
+    PLATT = "PLATT"
+    ISOTONIC = "ISOTONIC"
 
 
 class ModelRuntime(Protocol):
@@ -36,6 +43,80 @@ class LinearHead:
 
 
 @dataclass(frozen=True)
+class CalibratorSpec:
+    method: CalibrationMethod
+    ece: float
+    brier: float
+    sample_count: int
+    parameters: tuple[float, ...] = ()
+    x: tuple[float, ...] = ()
+    y: tuple[float, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.ece <= 1.0 or not 0.0 <= self.brier <= 1.0 or self.sample_count <= 0:
+            raise ModelBundleError("calibrator metrics are invalid")
+        if self.method is CalibrationMethod.PLATT and len(self.parameters) != 2:
+            raise ModelBundleError("Platt calibrator requires slope and intercept")
+        if self.method is CalibrationMethod.ISOTONIC:
+            if len(self.x) < 2 or len(self.x) != len(self.y) or tuple(sorted(self.x)) != self.x:
+                raise ModelBundleError("isotonic calibration knots are invalid")
+            if any(not 0.0 <= value <= 1.0 for value in (*self.x, *self.y)):
+                raise ModelBundleError("isotonic calibration knots must be probabilities")
+
+    def apply(self, probability: float) -> float:
+        value = min(1.0, max(0.0, float(probability)))
+        if self.method is CalibrationMethod.IDENTITY:
+            return value
+        if self.method is CalibrationMethod.PLATT:
+            slope, intercept = self.parameters
+            clipped = min(1.0 - 1e-15, max(1e-15, value))
+            logit = math.log(clipped / (1.0 - clipped))
+            return _sigmoid(slope * logit + intercept)
+        if value <= self.x[0]:
+            return self.y[0]
+        if value >= self.x[-1]:
+            return self.y[-1]
+        for index in range(1, len(self.x)):
+            if value <= self.x[index]:
+                left_x, right_x = self.x[index - 1], self.x[index]
+                weight = 0.0 if right_x == left_x else (value - left_x) / (right_x - left_x)
+                return self.y[index - 1] + weight * (self.y[index] - self.y[index - 1])
+        raise AssertionError("unreachable isotonic interval")
+
+
+@dataclass(frozen=True)
+class CalibrationBlock:
+    schema_version: str
+    out_of_fold: bool
+    long: CalibratorSpec
+    short: CalibratorSpec
+    neutral: CalibratorSpec
+    tail_risk: CalibratorSpec
+    quality: CalibratorSpec
+
+    @property
+    def valid(self) -> bool:
+        return self.schema_version == "aegis-calibration-v1" and self.out_of_fold
+
+
+@dataclass(frozen=True)
+class QuantileHeadSpec:
+    q50: LinearHead
+    q90: LinearHead
+    conformal_adjustment: float
+    empirical_coverage: float
+    coverage_min: float = 0.87
+    coverage_max: float = 0.93
+
+    @property
+    def valid(self) -> bool:
+        return (
+            self.conformal_adjustment >= 0.0
+            and 0.0 <= self.coverage_min <= self.empirical_coverage <= self.coverage_max <= 1.0
+        )
+
+
+@dataclass(frozen=True)
 class EstimatorSpec:
     model_id: str
     horizon_bars: int
@@ -44,8 +125,9 @@ class EstimatorSpec:
     neutral: LinearHead
     expected_return: LinearHead
     tail_risk: LinearHead
-    qmae_q90: LinearHead
+    qmae_mean: LinearHead
     quality: LinearHead
+    qmae_quantiles: QuantileHeadSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +160,7 @@ class ModelBundle:
     normalizer: FrozenNormalizer
     estimators: tuple[EstimatorSpec, ...]
     metadata: BundleMetadata
+    calibration: CalibrationBlock | None = None
 
 
 def _head(payload: Mapping[str, Any]) -> LinearHead:
@@ -99,6 +182,59 @@ def _window(value: Any, name: str) -> tuple[str, str] | None:
     if not isinstance(value, list) or len(value) != 2 or not all(isinstance(item, str) and item for item in value):
         raise ModelBundleError(f"{name} must be null or a two-item timestamp list")
     return value[0], value[1]
+
+
+def _calibrator(payload: Mapping[str, Any]) -> CalibratorSpec:
+    try:
+        return CalibratorSpec(
+            method=CalibrationMethod(str(payload["method"])),
+            ece=float(payload["ece"]), brier=float(payload["brier"]),
+            sample_count=int(payload["sample_count"]),
+            parameters=tuple(float(value) for value in payload.get("parameters", ())),
+            x=tuple(float(value) for value in payload.get("x", ())),
+            y=tuple(float(value) for value in payload.get("y", ())),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ModelBundleError("calibrator contract is invalid") from exc
+
+
+def _calibration(payload: Any) -> CalibrationBlock | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("heads"), Mapping):
+        raise ModelBundleError("calibration block is invalid")
+    heads = payload["heads"]
+    try:
+        return CalibrationBlock(
+            schema_version=str(payload["schema_version"]), out_of_fold=bool(payload["out_of_fold"]),
+            long=_calibrator(heads["long"]), short=_calibrator(heads["short"]),
+            neutral=_calibrator(heads["neutral"]), tail_risk=_calibrator(heads["tail_risk"]),
+            quality=_calibrator(heads["quality"]),
+        )
+    except KeyError as exc:
+        raise ModelBundleError("calibration block does not cover every probabilistic head") from exc
+
+
+def _quantiles(payload: Any) -> QuantileHeadSpec | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, Mapping):
+        raise ModelBundleError("QMAE quantile block is invalid")
+    try:
+        spec = QuantileHeadSpec(
+            q50=_head(payload["q50"]), q90=_head(payload["q90"]),
+            conformal_adjustment=float(payload["conformal_adjustment"]),
+            empirical_coverage=float(payload["empirical_coverage"]),
+            coverage_min=float(payload.get("coverage_min", 0.87)),
+            coverage_max=float(payload.get("coverage_max", 0.93)),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ModelBundleError("QMAE quantile contract is invalid") from exc
+    if not all(math.isfinite(value) for value in (
+        spec.conformal_adjustment, spec.empirical_coverage, spec.coverage_min, spec.coverage_max,
+    )):
+        raise ModelBundleError("QMAE quantile metadata must be finite")
+    return spec
 
 
 def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id: str | None = None) -> ModelBundle:
@@ -130,8 +266,8 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
                 model_id=str(item["model_id"]), horizon_bars=int(item["horizon_bars"]),
                 long=_head(item["heads"]["long"]), short=_head(item["heads"]["short"]),
                 neutral=_head(item["heads"]["neutral"]), expected_return=_head(item["heads"]["expected_return"]),
-                tail_risk=_head(item["heads"]["tail_risk"]), qmae_q90=_head(item["heads"]["qmae_q90"]),
-                quality=_head(item["heads"]["quality"]),
+                tail_risk=_head(item["heads"]["tail_risk"]), qmae_mean=_head(item["heads"]["qmae_mean"]),
+                quality=_head(item["heads"]["quality"]), qmae_quantiles=_quantiles(item.get("qmae_quantiles")),
             )
             for item in payload.get("estimators", ())
         )
@@ -172,7 +308,7 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
             scales=scales,
             clip_absolute=float(normalizer_data.get("clip_absolute", 12.0)),
         ),
-        estimators=estimators, metadata=metadata,
+        estimators=estimators, metadata=metadata, calibration=_calibration(payload.get("calibration")),
     )
 
 
@@ -213,17 +349,43 @@ class DeterministicModelRuntime:
             values = dict(zip(features.feature_names, row.normalized_values))
             for estimator in self.bundle.estimators:
                 probabilities = _softmax((estimator.long.evaluate(values), estimator.short.evaluate(values), estimator.neutral.evaluate(values)))
+                calibration_valid = self.bundle.calibration is not None and self.bundle.calibration.valid
+                if calibration_valid:
+                    assert self.bundle.calibration is not None
+                    calibrated = (
+                        self.bundle.calibration.long.apply(probabilities[0]),
+                        self.bundle.calibration.short.apply(probabilities[1]),
+                        self.bundle.calibration.neutral.apply(probabilities[2]),
+                    )
+                    total = math.fsum(calibrated)
+                    if total <= 0.0:
+                        raise ModelBundleError("calibrated direction probabilities are degenerate")
+                    probabilities = tuple(value / total for value in calibrated)
                 long_probability, short_probability, neutral_probability = probabilities
                 best = max(probabilities)
                 if best < self.direction_threshold or neutral_probability == best:
                     side = TradeSide.NO_TRADE
                 else:
                     side = TradeSide.LONG if long_probability >= short_probability else TradeSide.SHORT
+                raw_tail = _sigmoid(estimator.tail_risk.evaluate(values))
+                raw_quality = _sigmoid(estimator.quality.evaluate(values))
+                tail_probability = self.bundle.calibration.tail_risk.apply(raw_tail) if calibration_valid else raw_tail  # type: ignore[union-attr]
+                quality_probability = self.bundle.calibration.quality.apply(raw_quality) if calibration_valid else raw_quality  # type: ignore[union-attr]
+                qmae_mean = max(0.0, estimator.qmae_mean.evaluate(values))
+                qmae_q50 = qmae_q90 = coverage = None
+                qmae_valid = estimator.qmae_quantiles is not None and estimator.qmae_quantiles.valid
+                if qmae_valid:
+                    assert estimator.qmae_quantiles is not None
+                    qmae_q50 = max(0.0, estimator.qmae_quantiles.q50.evaluate(values))
+                    qmae_q90 = max(qmae_q50, estimator.qmae_quantiles.q90.evaluate(values))
+                    qmae_q90 += estimator.qmae_quantiles.conformal_adjustment
+                    coverage = estimator.qmae_quantiles.empirical_coverage
                 predictions.append(ModelPrediction(
                     model_id=estimator.model_id, symbol=row.symbol, horizon_bars=estimator.horizon_bars, side=side,
                     long_probability=long_probability, short_probability=short_probability, neutral_probability=neutral_probability,
-                    expected_return=estimator.expected_return.evaluate(values), tail_risk_probability=_sigmoid(estimator.tail_risk.evaluate(values)),
-                    qmae_q90=max(0.0, estimator.qmae_q90.evaluate(values)), quality_probability=_sigmoid(estimator.quality.evaluate(values)),
-                    uncertainty=1.0 - best,
+                    expected_return=estimator.expected_return.evaluate(values), tail_risk_probability=tail_probability,
+                    qmae_mean=qmae_mean, quality_probability=quality_probability, uncertainty=1.0 - best,
+                    qmae_q50=qmae_q50, qmae_q90=qmae_q90, qmae_coverage=coverage,
+                    calibration_valid=calibration_valid, qmae_valid=qmae_valid,
                 ))
         return ModelPredictions(self.bundle.bundle_id, features.feature_hash, tuple(predictions))

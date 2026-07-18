@@ -94,7 +94,7 @@ class ScientificCandidateBuilder:
                 compatibility=result.trrm_compatibility, expected_return=expected,
                 horizon_bars=symbol_predictions[0].horizon_bars,
                 risk_intent=RiskIntent(
-                    stop_distance_fraction=result.qmae_q90,
+                    stop_distance_fraction=None,
                     target_distance_fraction=max(0.0, expected),
                     volatility_multiple=None, target_risk_ratio=None,
                     maximum_holding_bars=symbol_predictions[0].horizon_bars,
@@ -119,6 +119,9 @@ class GlobalSelectionPolicy:
         for candidate in candidates.candidates:
             reasons = list(candidate.reason_codes)
             eligible = candidate.eligible
+            if candidate.side is not TradeSide.SHORT:
+                eligible = False
+                reasons.append(ReasonCode.SIDE_NOT_ENABLED)
             if candidate.calibrated_score < self.selection_threshold:
                 eligible = False
                 reasons.append(ReasonCode.NO_TRADE_THRESHOLD)

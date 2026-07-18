@@ -66,6 +66,9 @@ class ReasonCode(str, Enum):
     MODEL_NO_DIRECTION = "MODEL_NO_DIRECTION"
     TRRM_TAIL_RISK_VETO = "TRRM_TAIL_RISK_VETO"
     QMAE_ADVERSE_EXCURSION_HIGH = "QMAE_ADVERSE_EXCURSION_HIGH"
+    QMAE_QUANTILE_UNAVAILABLE = "QMAE_QUANTILE_UNAVAILABLE"
+    CALIBRATION_MISSING = "CALIBRATION_MISSING"
+    SIDE_NOT_ENABLED = "SIDE_NOT_ENABLED"
     EQM_QUALITY_LOW = "EQM_QUALITY_LOW"
     ECON1_EDGE_BELOW_COST = "ECON1_EDGE_BELOW_COST"
     SYMBOL_BLOCKED = "SYMBOL_BLOCKED"
@@ -266,9 +269,14 @@ class ModelPrediction:
     neutral_probability: float
     expected_return: float
     tail_risk_probability: float
-    qmae_q90: float
+    qmae_mean: float
     quality_probability: float
     uncertainty: float
+    qmae_q50: float | None = None
+    qmae_q90: float | None = None
+    qmae_coverage: float | None = None
+    calibration_valid: bool = False
+    qmae_valid: bool = False
 
     def __post_init__(self) -> None:
         for name in (
@@ -283,8 +291,18 @@ class ModelPrediction:
             if not 0.0 <= value <= 1.0:
                 raise DomainValidationError(f"{name} must be within [0, 1]")
         _finite(self.expected_return, "expected_return")
-        if _finite(self.qmae_q90, "qmae_q90") < 0:
-            raise DomainValidationError("qmae_q90 cannot be negative")
+        if _finite(self.qmae_mean, "qmae_mean") < 0:
+            raise DomainValidationError("qmae_mean cannot be negative")
+        for name in ("qmae_q50", "qmae_q90"):
+            value = getattr(self, name)
+            if value is not None and _finite(value, name) < 0:
+                raise DomainValidationError(f"{name} cannot be negative")
+        if self.qmae_coverage is not None and not 0.0 <= _finite(self.qmae_coverage, "qmae_coverage") <= 1.0:
+            raise DomainValidationError("qmae_coverage must be within [0, 1]")
+        if self.qmae_valid and (self.qmae_q50 is None or self.qmae_q90 is None or self.qmae_coverage is None):
+            raise DomainValidationError("valid QMAE requires q50, q90, and coverage")
+        if self.qmae_q50 is not None and self.qmae_q90 is not None and self.qmae_q90 < self.qmae_q50:
+            raise DomainValidationError("qmae_q90 cannot be below qmae_q50")
         probability_sum = self.long_probability + self.short_probability + self.neutral_probability
         if not math.isclose(probability_sum, 1.0, rel_tol=1e-9, abs_tol=1e-9):
             raise DomainValidationError("direction probabilities must sum to one")
@@ -318,7 +336,7 @@ class LayerResult:
     d3_confidence: float
     rv2_tail_risk: float
     trrm_compatibility: float
-    qmae_q90: float
+    qmae_q90: float | None
     qmae_quality: float
     eqm_score: float
     model_disagreement: float
@@ -335,7 +353,7 @@ class LayerResult:
             value = _finite(getattr(self, name), name)
             if not 0.0 <= value <= 1.0:
                 raise DomainValidationError(f"{name} must be within [0, 1]")
-        if _finite(self.qmae_q90, "qmae_q90") < 0:
+        if self.qmae_q90 is not None and _finite(self.qmae_q90, "qmae_q90") < 0:
             raise DomainValidationError("qmae_q90 cannot be negative")
         _finite(self.eqm_score, "eqm_score")
         _finite(self.econ_edge, "econ_edge")

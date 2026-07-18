@@ -65,8 +65,13 @@ class OrderedScientificLayers:
 
             rv2_tail = _mean([item.tail_risk_probability for item in symbol_predictions])
             trrm_compatibility = 1.0 - rv2_tail
-            qmae_q90 = _mean([item.qmae_q90 for item in symbol_predictions])
-            qmae_quality = _clip(1.0 - qmae_q90 / max(self.settings.qmae_max_fraction, 1e-12))
+            qmae_values = [item.qmae_q90 for item in symbol_predictions if item.qmae_valid and item.qmae_q90 is not None]
+            qmae_valid = len(qmae_values) == len(symbol_predictions)
+            qmae_q90 = _mean(qmae_values) if qmae_valid else None
+            qmae_quality = (
+                _clip(1.0 - qmae_q90 / max(self.settings.qmae_max_fraction, 1e-12))
+                if qmae_q90 is not None else 0.0
+            )
             expected_returns = [item.expected_return for item in symbol_predictions]
             directional_returns = [value if side is TradeSide.LONG else -value for value in expected_returns]
             expected_edge = _mean(directional_returns) if side is not TradeSide.NO_TRADE else 0.0
@@ -82,9 +87,15 @@ class OrderedScientificLayers:
             reasons: list[ReasonCode] = []
             if side is TradeSide.NO_TRADE:
                 reasons.append(ReasonCode.MODEL_NO_DIRECTION)
+            if side is TradeSide.LONG:
+                reasons.append(ReasonCode.SIDE_NOT_ENABLED)
+            if not all(item.calibration_valid for item in symbol_predictions):
+                reasons.append(ReasonCode.CALIBRATION_MISSING)
             if rv2_tail > self.settings.trrm_max_tail_probability:
                 reasons.append(ReasonCode.TRRM_TAIL_RISK_VETO)
-            if qmae_q90 > self.settings.qmae_max_fraction:
+            if not qmae_valid:
+                reasons.append(ReasonCode.QMAE_QUANTILE_UNAVAILABLE)
+            elif qmae_q90 is not None and qmae_q90 > self.settings.qmae_max_fraction:
                 reasons.append(ReasonCode.QMAE_ADVERSE_EXCURSION_HIGH)
             if eqm_score < self.settings.eqm_min_score:
                 reasons.append(ReasonCode.EQM_QUALITY_LOW)
@@ -111,6 +122,8 @@ class OrderedScientificLayers:
                 diagnostics=(
                     ("direction_probability", direction_probability),
                     ("clean_probability", clean_probability),
+                    ("qmae_mean", _mean([item.qmae_mean for item in symbol_predictions])),
+                    ("qmae_quantile_valid", qmae_valid),
                     ("expected_directional_return", expected_edge),
                     ("estimated_round_trip_cost", self.settings.estimated_round_trip_cost_fraction),
                 ),
@@ -121,7 +134,7 @@ class OrderedScientificLayers:
     def _unavailable(symbol: str) -> LayerResult:
         return LayerResult(
             symbol=symbol, side=TradeSide.NO_TRADE, regime=Regime.UNKNOWN, d3_confidence=0.0,
-            rv2_tail_risk=1.0, trrm_compatibility=0.0, qmae_q90=1.0, qmae_quality=0.0,
+            rv2_tail_risk=1.0, trrm_compatibility=0.0, qmae_q90=None, qmae_quality=0.0,
             eqm_score=0.0, model_disagreement=1.0, econ_edge=-1.0, calibrated_score=0.0,
             eligible=False, reason_codes=(ReasonCode.MODEL_UNAVAILABLE,),
         )

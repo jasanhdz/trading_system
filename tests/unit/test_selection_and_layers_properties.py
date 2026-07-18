@@ -8,7 +8,7 @@ from aegis.layers import LayerSettings, OrderedScientificLayers
 
 
 def _candidate(symbol: str, score: float) -> Candidate:
-    return Candidate(f"candidate-{symbol}", symbol, TradeSide.LONG, score, score, 0.8, 0.2,
+    return Candidate(f"candidate-{symbol}", symbol, TradeSide.SHORT, score, score, 0.8, 0.2,
                      Regime.BULL_TREND, 0.8, 0.02, 12, RiskIntent(maximum_holding_bars=12),
                      (ReasonCode.ELIGIBLE,), (), "bundle", "f" * 64, symbol.lower() * 4, True)
 
@@ -29,9 +29,15 @@ def test_global_ranking_ties_and_portfolio_fallback_are_deterministic() -> None:
 def _predictions(features, *, tail: float, qmae: float, expected: float = 0.03, disagreement: bool = False):
     rows = []
     for row in features.rows:
-        rows.append(ModelPrediction("a", row.symbol, 12, TradeSide.LONG, 0.9, 0.05, 0.05, expected, tail, qmae, 0.9, 0.1))
+        rows.append(ModelPrediction(
+            "a", row.symbol, 12, TradeSide.LONG, 0.9, 0.05, 0.05, expected, tail,
+            qmae, 0.9, 0.1, qmae * 0.7, qmae, 0.9, True, True,
+        ))
         if disagreement:
-            rows.append(ModelPrediction("b", row.symbol, 12, TradeSide.SHORT, 0.1, 0.85, 0.05, -expected, tail, qmae, 0.9, 0.1))
+            rows.append(ModelPrediction(
+                "b", row.symbol, 12, TradeSide.SHORT, 0.1, 0.85, 0.05, -expected, tail,
+                qmae, 0.9, 0.1, qmae * 0.7, qmae, 0.9, True, True,
+            ))
     return ModelPredictions("bundle", features.feature_hash, tuple(rows))
 
 

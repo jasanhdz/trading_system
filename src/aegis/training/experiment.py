@@ -411,7 +411,7 @@ def build_candidate_bundle(artifact: ModelArtifact, normalizer: FrozenNormalizer
             "model_id": "candidate-linear-h12", "horizon_bars": int(config["data"]["horizon_bars"]),
             "heads": {"long": head("direction"), "short": head("direction", -1), "neutral": {"bias": 0.0, "weights": {}},
                       "expected_return": head("expected_return"), "tail_risk": head("tail_event"),
-                      "qmae_q90": head("qmae"), "quality": head("clean_quality")},
+                      "qmae_mean": head("qmae"), "quality": head("clean_quality")},
         }],
         "feature_hash": FEATURE_HASH, "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "metadata": {"purpose": "SHADOW_CANDIDATE" if classification == "APPROVED_FOR_SHADOW" else "REJECTED_EXPERIMENT",

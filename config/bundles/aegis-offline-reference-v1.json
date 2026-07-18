@@ -1,14 +1,14 @@
 {
   "approved": true,
   "bundle_id": "aegis-offline-reference-v1",
-  "content_hash": "3f469d6a7137a544260e8070b1bc45463d57494b4cdf79b428f46a5f250ab0e0",
+  "content_hash": "b1b674183bf87ac9899fa2783da469a4b7e9e9bd9dd38d809b335f219dacbf68",
   "estimators": [
     {
       "heads": {
         "expected_return": {"bias": 0.0, "weights": {"relative_return_12": 0.10, "ret_12": 0.18, "trend_strength_12": 0.0002}},
         "long": {"bias": -0.10, "weights": {"cross_rank_return_6": 0.70, "ema_gap_6_12": 12.0, "market_direction_6": 8.0, "ret_12": 10.0}},
         "neutral": {"bias": 0.15, "weights": {"chop_12": 0.50, "range_expansion": -0.20}},
-        "qmae_q90": {"bias": 0.008, "weights": {"atr_24": 0.80, "range_mean_24": 0.30}},
+        "qmae_mean": {"bias": 0.008, "weights": {"atr_24": 0.80, "range_mean_24": 0.30}},
         "quality": {"bias": 0.10, "weights": {"chop_12": -0.70, "persistence_6": 0.20, "trend_strength_12": 0.05}},
         "short": {"bias": -0.10, "weights": {"cross_rank_return_6": -0.70, "ema_gap_6_12": -12.0, "market_direction_6": -8.0, "ret_12": -10.0}},
         "tail_risk": {"bias": -1.10, "weights": {"atr_24": 20.0, "range_expansion": 0.40, "volatility_ratio_6_24": 0.25}}
@@ -21,7 +21,7 @@
         "expected_return": {"bias": 0.0, "weights": {"relative_return_6": 0.08, "ret_6": 0.14, "ema_slope_12": 0.12}},
         "long": {"bias": -0.05, "weights": {"cross_rank_return_6": 0.50, "ema_gap_12_24": 10.0, "persistence_6": 0.30}},
         "neutral": {"bias": 0.10, "weights": {"chop_12": 0.40, "volatility_ratio_6_24": -0.10}},
-        "qmae_q90": {"bias": 0.009, "weights": {"atr_12": 0.65, "candle_range_fraction": 0.20}},
+        "qmae_mean": {"bias": 0.009, "weights": {"atr_12": 0.65, "candle_range_fraction": 0.20}},
         "quality": {"bias": 0.15, "weights": {"chop_12": -0.60, "volume_zscore_24": 0.04, "trend_strength_12": 0.04}},
         "short": {"bias": -0.05, "weights": {"cross_rank_return_6": -0.50, "ema_gap_12_24": -10.0, "persistence_6": -0.30}},
         "tail_risk": {"bias": -1.00, "weights": {"atr_12": 18.0, "range_expansion": 0.30, "volume_zscore_24": 0.04}}

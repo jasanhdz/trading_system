@@ -5,7 +5,10 @@ import pytest
 from aegis.config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
 from aegis.domain import Candle, DecisionRequest, FeedQuality, MarketSnapshot, PortfolioContext, SymbolSeries
 from aegis.decision import GlobalSelectionPolicy
-from aegis.models import BundleMetadata, EstimatorSpec, LinearHead, ModelBundle, DeterministicModelRuntime
+from aegis.models import (
+    BundleMetadata, CalibrationBlock, CalibrationMethod, CalibratorSpec,
+    DeterministicModelRuntime, EstimatorSpec, LinearHead, ModelBundle, QuantileHeadSpec,
+)
 from aegis.features import FEATURE_HASH, FEATURE_SCHEMA_VERSION, FrozenNormalizer
 
 
@@ -54,8 +57,12 @@ def scenario_bundle_factory():
             model_id=f"fixture-{side.lower()}-h12", horizon_bars=12,
             long=LinearHead(long_bias, empty), short=LinearHead(short_bias, empty), neutral=LinearHead(neutral_bias, empty),
             expected_return=LinearHead(0.03 if side == "LONG" else -0.03 if side == "SHORT" else 0.0, empty),
-            tail_risk=LinearHead(-9.0, empty), qmae_q90=LinearHead(0.0, empty), quality=LinearHead(9.0, empty),
+            tail_risk=LinearHead(-9.0, empty), qmae_mean=LinearHead(0.0, empty), quality=LinearHead(9.0, empty),
+            qmae_quantiles=QuantileHeadSpec(
+                LinearHead(0.0, empty), LinearHead(0.0, empty), 0.0, 0.90,
+            ),
         )
+        identity = CalibratorSpec(CalibrationMethod.IDENTITY, 0.01, 0.01, 100)
         return ModelBundle(
             bundle_id=f"fixture-{side.lower()}-bundle", schema_version="aegis-model-bundle-v1",
             feature_schema_version=FEATURE_SCHEMA_VERSION, feature_hash=FEATURE_HASH,
@@ -71,6 +78,9 @@ def scenario_bundle_factory():
                     "qmae_max_fraction": 0.03,
                     "eqm_min_score": 0.0,
                 },
+            ),
+            calibration=CalibrationBlock(
+                "aegis-calibration-v1", True, identity, identity, identity, identity, identity,
             ),
         )
     return build

@@ -34,10 +34,8 @@ def _future(start, *, rising: bool, bars: int = 12, adverse_fraction: float = 0.
     return tuple(candles)
 
 
-@pytest.mark.parametrize("side,rising", [("LONG", True), ("SHORT", False)])
-def test_shadow_resolves_long_and_short_without_execution(
-    side, rising, snapshot_factory, scenario_runtime_factory,
-) -> None:
+def test_shadow_resolves_short_without_execution(snapshot_factory, scenario_runtime_factory) -> None:
+    side, rising = "SHORT", False
     snapshot = snapshot_factory()
     runtime = scenario_runtime_factory(side, snapshot)
     response = runtime.evaluate(_request(runtime, snapshot, side.lower()))
@@ -60,14 +58,15 @@ def test_shadow_scientific_invalidation_is_applied_without_an_order(
     snapshot_factory, scenario_runtime_factory,
 ) -> None:
     snapshot = snapshot_factory()
-    runtime = scenario_runtime_factory("LONG", snapshot)
+    runtime = scenario_runtime_factory("SHORT", snapshot)
     response = runtime.evaluate(_request(runtime, snapshot, "invalidated"))
     selected = response.selected[0]
-    stop = selected.risk_intent.stop_distance_fraction
-    assert stop is not None
+    stop = 0.01
+    selected = replace(selected, risk_intent=replace(selected.risk_intent, stop_distance_fraction=stop))
+    response = replace(response, selected=(selected,))
     outcome = resolve_shadow_outcome(
         response,
-        {selected.symbol: _future(response.generated_at, rising=True, adverse_fraction=stop + 0.01)},
+        {selected.symbol: _future(response.generated_at, rising=False, adverse_fraction=stop + 0.01)},
         friction_fraction=0.0014,
     )
     assert outcome is not None
@@ -134,7 +133,7 @@ def test_shadow_replay_is_chronological_deterministic_and_records_once(
 
 def test_shadow_replay_rejects_duplicate_cycles(snapshot_factory, scenario_runtime_factory) -> None:
     snapshot = snapshot_factory()
-    runtime = scenario_runtime_factory("LONG", snapshot)
+    runtime = scenario_runtime_factory("SHORT", snapshot)
     runtime.clock = MutableUtcClock(snapshot.closed_at)
     request = _request(runtime, snapshot, "duplicate")
     case = ShadowReplayCase(request, {})
