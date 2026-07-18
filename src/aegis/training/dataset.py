@@ -291,7 +291,8 @@ def load_and_build_e2_hourly_dataset(
     if last_anchor >= semi_blind:
         raise ValueError("SEMI_BLIND_ACCESS_FORBIDDEN_PRE_LOCKBOX")
     start = first_anchor - timedelta(minutes=5 * int(sampling["history_bars"]))
-    end = last_anchor + timedelta(minutes=5 * int(sampling["horizon_bars"]) + 1)
+    # Half-open load: the final H12 bar opens at t+55m, so t+60m is sufficient.
+    end = last_anchor + timedelta(minutes=5 * int(sampling["horizon_bars"]))
     if end > semi_blind:
         raise ValueError("SEMI_BLIND_ACCESS_FORBIDDEN_PRE_LOCKBOX")
     audit = source.audit(verify_content=True)

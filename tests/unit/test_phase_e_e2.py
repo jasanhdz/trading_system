@@ -171,6 +171,21 @@ def test_prelockbox_loader_rejects_any_semiblind_boundary_request() -> None:
         load_and_build_e2_hourly_dataset(object(), payload)  # type: ignore[arg-type]
 
 
+def test_last_dev_h12_load_ends_exactly_at_semiblind_boundary() -> None:
+    payload = yaml.safe_load(E2.read_text())
+
+    class BoundarySource:
+        def audit(self, *, verify_content: bool):
+            return type("Audit", (), {"finality_verified": True})()
+
+        def load(self, *, start: datetime, end: datetime):
+            assert end == datetime(2026, 4, 27, tzinfo=timezone.utc)
+            raise RuntimeError("boundary verified")
+
+    with pytest.raises(RuntimeError, match="boundary verified"):
+        load_and_build_e2_hourly_dataset(BoundarySource(), payload)  # type: ignore[arg-type]
+
+
 def test_shared_authority_creation_does_not_consume_and_is_compatible(tmp_path: Path) -> None:
     authority = SharedLockboxAuthority(
         tmp_path / "authority.json", "window", "2026-04-27T00:00:00Z",
