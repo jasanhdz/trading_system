@@ -1,0 +1,22 @@
+{
+  "approved": false,
+  "architect_authority": "AEGIS_PRINCIPAL_ARCHITECT_BINDING_DECISION",
+  "anchors": 15680,
+  "bundle_status": "EXPERIMENTAL_NONCOMPARABLE",
+  "classification": "VALID_DIAGNOSTIC_NONCOMPARABLE",
+  "classification_date_utc": "2026-07-18T00:00:00Z",
+  "commit": "536fff2",
+  "determinism": "two byte-identical validation-runs",
+  "expectancy": -0.0014500047,
+  "experiment_id": "aegis-short-candidate-e2",
+  "lockbox": "NOT_CONSUMED",
+  "owner_authority": "Jasan Hernandez",
+  "preregistration_status": "SUPERSEDED_UNDERSPECIFIED_NEVER_CONSUMED_LOCKBOX",
+  "reason": "protocol underspecified in exact hyperparameters, EQM fold population, TRRM veto semantics and ECON baseline enumeration",
+  "result": {"profit_factor": 0.5383978},
+  "rows": 172480,
+  "run_id": "b49f1ec7c71fcf70",
+  "schema_version": "aegis-experiment-governance-v1",
+  "threshold_draft_status": "RETAINED_FOR_AUDIT_ONLY",
+  "trained": true
+}

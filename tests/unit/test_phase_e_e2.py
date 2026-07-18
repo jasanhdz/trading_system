@@ -75,12 +75,14 @@ def test_e1_is_auditable_but_not_productively_executable() -> None:
         ProductionScientificBackend().build_dataset(yaml.safe_load(E1.read_text()), RunMode.VALIDATION_RUN)
 
 
-def test_e2_supersedes_e1_and_is_stably_executable() -> None:
-    payload, first = load_and_validate_preregistration(E2, audit_source=False, require_executable=True)
-    _, second = load_and_validate_preregistration(E2, audit_source=False, require_executable=True)
+def test_e2_supersedes_e1_and_is_stably_auditable_but_not_executable() -> None:
+    payload, first = load_and_validate_preregistration(E2, audit_source=False)
+    _, second = load_and_validate_preregistration(E2, audit_source=False)
     assert payload["supersedes"]["experiment_id"] == "aegis-short-candidate-e1"
-    assert first.protocol_version == 2 and first.executable
+    assert first.protocol_version == 2 and not first.executable
     assert first.content_hash == second.content_hash
+    with pytest.raises(PreregistrationError, match="PROTOCOL_VERSION_NOT_EXECUTABLE"):
+        load_and_validate_preregistration(E2, audit_source=False, require_executable=True)
 
 
 @pytest.mark.parametrize("block", ["source", "models", "econ", "promotion", "publication"])

@@ -19,6 +19,8 @@ from ..utils import Sha256HashProvider, canonical_json, sha256_file
 
 E1_PHYSICAL_SHA256 = "2604df3461ca891db05b6d877ab2e6373eac8fc7b7412d08571b2644f351ae39"
 E1_CANONICAL_HASH = "ef2c4c236fb09d83886817a296a4aa39d337d7e4fbcbbcbc54e2d3e769c67e78"
+E2_PHYSICAL_SHA256 = "759a7c87d2afaec2f6ede7b6451154a287ea5527e00036e040beb26c32732b8e"
+E2_CANONICAL_HASH = "dad3d088f41d8aec7fd52f79a0dac8d53c87d6e201c22f7098220991ca8af308"
 SEMI_BLIND_BOUNDARY = "2026-04-27T00:00:00Z"
 
 
@@ -55,7 +57,7 @@ class PreregistrationAudit:
 
 
 def _validate_common(payload: Mapping[str, Any]) -> None:
-    if payload.get("status") != "PRE_REGISTERED_NOT_EXECUTED" or payload.get("side") != "SHORT":
+    if payload.get("status") not in {"PRE_REGISTERED_NOT_EXECUTED", "PRE_REGISTERED_UNEXECUTED"} or payload.get("side") != "SHORT":
         raise PreregistrationError("experiment status or side is not eligible")
     if payload.get("allowed_sides") != ["SHORT"] or payload.get("timeframe") != "5m":
         raise PreregistrationError("experiment side/timeframe contract mismatch")
@@ -254,6 +256,75 @@ def _validate_v2(path: Path, payload: Mapping[str, Any]) -> tuple[int, int]:
     return len(payload["fold_protocol"]["folds"]), 1
 
 
+def _validate_v3(path: Path, payload: Mapping[str, Any]) -> tuple[int, int]:
+    if int(payload.get("protocol_version", 0)) != 3 or payload.get("experiment_id") != "aegis-short-candidate-e3":
+        raise PreregistrationError("PROTOCOL_VERSION_NOT_EXECUTABLE")
+    parent_path = path.with_name("aegis_short_candidate_e2.yaml")
+    if not parent_path.is_file() or sha256_file(parent_path) != E2_PHYSICAL_SHA256:
+        raise PreregistrationError("PREREGISTRATION_INHERITANCE_MISMATCH: E2 physical hash")
+    parent = yaml.safe_load(parent_path.read_text(encoding="utf-8"))
+    if Sha256HashProvider().digest_value(parent) != E2_CANONICAL_HASH:
+        raise PreregistrationError("PREREGISTRATION_INHERITANCE_MISMATCH: E2 canonical hash")
+    supersedes = payload.get("supersedes", {})
+    expected = {
+        "experiment_id": "aegis-short-candidate-e2",
+        "parent_physical_sha256": E2_PHYSICAL_SHA256,
+        "parent_canonical_hash": E2_CANONICAL_HASH,
+        "parent_status": "SUPERSEDED_UNDERSPECIFIED_NEVER_CONSUMED_LOCKBOX",
+        "no_semi_blind_inspection": True,
+        "shared_lockbox_authority": True,
+        "additional_lockbox_budget": 0,
+    }
+    if any(supersedes.get(key) != value for key, value in expected.items()):
+        raise PreregistrationError("PREREGISTRATION_INHERITANCE_MISMATCH: E3 supersedes")
+    validation_run = supersedes.get("parent_validation_run", {})
+    if validation_run != {
+        "run_id": "b49f1ec7c71fcf70",
+        "classification": "VALID_DIAGNOSTIC_NONCOMPARABLE",
+        "threshold_draft_status": "RETAINED_FOR_AUDIT_ONLY",
+    }:
+        raise PreregistrationError("PREREGISTRATION_INHERITANCE_MISMATCH: E2 classification")
+    hasher = Sha256HashProvider()
+    for key in ("source", "sampling", "fold_protocol", "refit", "threshold_derivation", "econ", "promotion", "publication"):
+        if hasher.digest_value(payload.get(key)) != hasher.digest_value(parent.get(key)):
+            raise PreregistrationError(f"PREREGISTRATION_INHERITANCE_MISMATCH: {key}")
+    for key in ("side", "allowed_sides", "timeframe", "universe_id", "symbol_set_hash", "feature_schema_version", "feature_hash", "label_schema_version", "protocol"):
+        if hasher.digest_value(payload.get(key)) != hasher.digest_value(parent.get(key)):
+            raise PreregistrationError(f"PREREGISTRATION_INHERITANCE_MISMATCH: {key}")
+    _validate_sampling(payload)
+    _validate_fold_protocol(payload)
+    competition = payload.get("models", {}).get("competition_protocol", {})
+    competition_path = (path.parents[2] / str(competition.get("path", ""))).resolve()
+    if not competition_path.is_file() or sha256_file(competition_path) != competition.get("physical_sha256"):
+        raise PreregistrationError("E3 competition protocol hash mismatch")
+    if payload.get("calibration", {}).get("family_selection_rule") != "config/scientific_competition_v2.yaml":
+        raise PreregistrationError("E3 calibration protocol mismatch")
+    if payload.get("scoring", {}).get("selection_rule") != "config/scientific_competition_v2.yaml":
+        raise PreregistrationError("E3 scoring protocol mismatch")
+    if payload.get("eqm_population") != {
+        "fold_train": "TRRM_VETO_SURVIVORS_OF_FOLD_TRAIN",
+        "fold_scoring": "TRRM_VETO_SURVIVORS_OF_FOLD_SCORING",
+        "refit": "TRRM_VETO_SURVIVORS_OF_FINAL_TRAIN",
+    }:
+        raise PreregistrationError("E3 EQM population contract mismatch")
+    veto = payload.get("trrm_veto", {})
+    if veto.get("mechanics") != "RANK_BASED_BUDGET" or float(veto.get("veto_budget", -1)) != 0.30:
+        raise PreregistrationError("E3 TRRM veto contract mismatch")
+    if veto.get("raw_probability_0_70_placeholder") != "FORBIDDEN":
+        raise PreregistrationError("E3 raw probability veto is forbidden")
+    if payload.get("econ_baselines") != {
+        "config_source": "config/scientific_competition_v2.yaml",
+        "equal_budget_required": True,
+        "equal_costs_required": True,
+        "fixed_seed_required": True,
+    }:
+        raise PreregistrationError("E3 ECON baseline contract mismatch")
+    lockbox = payload.get("lockbox", {})
+    if lockbox.get("shared_with") != ["aegis-short-candidate-e1", "aegis-short-candidate-e2", "aegis-short-candidate-e3"] or int(lockbox.get("additional_lockbox_budget", -1)) != 0:
+        raise PreregistrationError("E3 shared lockbox contract mismatch")
+    return len(payload["fold_protocol"]["folds"]), 1
+
+
 def load_and_validate_preregistration(
     path: Path, *, audit_source: bool = True, require_executable: bool = False,
 ) -> tuple[Mapping[str, Any], PreregistrationAudit]:
@@ -261,7 +332,7 @@ def load_and_validate_preregistration(
     if not isinstance(payload, Mapping):
         raise PreregistrationError("unsupported experiment preregistration")
     schema = payload.get("schema_version")
-    if schema not in {"aegis-candidate-preregistration-v1", "aegis-candidate-preregistration-v2"}:
+    if schema not in {"aegis-candidate-preregistration-v1", "aegis-candidate-preregistration-v2", "aegis-candidate-preregistration-v3"}:
         raise PreregistrationError("unsupported experiment preregistration")
     _validate_common(payload)
     if payload["protocol"].get("threshold_value") is not None:
@@ -271,9 +342,14 @@ def load_and_validate_preregistration(
         protocol_version, executable = 1, False
         if require_executable:
             raise PreregistrationError("PROTOCOL_VERSION_NOT_EXECUTABLE")
-    else:
+    elif schema.endswith("v2"):
         fold_count, lockbox_queries = _validate_v2(path.resolve(), payload)
-        protocol_version, executable = 2, True
+        protocol_version, executable = 2, False
+        if require_executable:
+            raise PreregistrationError("PROTOCOL_VERSION_NOT_EXECUTABLE")
+    else:
+        fold_count, lockbox_queries = _validate_v3(path.resolve(), payload)
+        protocol_version, executable = 3, True
     if audit_source:
         CanonicalSeriesSource(
             Path(payload["source"]["path"]), DataPurpose.TRAINING,
