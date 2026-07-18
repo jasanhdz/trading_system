@@ -1,0 +1,34 @@
+{
+  "schema_version": "aegis-c4-governance-manifest-v1",
+  "status": "C4_IMPLEMENTED_TECHNICALLY_VERIFIED",
+  "implementation_commits": {
+    "c4": "108c7a3",
+    "econ_baselines": "d9d58b9edb12d92f305171504c90c52b44735950"
+  },
+  "frozen_contracts": {
+    "e1_physical_sha256": "2604df3461ca891db05b6d877ab2e6373eac8fc7b7412d08571b2644f351ae39",
+    "e2_physical_sha256": "759a7c87d2afaec2f6ede7b6451154a287ea5527e00036e040beb26c32732b8e",
+    "e3_physical_sha256": "281e27f93f8be0f9c4fbe78673d55f1a4f3391aa421c3fcaf90823113dc81e62",
+    "competition_v1_physical_sha256": "6eb6e89b42ec518ddc7b277cec1ec7df22dd5f5b2fdbb78341d9885aaf27988c",
+    "competition_v2_physical_sha256": "70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79"
+  },
+  "artifacts": {
+    "baseline_contract.yaml": "7c08c6715cbeea4c7360242cfe7942fc2b690a06bb32be8c82e2227cc4639e2b",
+    "parameter_matrix.json": "178d7dba3474a493ea7ab820bea980a679495c9aeb7ed32475b0c6ae03f7ffd9",
+    "implementation_report.md": "3da986ca57252e30a19a08e8825fbdd8c540e46d9e0d15d3fcf7decf148027d7",
+    "test_evidence.json": "4fbaff03a291316312ca32372986fca6be75638f3092270f4d5167e1d0fae667",
+    "stage_1b_preregistration.yaml": "3fd8b6f59aaf0ffe538a5cc66b4cffc2223a7b78ebd03b1243b8bcbf16f1431f",
+    "stage_4b_preregistration.yaml": "330a3385109547893ed11fbb0d9c0079fa519df0db251ece338c1c050bc0865e",
+    "owner_decision_o1.json": "7d1158a37a3eec64ff93f68523e01f7627f8d449527e936b9d3d2e37ee67536a",
+    "stage_5b_decision.json": "005a694d7fe5b9e2235575c3203f4bf7fe930815b8ec3687efd1deed7768a721"
+  },
+  "execution": {
+    "stage_1b": "NOT_EXECUTED",
+    "stage_4b": "NOT_EXECUTED",
+    "stage_5b": "NOT_EXECUTED",
+    "e3_validation_run": "NOT_EXECUTED",
+    "full_run": "NOT_EXECUTED",
+    "lockbox": "NOT_ACCESSED",
+    "semi_blind": "NOT_ACCESSED"
+  }
+}

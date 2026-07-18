@@ -1,0 +1,36 @@
+schema_version: aegis-causal-ablation-preregistration-v1
+experiment_id: aegis-gen2-stage-4b-selection-decomposition-v1
+status: PRE_REGISTERED_NOT_EXECUTED
+base: HISTORICAL_STAGE_0
+scope: {dev_only: true, dev_end: "2026-04-26T23:59:59Z", lockbox: FORBIDDEN, semi_blind: FORBIDDEN}
+frozen_chain: [scores, veto, threshold, ranking, dedup, budget]
+frozen_axes: [historical_sampling, historical_114_features, historical_models, historical_folds, historical_eqm_population, historical_costs, historical_entry_exit]
+variants:
+  - id: STAGE_4B_A
+    changed_axis: veto
+    veto: {mechanics: ABSOLUTE_CALIBRATED_PROBABILITY, maximum: 0.70, source: E2_EXECUTED_RUNTIME}
+    threshold: NONE
+    ranking: HISTORICAL_SCORE_DESC
+    selection: HISTORICAL_POOLED_TOP_DECILE
+    dedup_minutes: 30
+  - id: STAGE_4B_B
+    changed_axis: selection
+    veto: {mechanics: RANK_BASED_BUDGET, veto_budget: 0.30}
+    threshold: NONE
+    ranking: SCORE_DESC_SYMBOL_ASC
+    selection: TOP_1_PER_CYCLE
+    dedup_minutes: 30
+  - id: STAGE_4B_C
+    changed_axis: threshold
+    veto: {mechanics: RANK_BASED_BUDGET, veto_budget: 0.30}
+    threshold:
+      value: 4.047730415717134e-05
+      source: E2_VALIDATION_DIAGNOSTIC_RETAINED_FOR_AUDIT_ONLY
+      source_econ_sha256: ec6596febe3af8b9b299d0f6eef3b8a070a2a9b15d50ea4eedafed23e3febb50
+      application_order: AFTER_VETO_BEFORE_RANKING
+    ranking: HISTORICAL_SCORE_DESC
+    selection: HISTORICAL_POOLED_TOP_DECILE
+    dedup_minutes: 30
+closed_variant_ids: [STAGE_4B_A, STAGE_4B_B, STAGE_4B_C]
+additional_variants: FORBIDDEN
+execution_authorized: false

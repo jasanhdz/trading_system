@@ -1,0 +1,15 @@
+{
+  "schema_version": "aegis-governance-option-v1",
+  "decision_id": "STAGE_5B",
+  "status": "OPTIONAL_GOVERNANCE_EVIDENCE",
+  "owner_decision_required": true,
+  "default_execution": "FORBIDDEN",
+  "c4_justification": "EQM survivor populations are corrected for historical fidelity and the frozen E3 contract, not as a causal conclusion from Stage 5.",
+  "optional_design": {
+    "changed_axis": "EQM_FINAL_REFIT_POPULATION",
+    "alternative": "FULL_FINAL_REFIT_POPULATION",
+    "frozen_axes": "ALL_OTHER_HISTORICAL_STAGE_0_AXES",
+    "objective": "Measure whether the fold-population change propagates to final runtime."
+  },
+  "executed": false
+}

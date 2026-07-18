@@ -1,0 +1,28 @@
+{
+  "schema_version": "aegis-c4-parameter-matrix-v1",
+  "source_sha256": "70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79",
+  "before": {
+    "trrm_random_forest": {"n_estimators": 80, "max_depth": 8, "min_samples_leaf": 8, "class_weight": null},
+    "trrm_hgb": {"max_iter": 80, "learning_rate": 0.05, "max_depth": 5, "min_samples_leaf": 10},
+    "trrm_logistic": {"C": 1.0, "max_iter": 1000},
+    "eqm_extra_trees": {"n_estimators": 80, "max_depth": 8, "min_samples_leaf": 5},
+    "eqm_hgb": {"max_iter": 80, "learning_rate": 0.05, "max_depth": 5, "min_samples_leaf": 10},
+    "eqm_random_forest_clean": {"n_estimators": 80, "max_depth": 8, "min_samples_leaf": 8, "class_weight": null},
+    "qmae_hgb": {"max_iter": 80, "learning_rate": 0.05, "max_depth": 4, "min_samples_leaf": 10},
+    "eqm_fold_population": "FULL_FOLD_POPULATION",
+    "trrm_veto": "RAW_PROBABILITY_LE_0.70",
+    "econ_baselines": "FULL_STACK_ONLY"
+  },
+  "after": {
+    "trrm_random_forest": {"n_estimators": 300, "max_depth": 12, "min_samples_leaf": 20, "class_weight": "balanced_subsample"},
+    "trrm_hgb": {"max_iter": 300, "learning_rate": 0.06, "max_leaf_nodes": 31, "min_samples_leaf": 40, "l2_regularization": 1.0},
+    "trrm_logistic": {"C": 1.0, "max_iter": 1000},
+    "eqm_extra_trees": {"n_estimators": 300, "max_depth": 14, "min_samples_leaf": 25},
+    "eqm_hgb": {"max_iter": 250, "learning_rate": 0.06, "max_leaf_nodes": 31, "min_samples_leaf": 40, "l2_regularization": 1.0},
+    "eqm_random_forest_clean": {"n_estimators": 200, "max_depth": 12, "min_samples_leaf": 25, "class_weight": "balanced_subsample"},
+    "qmae_hgb": {"max_iter": 300, "learning_rate": 0.06, "max_leaf_nodes": 31, "min_samples_leaf": 40, "l2_regularization": 1.0},
+    "eqm_fold_population": "TRRM_RANK_SURVIVORS_TRAIN_AND_SCORING",
+    "trrm_veto": "RANK_BASED_BUDGET_0.30",
+    "econ_baselines": "SEVEN_FROZEN_EQUAL_BUDGET_BASELINES"
+  }
+}

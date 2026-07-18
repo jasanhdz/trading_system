@@ -1,0 +1,26 @@
+{
+  "schema_version": "aegis-c4-test-evidence-v1",
+  "interpreter": "/home/jasan/.venv_rocm62/bin/python",
+  "python_version": "3.12.3",
+  "targeted": {
+    "tests": 77,
+    "passed": 77,
+    "failed": 0,
+    "duration_seconds": 23.62
+  },
+  "full_collection": {
+    "collected": 193,
+    "execution": "TWO_DISJOINT_EXHAUSTIVE_PARTITIONS",
+    "partition_a": {"tests": 97, "passed": 97, "failed": 0, "duration_seconds": 7.69},
+    "partition_b": {"tests": 96, "passed": 96, "failed": 0, "duration_seconds": 26.40},
+    "overlap": 0,
+    "covered": 193,
+    "monolithic_note": "The execution environment terminated the monolithic process after 75 percent without a pytest failure or final summary."
+  },
+  "compileall": "PASSED",
+  "git_diff_check": "PASSED",
+  "scientific_experiments_executed": false,
+  "e3_validation_run_executed": false,
+  "lockbox_accessed": false,
+  "semi_blind_accessed": false
+}

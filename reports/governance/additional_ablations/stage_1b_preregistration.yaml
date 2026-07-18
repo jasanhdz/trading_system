@@ -1,0 +1,57 @@
+schema_version: aegis-causal-ablation-preregistration-v1
+experiment_id: aegis-gen2-stage-1b-hourly-coherent-training-v1
+status: PRE_REGISTERED_NOT_EXECUTED
+question: Does edge remain when training and scoring coherently use E2 hourly anchors?
+owner_decision: OWNER_DECISION_O1
+scope:
+  dev_only: true
+  dev_end: "2026-04-26T23:59:59Z"
+  lockbox: FORBIDDEN
+  semi_blind: FORBIDDEN
+data:
+  sampling: E2_HOURLY_ANCHORS
+  training_sampling: E2_HOURLY_ANCHORS
+  scoring_sampling: E2_HOURLY_ANCHORS
+  anchor_population_hash: 150a1007f03e421338ac349b1294b55e8f78a2f84826d872af6f02912ddde2f6
+  anchor_count: 15680
+  row_count: 172480
+  symbols: 11
+  source_manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+features:
+  schema: HISTORICAL_114_RECOMPUTED_ON_HOURLY_POPULATION
+  source_branch: feature/wraith-phantom-v8
+  source_commit: 1841dbf94b6e4c674917f0dbbeb2fbfa46f1181d
+  source_path: aegis_alpha/tools/build_trrm_causal_feature_dataset_d.py
+  source_sha256: 3fc04e9bb0cce2266941c5edc3b26db9aa91d106546ee7d3633331fa64984b3b
+  output_hash: PENDING_EXECUTION
+models:
+  algorithms: HISTORICAL_FROZEN_FAMILIES
+  capacities: HISTORICAL_FULL
+  competition_sha256: 70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79
+  hyperparameter_search: FORBIDDEN
+folds:
+  authority: HISTORICAL_FRACTIONAL_FOLDS
+  train_validation_fractions: [[0.50, 0.60], [0.60, 0.70], [0.70, 0.80], [0.80, 0.90]]
+  calibration_fraction: 0.50
+  embargo_minutes: 120
+  minimum_trades_each_fold: 100
+training:
+  seeds: BASE_42_PLUS_FOLD_ID
+  eqm_population: TRRM_RANK_30_PERCENT_VETO_SURVIVORS
+  veto: {mechanics: RANK_BASED_BUDGET, veto_budget: 0.30}
+selection:
+  method: HISTORICAL_POOLED_TOP_DECILE
+  absolute_threshold: FORBIDDEN
+  correlation_dedup_minutes: 30
+evaluation:
+  scenario: B_BASE
+  primary_metrics: [pooled_expectancy, pooled_profit_factor, fold_expectancy, trades]
+  deterministic_runs: 2
+  numeric_tolerance: 1.0e-12
+  canonical_hashes_identical: true
+  trade_keys_identical: true
+decision:
+  EDGE_PRESENT_ON_HOURLY: pooled_expectancy > 0 AND positive_expectancy_folds >= 3
+  EDGE_ABSENT_ON_HOURLY: NOT EDGE_PRESENT_ON_HOURLY
+  post_result_sampling_redesign: FORBIDDEN
+stop_conditions: [NONDETERMINISM, TRADE_COUNT_BELOW_100_ANY_FOLD, SEMI_BLIND_ACCESS, LOCKBOX_ACCESS, HYPERPARAMETER_SEARCH]

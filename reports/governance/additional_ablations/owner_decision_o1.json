@@ -1,0 +1,9 @@
+{
+  "schema_version": "aegis-owner-decision-v1",
+  "decision_id": "OWNER_DECISION_O1",
+  "status": "ADOPTED_BEFORE_STAGE_1B_EXECUTION",
+  "experiment": "aegis-gen2-stage-1b-hourly-coherent-training-v1",
+  "rule": "If Stage 1b concludes EDGE_ABSENT_ON_HOURLY, E3 will not be redesigned post-hoc. A later explicitly authorized E3 validation-run may execute the preregistered protocol and may honestly result in REJECTED.",
+  "stage_1b_execution_authorized": false,
+  "e3_validation_authorized": false
+}
