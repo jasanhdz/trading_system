@@ -11,3 +11,13 @@ Run Stage 0 with:
 PYTHONPATH=. /home/jasan/.venv_rocm62/bin/python \
   scripts/diagnostics/compat_replay/run_compatibility_replay.py
 ```
+
+Run the closed Stage 1-5 ablations (two clean deterministic attempts each) with:
+
+```bash
+PYTHONPATH=src:. /home/jasan/.venv_rocm62/bin/python \
+  scripts/diagnostics/compat_replay/run_compatibility_replay.py --mode ablations
+```
+
+The ablation runner pins the prior E2 dev ECON report by physical hash, never
+reads beyond `2026-04-26T23:59:59Z`, and cannot acquire the shared lockbox.
