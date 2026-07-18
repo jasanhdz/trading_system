@@ -16,7 +16,7 @@ from .decision import (
 from .domain import BrainManifest, DecisionRequest, DecisionResponse, ScientificEvidenceEvent
 from .evidence import AppendOnlyEvidenceRecorder, EvidenceRecorder, InMemoryEvidenceRecorder
 from .features import DeterministicFeaturePipeline, MarketSnapshotValidator
-from .layers import LayerSettings, OrderedScientificLayers
+from .layers import LayerSettings, OrderedScientificLayers, RegimeThresholds
 from .models import DeterministicModelRuntime, load_model_bundle
 from .utils import HashProvider, Sha256HashProvider, SystemUtcClock, UtcClock
 
@@ -172,6 +172,7 @@ def build_runtime(config_dir: Path, *, clock: UtcClock | None = None, persist_ev
         trrm_max_tail_probability=config.models.trrm_max_tail_probability,
         qmae_max_fraction=config.models.qmae_max_fraction, eqm_min_score=config.models.eqm_min_score,
         direction_threshold=config.models.direction_threshold,
+        regime_thresholds=RegimeThresholds(**config.models.regime_thresholds),
     )
     return BrainRuntime(
         config=config, validator=MarketSnapshotValidator(config.universe), features=features,

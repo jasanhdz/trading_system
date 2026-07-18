@@ -24,11 +24,21 @@ class ScientificLayers(Protocol):
 
 
 @dataclass(frozen=True)
+class RegimeThresholds:
+    schema_version: str = "aegis-regime-thresholds-v1"
+    high_volatility_fraction: float = 0.035
+    expansion_ratio: float = 1.0
+    chop_ratio: float = 0.70
+    trend_fraction: float = 0.002
+
+
+@dataclass(frozen=True)
 class LayerSettings:
     trrm_max_tail_probability: float
     qmae_max_fraction: float
     eqm_min_score: float
     direction_threshold: float
+    regime_thresholds: RegimeThresholds = RegimeThresholds()
 
 
 def _mean(values: list[float]) -> float:
@@ -53,7 +63,7 @@ class OrderedScientificLayers:
                 results.append(self._unavailable(row.symbol))
                 continue
             features = dict(zip(context.features.feature_names, row.raw_values))
-            regime, regime_confidence = classify_market_regime(features)
+            regime, regime_confidence = classify_market_regime(features, self.settings.regime_thresholds)
             long_probability = _mean([item.long_probability for item in symbol_predictions])
             short_probability = _mean([item.short_probability for item in symbol_predictions])
             direction_probability = max(long_probability, short_probability)
@@ -129,19 +139,21 @@ class OrderedScientificLayers:
         )
 
 
-def classify_market_regime(features: dict[str, float]) -> tuple[Regime, float]:
+def classify_market_regime(
+    features: dict[str, float], thresholds: RegimeThresholds = RegimeThresholds(),
+) -> tuple[Regime, float]:
     """Classify market context without claiming the historical D3 data discipline."""
     trend = features["market_direction_6"]
     volatility = features["range_mean_24"]
     expansion = features["range_expansion"]
     chop = features["chop_12"]
-    if volatility > 0.035 or expansion > 1.0:
+    if volatility > thresholds.high_volatility_fraction or expansion > thresholds.expansion_ratio:
         regime = Regime.HIGH_VOLATILITY
-    elif chop > 0.70:
+    elif chop > thresholds.chop_ratio:
         regime = Regime.RANGE
-    elif trend > 0.002:
+    elif trend > thresholds.trend_fraction:
         regime = Regime.BULL_TREND
-    elif trend < -0.002:
+    elif trend < -thresholds.trend_fraction:
         regime = Regime.BEAR_TREND
     else:
         regime = Regime.TRANSITION

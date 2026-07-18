@@ -1,6 +1,6 @@
 """Technical utilities with no scientific or operational policy."""
 
-from .hashing import HashProvider, Sha256HashProvider, canonical_json, ordered_name_hash, to_primitive
+from .hashing import HashProvider, Sha256HashProvider, canonical_json, ordered_name_hash, sha256_file, to_primitive
 from .time import FixedUtcClock, MutableUtcClock, SystemUtcClock, UtcClock
 
 __all__ = [
@@ -12,5 +12,6 @@ __all__ = [
     "UtcClock",
     "canonical_json",
     "ordered_name_hash",
+    "sha256_file",
     "to_primitive",
 ]

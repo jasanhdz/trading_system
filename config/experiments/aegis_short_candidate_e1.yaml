@@ -1,0 +1,82 @@
+schema_version: aegis-candidate-preregistration-v1
+experiment_id: aegis-short-candidate-e1
+status: PRE_REGISTERED_NOT_EXECUTED
+side: SHORT
+allowed_sides: [SHORT]
+timeframe: 5m
+universe_id: aegis-operational-eleven-v1
+symbol_set_hash: f6448e67daf1d017e16cc6b331f6494e97e178824474994fff08864303ccd348
+feature_schema_version: aegis-features-v2
+feature_hash: 2dc278b4353585fe22503233187e12832cabfd67e2a2e58f4cd683ee6f3b9454
+label_schema_version: aegis-labels-short-v4
+source:
+  kind: canonical_d3_series
+  path: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+  read_only: true
+  finality_gate_required: true
+protocol:
+  seed: 20260718
+  embargo_minutes: 120
+  horizon_bars: 12
+  fold_count: 4
+  folds:
+    - {id: 1, train_start: '2024-07-11T15:20:00Z', train_end: '2025-02-28T23:59:59Z', validation_start: '2025-03-01T02:00:00Z', validation_end: '2025-05-31T23:59:59Z'}
+    - {id: 2, train_start: '2024-07-11T15:20:00Z', train_end: '2025-05-31T23:59:59Z', validation_start: '2025-06-01T02:00:00Z', validation_end: '2025-08-31T23:59:59Z'}
+    - {id: 3, train_start: '2024-07-11T15:20:00Z', train_end: '2025-08-31T23:59:59Z', validation_start: '2025-09-01T02:00:00Z', validation_end: '2025-11-30T23:59:59Z'}
+    - {id: 4, train_start: '2024-07-11T15:20:00Z', train_end: '2025-11-30T23:59:59Z', validation_start: '2025-12-01T02:00:00Z', validation_end: '2026-04-26T23:59:59Z'}
+  calibration: temporally_held_out_within_fold
+  threshold_derivation: ECON_VALIDATED_ABSOLUTE_QUANTILE
+  threshold_value: null
+models:
+  competition_protocol: config/scientific_competition_v1.yaml
+  trrm: [trrm_logistic_baseline, trrm_random_forest, trrm_hist_gradient_boosting]
+  qmae: [qmae_unconditional_baseline, qmae_hist_gradient_boosting]
+  eqm_clean: [eqm_logistic_clean_baseline, eqm_random_forest_clean, eqm_hgb_clean]
+  eqm_net_quality: [eqm_linear_net_baseline, eqm_extra_trees_net, eqm_hgb_net]
+econ:
+  entry: NEXT_BAR_OPEN
+  exit: H12_CLOSE
+  scenarios: [A_OPTIMISTIC, B_BASE, C_PESSIMISTIC]
+  bootstrap_block: ISO_WEEK
+  bootstrap_repetitions: 2000
+  bootstrap_seed: 20260718
+promotion:
+  mandatory:
+    minimum_test_signals: 100
+    minimum_positive_folds: 3
+    fold_count: 4
+    minimum_profit_factor_base: 1.05
+    minimum_net_expectancy_base: 0.0
+    minimum_worst_fold_expectancy: 0.0
+    beat_best_directional_baseline_expectancy: true
+    maximum_symbol_concentration: 0.30
+    require_no_known_leakage: true
+    require_side_separated_metrics: true
+    qmae_coverage_minimum_each_fold: 0.87
+    qmae_coverage_maximum_each_fold: 0.93
+    maximum_ece_each_fold: 0.08
+  desirable:
+    positive_pessimistic_expectancy: true
+    minimum_worst_to_mean_ratio: 0.75
+  informative: [brier, cvar_05, maximum_drawdown, turnover, per_symbol, per_regime]
+lockbox:
+  start: '2026-04-27T00:00:00Z'
+  end: '2026-07-11T09:20:00Z'
+  maximum_queries: 1
+  query_state_path: reports/experiments/aegis-short-candidate-e1/lockbox_state.json
+  forbidden_uses: [model_selection, threshold_selection, calibration_fitting, feature_engineering, econ_development]
+publication:
+  initial_state: EXPERIMENTAL
+  success_state: CANDIDATE
+  failure_state: REJECTED_EXPERIMENT
+  artifact_format: INSPECTABLE_JSON
+  pickle_allowed: false
+  automatic_promotion: false
+resources:
+  estimated_wall_time: 2-6 hours
+  estimated_peak_memory_gib: 16
+  device: CPU
+rollback:
+  strategy: retain immutable failed report and leave active configuration unchanged
+

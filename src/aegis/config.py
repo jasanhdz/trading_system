@@ -50,6 +50,7 @@ class ModelConfig:
     qmae_max_fraction: float
     eqm_min_score: float
     maximum_decision_age_seconds: int
+    regime_thresholds: Mapping[str, float]
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,9 @@ def load_brain_config(config_dir: Path) -> BrainConfig:
     if layers != EXPECTED_LAYERS:
         raise ConfigurationError("scientific layer order must be REGIME/RV2/TRRM/QMAE/EQM")
     thresholds = _mapping(models_data.get("thresholds", {}), "models.thresholds")
+    regime_data = _mapping(models_data.get("regime_thresholds", {}), "models.regime_thresholds")
+    if regime_data.get("schema_version") != "aegis-regime-thresholds-v1":
+        raise ConfigurationError("regime thresholds are not versioned")
     model_bundle_id = str(models_data.get("model_bundle_id", ""))
     if not model_bundle_id or model_bundle_id.startswith("TODO"):
         raise ConfigurationError("an explicit approved model_bundle_id is required")
@@ -139,6 +143,9 @@ def load_brain_config(config_dir: Path) -> BrainConfig:
         qmae_max_fraction=_fraction(thresholds.get("qmae_max_fraction", 0.03), "qmae_max_fraction"),
         eqm_min_score=_fraction(thresholds.get("eqm_min_score", 0.0), "eqm_min_score"),
         maximum_decision_age_seconds=int(models_data.get("maximum_decision_age_seconds", 30)),
+        regime_thresholds={key: float(regime_data[key]) for key in (
+            "high_volatility_fraction", "expansion_ratio", "chop_ratio", "trend_fraction",
+        )},
     )
     if models.maximum_decision_age_seconds <= 0:
         raise ConfigurationError("maximum_decision_age_seconds must be positive")

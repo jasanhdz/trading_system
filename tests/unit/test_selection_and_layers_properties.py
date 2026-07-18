@@ -4,7 +4,7 @@ from datetime import timedelta
 from aegis.decision import GlobalSelectionPolicy
 from aegis.domain import Candidate, CandidateSet, ModelPrediction, ModelPredictions, PortfolioContext, ReasonCode, Regime, RiskIntent, ScientificContext, TradeSide
 from aegis.features import DeterministicFeaturePipeline
-from aegis.layers import LayerSettings, OrderedScientificLayers
+from aegis.layers import LayerSettings, OrderedScientificLayers, RegimeThresholds, classify_market_regime
 
 
 def _candidate(symbol: str, score: float) -> Candidate:
@@ -60,3 +60,10 @@ def test_trrm_qmae_and_eqm_runtime_properties(snapshot_factory) -> None:
     assert high_qmae.results[0].calibrated_score == low_tail.results[0].calibrated_score
     disagreement = _apply(snapshot, features, _predictions(features, tail=0.1, qmae=0.005, disagreement=True))
     assert disagreement.results[0].calibrated_score <= low_tail.results[0].calibrated_score
+
+
+def test_regime_thresholds_are_versioned_and_configurable() -> None:
+    values = {"market_direction_6": 0.0, "range_mean_24": 0.036, "range_expansion": 0.5, "chop_12": 0.2}
+    assert classify_market_regime(values)[0] is Regime.HIGH_VOLATILITY
+    relaxed = RegimeThresholds(high_volatility_fraction=0.04)
+    assert classify_market_regime(values, relaxed)[0] is Regime.TRANSITION
