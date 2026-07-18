@@ -163,7 +163,9 @@ def build_runtime(config_dir: Path, *, clock: UtcClock | None = None, persist_ev
     bundle = load_model_bundle(bundle_path, expected_bundle_id=config.models.model_bundle_id)
     if bundle.universe_id != config.universe.universe_id or bundle.feature_schema_version != config.models.feature_schema_version:
         raise ValueError("bundle does not match configured universe or feature schema")
-    features = DeterministicFeaturePipeline(normalizer=bundle.normalizer)
+    features = DeterministicFeaturePipeline(
+        normalizer=bundle.normalizer, schema_version=bundle.feature_schema_version,
+    )
     use_persistence = config.persistence_enabled if persist_evidence is None else persist_evidence
     evidence = AppendOnlyEvidenceRecorder(hashing, config.evidence_path) if use_persistence else InMemoryEvidenceRecorder(hashing)
     settings = LayerSettings(

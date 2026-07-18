@@ -6,7 +6,7 @@ import pytest
 
 from aegis.config import load_brain_config
 from aegis.domain import ScientificContext, ValidationStatus
-from aegis.features import DeterministicFeaturePipeline, FEATURE_HASH, FEATURE_NAMES, MarketSnapshotValidator, SnapshotValidationError
+from aegis.features import DeterministicFeaturePipeline, feature_contract, MarketSnapshotValidator, SnapshotValidationError
 from aegis.layers import LayerSettings, OrderedScientificLayers
 from aegis.models import DeterministicModelRuntime, ModelBundleError, load_model_bundle
 
@@ -14,7 +14,7 @@ from aegis.models import DeterministicModelRuntime, ModelBundleError, load_model
 def _components():
     config = load_brain_config(Path(__file__).parents[2] / "config")
     bundle = load_model_bundle(config.models.artifact_registry / f"{config.models.model_bundle_id}.json")
-    features = DeterministicFeaturePipeline(bundle.normalizer)
+    features = DeterministicFeaturePipeline(bundle.normalizer, bundle.feature_schema_version)
     models = DeterministicModelRuntime(bundle, config.models.direction_threshold)
     layers = OrderedScientificLayers(LayerSettings(
         config.models.trrm_max_tail_probability, config.models.qmae_max_fraction,
@@ -31,8 +31,9 @@ def test_snapshot_validation_features_and_models_are_finite_and_deterministic(sn
     first = pipeline.transform(snapshot)
     second = pipeline.transform(snapshot)
     assert first == second
-    assert first.feature_names == FEATURE_NAMES and first.feature_hash == FEATURE_HASH
-    assert len(first.rows) == 11 and all(len(row.raw_values) == 39 for row in first.rows)
+    expected_names, expected_hash = feature_contract(config.models.feature_schema_version)
+    assert first.feature_names == expected_names and first.feature_hash == expected_hash
+    assert len(first.rows) == 11 and all(len(row.raw_values) == len(expected_names) for row in first.rows)
     predictions = models.predict(first)
     assert len(predictions.predictions) == 22
 

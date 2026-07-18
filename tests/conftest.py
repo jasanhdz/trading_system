@@ -9,7 +9,7 @@ from aegis.models import (
     BundleMetadata, CalibrationBlock, CalibrationMethod, CalibratorSpec,
     DeterministicModelRuntime, EstimatorSpec, LinearHead, ModelBundle, QuantileHeadSpec,
 )
-from aegis.features import FEATURE_HASH, FEATURE_SCHEMA_VERSION, FrozenNormalizer
+from aegis.features import DeterministicFeaturePipeline, FEATURE_HASH, FEATURE_SCHEMA_VERSION, FrozenNormalizer
 
 
 @pytest.fixture
@@ -95,6 +95,7 @@ def scenario_runtime_factory(scenario_bundle_factory):
     def build(side: str, snapshot: MarketSnapshot):
         runtime = build_runtime(Path(__file__).parents[1] / "config", clock=FixedUtcClock(snapshot.closed_at))
         runtime.models = DeterministicModelRuntime(scenario_bundle_factory(side), 0.50)
+        runtime.features = DeterministicFeaturePipeline(schema_version=FEATURE_SCHEMA_VERSION)
         runtime.config = __import__("dataclasses").replace(
             runtime.config,
             models=__import__("dataclasses").replace(runtime.config.models, model_bundle_id=f"fixture-{side.lower()}-bundle"),

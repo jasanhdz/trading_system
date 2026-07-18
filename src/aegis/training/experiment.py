@@ -29,6 +29,7 @@ from ..layers import LayerSettings, OrderedScientificLayers, classify_market_reg
 from ..models import DeterministicModelRuntime, ModelBundle, model_bundle_from_payload
 from ..utils import Sha256HashProvider, canonical_json
 from .dataset import TrainingDataset, TrainingRow, TrainingTarget, walk_forward_splits
+from .labels import ShortLabelConfig, build_short_path_label
 from .train import DeterministicLinearTrainer, ModelArtifact
 
 
@@ -178,11 +179,34 @@ class LocalCandleDataset:
             batch = pipeline.transform(snapshot)
             for feature_row in batch.rows:
                 history, future = selected[feature_row.symbol]
-                entry = history[-1].close
-                forward_return = future[-1].close / entry - 1.0
-                direction = 1.0 if forward_return > float(config["protocol"]["friction_fraction"]) else -1.0 if forward_return < -float(config["protocol"]["friction_fraction"]) else 0.0
-                adverse = (entry - min(bar.low for bar in future)) / entry if direction >= 0 else (max(bar.high for bar in future) - entry) / entry
-                target = TrainingTarget(direction, forward_return, float(adverse >= 0.03), max(0.0, adverse), float(direction != 0 and adverse < 0.03))
+                signal_bar = history[-1]
+                signal = Candle(
+                    signal_bar.timestamp, signal_bar.timestamp + expected_step, signal_bar.open,
+                    signal_bar.high, signal_bar.low, signal_bar.close, signal_bar.volume, True, "CANONICAL_D3",
+                )
+                future_candles = tuple(
+                    Candle(bar.timestamp, bar.timestamp + expected_step, bar.open, bar.high, bar.low,
+                           bar.close, bar.volume, True, "CANONICAL_D3")
+                    for bar in future
+                )
+                label = build_short_path_label(
+                    signal, future_candles,
+                    ShortLabelConfig(
+                        horizon_bars=horizon_bars,
+                        fee_bps_per_side=float(config["protocol"].get("fee_bps_per_side", 4.0)),
+                        slippage_bps_per_side=float(config["protocol"].get("slippage_bps_per_side", 1.0)),
+                        funding_bps_per_hour=float(config["protocol"].get("funding_bps_per_hour", 0.0)),
+                    ),
+                )
+                if not label.valid:
+                    raise ExperimentDataError(f"quarantined label after canonical alignment: {label.quarantine_reason}")
+                assert label.terminal_short_return is not None and label.mae_fraction is not None
+                assert label.net_quality_after_costs is not None
+                direction = -1.0 if label.terminal_short_return > float(config["protocol"]["friction_fraction"]) else 0.0
+                target = TrainingTarget(
+                    direction, -label.terminal_short_return, float(label.tail_event), label.mae_fraction,
+                    float(label.clean_entry), label.net_quality_after_costs, float(label.bad_entry), True,
+                )
                 regime, _ = classify_market_regime(dict(zip(FEATURE_NAMES, feature_row.raw_values)))
                 training_rows.append(TrainingRow(closed_at, feature_row.symbol, feature_row.raw_values, target, regime))
             accepted += 1

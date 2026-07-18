@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from .domain import FeatureBatch, ModelPrediction, ModelPredictions, TradeSide
-from .features import FEATURE_NAMES, FrozenNormalizer
+from .features import FrozenNormalizer, feature_contract
 from .utils import Sha256HashProvider
 
 
@@ -163,14 +163,14 @@ class ModelBundle:
     calibration: CalibrationBlock | None = None
 
 
-def _head(payload: Mapping[str, Any]) -> LinearHead:
+def _head(payload: Mapping[str, Any], allowed_names: tuple[str, ...]) -> LinearHead:
     weights = payload.get("weights", {})
     if not isinstance(weights, Mapping):
         raise ModelBundleError("head weights must be a mapping")
     parsed = {str(name): float(value) for name, value in weights.items()}
     if not all(math.isfinite(value) for value in parsed.values()):
         raise ModelBundleError("head weights must be finite")
-    unknown = set(parsed) - set(FEATURE_NAMES)
+    unknown = set(parsed) - set(allowed_names)
     if unknown:
         raise ModelBundleError(f"head contains unknown features: {sorted(unknown)}")
     return LinearHead(float(payload.get("bias", 0.0)), parsed)
@@ -215,14 +215,14 @@ def _calibration(payload: Any) -> CalibrationBlock | None:
         raise ModelBundleError("calibration block does not cover every probabilistic head") from exc
 
 
-def _quantiles(payload: Any) -> QuantileHeadSpec | None:
+def _quantiles(payload: Any, allowed_names: tuple[str, ...]) -> QuantileHeadSpec | None:
     if payload is None:
         return None
     if not isinstance(payload, Mapping):
         raise ModelBundleError("QMAE quantile block is invalid")
     try:
         spec = QuantileHeadSpec(
-            q50=_head(payload["q50"]), q90=_head(payload["q90"]),
+            q50=_head(payload["q50"], allowed_names), q90=_head(payload["q90"], allowed_names),
             conformal_adjustment=float(payload["conformal_adjustment"]),
             empirical_coverage=float(payload["empirical_coverage"]),
             coverage_min=float(payload.get("coverage_min", 0.87)),
@@ -254,6 +254,12 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
         raise ModelBundleError("unsupported model bundle schema")
     if payload.get("feature_hash") is None or payload.get("feature_schema_version") is None:
         raise ModelBundleError("bundle feature contract is incomplete")
+    try:
+        feature_names, expected_feature_hash = feature_contract(str(payload["feature_schema_version"]))
+    except ValueError as exc:
+        raise ModelBundleError("unsupported bundle feature schema") from exc
+    if str(payload["feature_hash"]) != expected_feature_hash:
+        raise ModelBundleError("bundle feature hash does not match its schema")
     normalizer_data = payload.get("normalizer", {})
     if not isinstance(normalizer_data, Mapping):
         raise ModelBundleError("normalizer must be a mapping")
@@ -264,10 +270,11 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
         estimators = tuple(
             EstimatorSpec(
                 model_id=str(item["model_id"]), horizon_bars=int(item["horizon_bars"]),
-                long=_head(item["heads"]["long"]), short=_head(item["heads"]["short"]),
-                neutral=_head(item["heads"]["neutral"]), expected_return=_head(item["heads"]["expected_return"]),
-                tail_risk=_head(item["heads"]["tail_risk"]), qmae_mean=_head(item["heads"]["qmae_mean"]),
-                quality=_head(item["heads"]["quality"]), qmae_quantiles=_quantiles(item.get("qmae_quantiles")),
+                long=_head(item["heads"]["long"], feature_names), short=_head(item["heads"]["short"], feature_names),
+                neutral=_head(item["heads"]["neutral"], feature_names), expected_return=_head(item["heads"]["expected_return"], feature_names),
+                tail_risk=_head(item["heads"]["tail_risk"], feature_names), qmae_mean=_head(item["heads"]["qmae_mean"], feature_names),
+                quality=_head(item["heads"]["quality"], feature_names),
+                qmae_quantiles=_quantiles(item.get("qmae_quantiles"), feature_names),
             )
             for item in payload.get("estimators", ())
         )
@@ -279,7 +286,7 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
         raise ModelBundleError("estimator horizon must be positive")
     means = {str(k): float(v) for k, v in normalizer_data.get("means", {}).items()}
     scales = {str(k): float(v) for k, v in normalizer_data.get("scales", {}).items()}
-    if set(means) != set(scales) or set(means) - set(FEATURE_NAMES):
+    if set(means) != set(scales) or set(means) - set(feature_names):
         raise ModelBundleError("normalizer means/scales are incompatible")
     if not all(math.isfinite(value) for value in (*means.values(), *scales.values())) or any(value <= 0 for value in scales.values()):
         raise ModelBundleError("normalizer values are invalid")
@@ -296,7 +303,7 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
         calibration_method=str(metadata_data["calibration_method"]), feature_count=int(metadata_data["feature_count"]),
         thresholds={str(key): float(value) for key, value in thresholds_data.items()},
     )
-    if metadata.feature_count != len(FEATURE_NAMES):
+    if metadata.feature_count != len(feature_names):
         raise ModelBundleError("bundle feature count mismatch")
     return ModelBundle(
         bundle_id=bundle_id, schema_version=str(payload["schema_version"]),

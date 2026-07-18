@@ -18,6 +18,9 @@ class TrainingTarget:
     tail_event: float
     qmae: float
     clean_quality: float
+    net_quality_after_costs: float = 0.0
+    bad_entry: float = 0.0
+    label_valid: bool = True
 
 
 @dataclass(frozen=True)
