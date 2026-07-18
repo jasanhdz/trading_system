@@ -29,6 +29,11 @@ class ShortLabelConfig:
     bad_low_mfe_fraction: float = 0.04 / 20.0
     bad_initial_adverse_3_fraction: float = 0.05 / 20.0
     tail_mae_fraction: float = 0.06 / 20.0
+    entry_rule: str = "SIGNAL_CLOSE"
+
+    def __post_init__(self) -> None:
+        if self.entry_rule not in {"SIGNAL_CLOSE", "NEXT_BAR_OPEN"}:
+            raise ValueError("unsupported SHORT label entry rule")
 
     @property
     def round_trip_cost_fraction(self) -> float:
@@ -63,7 +68,7 @@ class ShortPathLabel:
 
 
 def _quarantine(config: ShortLabelConfig, reason: str) -> ShortPathLabel:
-    return ShortPathLabel(SHORT_LABEL_SCHEMA_VERSION, False, reason, "SIGNAL_CLOSE", config.horizon_bars)
+    return ShortPathLabel(SHORT_LABEL_SCHEMA_VERSION, False, reason, config.entry_rule, config.horizon_bars)
 
 
 def _hit_before_stop(
@@ -98,7 +103,7 @@ def build_short_path_label(
         if candle.open_time != previous_close or candle.close_time - candle.open_time != interval:
             return _quarantine(settings, "FUTURE_GAP")
         previous_close = candle.close_time
-    entry = signal.close
+    entry = future[0].open if settings.entry_rule == "NEXT_BAR_OPEN" else signal.close
     favorable = [max(0.0, (entry - candle.low) / entry) for candle in future]
     adverse = [max(0.0, (candle.high - entry) / entry) for candle in future]
     mfe = max(favorable); mae = max(adverse)
@@ -129,7 +134,7 @@ def build_short_path_label(
     )
     return ShortPathLabel(
         schema_version=SHORT_LABEL_SCHEMA_VERSION, valid=True, quarantine_reason=None,
-        entry_convention="SIGNAL_CLOSE", horizon_bars=settings.horizon_bars, entry_price=entry,
+        entry_convention=settings.entry_rule, horizon_bars=settings.horizon_bars, entry_price=entry,
         mfe_fraction=mfe, mae_fraction=mae, net_quality_after_costs=net_quality,
         mfe_mae_ratio=ratio, time_to_mfe=mfe_index, time_to_mae=mae_index,
         mfe_before_mae=mfe_before_mae, clean_entry=clean, bad_entry=bad,

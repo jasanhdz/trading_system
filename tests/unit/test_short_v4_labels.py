@@ -65,3 +65,13 @@ def test_thresholds_are_historical_roe_values_converted_to_price_fraction() -> N
     assert math.isclose(config.clean_mfe_fraction * config.historical_reference_leverage, 0.08)
     assert math.isclose(config.clean_mae_fraction * config.historical_reference_leverage, 0.055)
     assert math.isclose(config.bad_mae_fraction * config.historical_reference_leverage, 0.06)
+
+
+def test_e2_label_uses_next_bar_open_without_changing_legacy_default() -> None:
+    signal, future = _path()
+    first = future[0]
+    shifted = (_candle(first.open_time, 101.0, 101.1, 99.5, 100.0), *future[1:])
+    e2 = build_short_path_label(signal, shifted, ShortLabelConfig(entry_rule="NEXT_BAR_OPEN"))
+    legacy = build_short_path_label(signal, shifted)
+    assert e2.entry_convention == "NEXT_BAR_OPEN" and e2.entry_price == 101.0
+    assert legacy.entry_convention == "SIGNAL_CLOSE" and legacy.entry_price == 100.0

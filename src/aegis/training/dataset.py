@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Mapping, Protocol, Sequence
+from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping, Protocol, Sequence
 
-from ..domain import MarketSnapshot, Regime
-from ..features import FeaturePipeline
-from ..utils import HashProvider
+from ..config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
+from ..data import CanonicalBar, CanonicalSeriesSource
+from ..domain import Candle, FeedQuality, MarketSnapshot, PortfolioContext, Regime, SymbolSeries
+from ..features import DeterministicFeaturePipeline, FEATURE_HASH, FEATURE_NAMES, FEATURE_SCHEMA_VERSION, FeaturePipeline
+from ..layers import classify_market_regime
+from ..utils import HashProvider, canonical_json
+from .labels import SHORT_LABEL_SCHEMA_VERSION, ShortLabelConfig, build_short_path_label
 
 
 @dataclass(frozen=True)
@@ -95,3 +100,203 @@ def walk_forward_splits(dataset: TrainingDataset, fold_count: int = 4, embargo: 
             raise ValueError("empty temporal fold")
         folds.append((train, validation))
     return tuple(folds)
+
+
+@dataclass(frozen=True)
+class ExplicitFoldWindow:
+    fold_id: int
+    train_start: datetime
+    train_end: datetime
+    calibration_start: datetime
+    calibration_end: datetime
+    scoring_start: datetime
+    scoring_end: datetime
+
+
+@dataclass(frozen=True)
+class ExplicitFoldSplit:
+    window: ExplicitFoldWindow
+    train: tuple[int, ...]
+    calibration: tuple[int, ...]
+    scoring: tuple[int, ...]
+
+
+def explicit_temporal_folds(
+    dataset: TrainingDataset, windows: Sequence[ExplicitFoldWindow], *, embargo: timedelta,
+) -> tuple[ExplicitFoldSplit, ...]:
+    """Single E2 fold authority with disjoint TRAIN/CALIBRATION/SCORING blocks."""
+    if embargo <= timedelta(0) or not windows:
+        raise ValueError("explicit fold embargo/windows are invalid")
+    results = []
+    previous_train_end: datetime | None = None
+    for expected_id, window in enumerate(windows, start=1):
+        values = (
+            window.train_start, window.train_end, window.calibration_start,
+            window.calibration_end, window.scoring_start, window.scoring_end,
+        )
+        if window.fold_id != expected_id or any(value.tzinfo is None for value in values):
+            raise ValueError("explicit fold identity/timestamps are invalid")
+        if not (
+            window.train_start < window.train_end
+            and window.train_end + embargo <= window.calibration_start < window.calibration_end
+            and window.calibration_end + embargo == window.scoring_start < window.scoring_end
+        ):
+            raise ValueError("explicit fold chronology or embargo is invalid")
+        if previous_train_end is not None and window.train_end <= previous_train_end:
+            raise ValueError("explicit training folds are not expanding")
+        train = tuple(index for index, row in enumerate(dataset.rows) if window.train_start <= row.timestamp <= window.train_end)
+        calibration = tuple(index for index, row in enumerate(dataset.rows) if window.calibration_start <= row.timestamp <= window.calibration_end)
+        scoring = tuple(index for index, row in enumerate(dataset.rows) if window.scoring_start <= row.timestamp <= window.scoring_end)
+        if not train or not calibration or not scoring:
+            raise ValueError("explicit temporal fold contains an empty block")
+        if set(train) & set(calibration) or set(train) & set(scoring) or set(calibration) & set(scoring):
+            raise ValueError("explicit temporal fold blocks overlap")
+        results.append(ExplicitFoldSplit(window, train, calibration, scoring))
+        previous_train_end = window.train_end
+    return tuple(results)
+
+
+@dataclass(frozen=True)
+class HourlyDatasetBuild:
+    dataset: TrainingDataset
+    expected_anchor_count: int
+    found_anchor_count: int
+    valid_cycle_count: int
+    skipped_history_cycles: int
+    quarantined_label_cycles: int
+    rows_by_symbol: Mapping[str, int]
+    first_anchor: datetime
+    last_anchor: datetime
+
+
+def _utc(value: str) -> datetime:
+    result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if result.tzinfo is None:
+        result = result.replace(tzinfo=timezone.utc)
+    return result.astimezone(timezone.utc)
+
+
+def _candle(bar: CanonicalBar) -> Candle:
+    return Candle(
+        bar.timestamp, bar.timestamp + timedelta(minutes=5), bar.open, bar.high,
+        bar.low, bar.close, bar.volume, True, "CANONICAL_D3_READ_ONLY",
+    )
+
+
+def build_e2_hourly_short_dataset(
+    series: Mapping[str, Sequence[CanonicalBar]], sampling: Mapping[str, Any], *,
+    dataset_id: str, source_finality_verified: bool,
+) -> HourlyDatasetBuild:
+    """Build causal E2 rows at exact hourly close anchors without overlap or interpolation."""
+    if not source_finality_verified:
+        raise ValueError("E2 requires final canonical candles")
+    if set(series) != set(CANONICAL_SYMBOLS) or int(sampling["coordinated_symbols_required"]) != len(CANONICAL_SYMBOLS):
+        raise ValueError("E2 requires the coordinated eleven-symbol universe")
+    history_bars = int(sampling["history_bars"]); horizon_bars = int(sampling["horizon_bars"])
+    if int(sampling["stride_bars"]) != horizon_bars or horizon_bars != 12:
+        raise ValueError("E2 H12 sampling overlap contract is invalid")
+    expected = sampling["expected_rows"]
+    first_anchor, last_anchor = _utc(expected["first_anchor_utc"]), _utc(expected["last_dev_anchor_utc"])
+    interval = timedelta(minutes=5)
+    expected_anchor_count = int((last_anchor - first_anchor).total_seconds() // 3600) + 1
+    indexes = {symbol: {bar.timestamp: index for index, bar in enumerate(rows)} for symbol, rows in series.items()}
+    anchors = []
+    for bar in series[CANONICAL_SYMBOLS[0]]:
+        close_time = bar.timestamp + interval
+        if first_anchor <= close_time <= last_anchor and close_time.minute == close_time.second == close_time.microsecond == 0:
+            anchors.append(close_time)
+    if any(right - left < timedelta(minutes=5 * horizon_bars) for left, right in zip(anchors, anchors[1:])):
+        raise ValueError("E2 H12 anchors overlap")
+    pipeline = DeterministicFeaturePipeline()
+    label_config = ShortLabelConfig(horizon_bars=horizon_bars, entry_rule="NEXT_BAR_OPEN")
+    training_rows: list[TrainingRow] = []
+    skipped_history = quarantined = valid_cycles = 0
+    rows_by_symbol = {symbol: 0 for symbol in CANONICAL_SYMBOLS}
+    hash_stream = hashlib.sha256()
+    for anchor in anchors:
+        anchor_open = anchor - interval
+        selected: dict[str, tuple[Sequence[CanonicalBar], Sequence[CanonicalBar]]] = {}
+        history_invalid = False
+        for symbol in CANONICAL_SYMBOLS:
+            position = indexes[symbol].get(anchor_open)
+            if position is None or position - history_bars + 1 < 0:
+                history_invalid = True; break
+            history = series[symbol][position - history_bars + 1:position + 1]
+            future = series[symbol][position + 1:position + horizon_bars + 1]
+            if len(history) != history_bars or any(
+                history[index].timestamp - history[index - 1].timestamp != interval
+                for index in range(1, len(history))
+            ):
+                history_invalid = True; break
+            selected[symbol] = (history, future)
+        if history_invalid or len(selected) != len(CANONICAL_SYMBOLS):
+            skipped_history += 1; continue
+        symbol_series = tuple(SymbolSeries(
+            symbol, tuple(_candle(bar) for bar in selected[symbol][0]), anchor, FeedQuality(),
+        ) for symbol in CANONICAL_SYMBOLS)
+        snapshot = MarketSnapshot(
+            anchor, "5m", CANONICAL_SYMBOL_SET_HASH, symbol_series,
+            PortfolioContext(available_slots=1, operational_time=anchor),
+        )
+        batch = pipeline.transform(snapshot)
+        pending: list[TrainingRow] = []
+        cycle_quarantined = False
+        for feature_row in batch.rows:
+            history, future = selected[feature_row.symbol]
+            label = build_short_path_label(_candle(history[-1]), tuple(_candle(bar) for bar in future), label_config)
+            if not label.valid:
+                cycle_quarantined = True; break
+            assert label.terminal_short_return is not None and label.mae_fraction is not None
+            assert label.net_quality_after_costs is not None
+            direction = -1.0 if label.terminal_short_return > label_config.round_trip_cost_fraction else 0.0
+            target = TrainingTarget(
+                direction, -label.terminal_short_return, float(label.tail_event), label.mae_fraction,
+                float(label.clean_entry), label.net_quality_after_costs, float(label.bad_entry), True,
+            )
+            regime, _ = classify_market_regime(dict(zip(FEATURE_NAMES, feature_row.raw_values)))
+            pending.append(TrainingRow(anchor, feature_row.symbol, feature_row.raw_values, target, regime))
+        if cycle_quarantined:
+            quarantined += 1; continue
+        for row in pending:
+            training_rows.append(row); rows_by_symbol[row.symbol] += 1
+            hash_stream.update(canonical_json(row).encode("utf-8")); hash_stream.update(b"\n")
+        valid_cycles += 1
+    minimum_rows = int(expected["approximate_maximum_dev_rows"] * float(expected["hard_stop_if_valid_rows_below_fraction"]))
+    if len(training_rows) < minimum_rows:
+        raise ValueError("E2 valid rows are below the pre-registered 90% hard stop")
+    dataset_hash = hashlib.sha256(
+        canonical_json({
+            "dataset_id": dataset_id, "feature_hash": FEATURE_HASH,
+            "label_schema": SHORT_LABEL_SCHEMA_VERSION, "sampling": sampling,
+            "rows_sha256": hash_stream.hexdigest(), "row_count": len(training_rows),
+        }).encode("utf-8")
+    ).hexdigest()
+    dataset = TrainingDataset(
+        dataset_id, "aegis-training-dataset-v2", FEATURE_SCHEMA_VERSION, FEATURE_HASH,
+        CANONICAL_SYMBOLS, "5m", tuple(training_rows), dataset_hash,
+    )
+    return HourlyDatasetBuild(
+        dataset, expected_anchor_count, len(anchors), valid_cycles, skipped_history,
+        quarantined, rows_by_symbol, first_anchor, last_anchor,
+    )
+
+
+def load_and_build_e2_hourly_dataset(
+    source: CanonicalSeriesSource, preregistration: Mapping[str, Any],
+) -> HourlyDatasetBuild:
+    sampling = preregistration["sampling"]
+    first_anchor = _utc(sampling["expected_rows"]["first_anchor_utc"])
+    last_anchor = _utc(sampling["expected_rows"]["last_dev_anchor_utc"])
+    semi_blind = _utc(preregistration["lockbox"]["semi_blind_start"])
+    if last_anchor >= semi_blind:
+        raise ValueError("SEMI_BLIND_ACCESS_FORBIDDEN_PRE_LOCKBOX")
+    start = first_anchor - timedelta(minutes=5 * int(sampling["history_bars"]))
+    end = last_anchor + timedelta(minutes=5 * int(sampling["horizon_bars"]) + 1)
+    if end > semi_blind:
+        raise ValueError("SEMI_BLIND_ACCESS_FORBIDDEN_PRE_LOCKBOX")
+    audit = source.audit(verify_content=True)
+    loaded = source.load(start=start, end=end)
+    return build_e2_hourly_short_dataset(
+        loaded, sampling, dataset_id=str(preregistration["experiment_id"]),
+        source_finality_verified=audit.finality_verified,
+    )
