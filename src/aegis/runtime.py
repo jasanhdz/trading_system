@@ -9,8 +9,11 @@ from time import perf_counter
 from typing import Mapping
 
 from .config import BrainConfig, load_brain_config
-from .decision import DecisionFreezer, GlobalSelectionPolicy, ScientificCandidateBuilder
-from .domain import BrainManifest, DecisionRequest, DecisionResponse, ScientificContext, ScientificEvidenceEvent
+from .decision import (
+    DecisionFreezer, GlobalSelectionPolicy, ScientificCandidateBuilder,
+    evaluate_scientific_pipeline,
+)
+from .domain import BrainManifest, DecisionRequest, DecisionResponse, ScientificEvidenceEvent
 from .evidence import AppendOnlyEvidenceRecorder, EvidenceRecorder, InMemoryEvidenceRecorder
 from .features import DeterministicFeaturePipeline, MarketSnapshotValidator
 from .layers import LayerSettings, OrderedScientificLayers
@@ -105,25 +108,29 @@ class BrainRuntime:
             now = self.clock.now()
             stage = perf_counter(); self.validator.validate(request.snapshot, now); self.metrics.latency("validation", perf_counter() - stage)
             stage = perf_counter(); features = self.features.transform(request.snapshot); self.metrics.latency("features", perf_counter() - stage)
-            stage = perf_counter(); predictions = self.models.predict(features); self.metrics.latency("models", perf_counter() - stage)
         except Exception:
             self.metrics.increment("errors")
             self.metrics.latency("total", perf_counter() - started)
             raise
-        context = ScientificContext(request.request_id, request.decision_cycle_id, request.snapshot.closed_at,
-                                    request.snapshot.timeframe, request.snapshot.portfolio, features)
-        stage = perf_counter(); layers = self.layers.apply(predictions, context); self.metrics.latency("layers", perf_counter() - stage)
-        stage = perf_counter(); candidates = self.candidate_builder.build(request.decision_cycle_id, predictions, layers); self.metrics.latency("candidates", perf_counter() - stage)
-        stage = perf_counter(); selection = self.selection_policy.select(candidates, request.snapshot.portfolio, now); self.metrics.latency("selection", perf_counter() - stage)
+        stage = perf_counter()
+        pipeline = evaluate_scientific_pipeline(
+            model_runtime=self.models, scientific_layers=self.layers,
+            candidate_builder=self.candidate_builder, selection_policy=self.selection_policy,
+            request_id=request.request_id, decision_cycle_id=request.decision_cycle_id,
+            closed_at=request.snapshot.closed_at, timeframe=request.snapshot.timeframe,
+            portfolio=request.snapshot.portfolio, features=features, now=now,
+            stage_observer=self.metrics.latency,
+        )
+        self.metrics.latency("scientific_pipeline", perf_counter() - stage)
         evidence_payload = {
             "request_hash": request_hash, "validation": "VALID",
-            "feature_batch": features, "predictions": predictions, "layers": layers,
-            "candidates": candidates, "selection": selection,
+            "feature_batch": features, "predictions": pipeline.predictions, "layers": pipeline.layers,
+            "candidates": pipeline.candidates, "selection": pipeline.selection,
         }
         evidence_hash = self.hashing.digest_value(evidence_payload)
         frozen = self.freezer.freeze(
-            selection, decision_cycle_id=request.decision_cycle_id, generated_at=request.snapshot.closed_at,
-            model_bundle_id=predictions.bundle_id, feature_hash=features.feature_hash,
+            pipeline.selection, decision_cycle_id=request.decision_cycle_id, generated_at=request.snapshot.closed_at,
+            model_bundle_id=pipeline.predictions.bundle_id, feature_hash=features.feature_hash,
             config_hash=self.config.config_hash, evidence_hash=evidence_hash,
         )
         response = DecisionResponse(

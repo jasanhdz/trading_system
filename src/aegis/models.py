@@ -101,8 +101,8 @@ def _window(value: Any, name: str) -> tuple[str, str] | None:
     return value[0], value[1]
 
 
-def load_model_bundle(path: Path, *, expected_bundle_id: str | None = None) -> ModelBundle:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id: str | None = None) -> ModelBundle:
+    """Validate an in-memory JSON bundle using the same path as registry loading."""
     if not isinstance(payload, dict):
         raise ModelBundleError("bundle must be a JSON object")
     claimed_hash = str(payload.get("content_hash", ""))
@@ -174,6 +174,11 @@ def load_model_bundle(path: Path, *, expected_bundle_id: str | None = None) -> M
         ),
         estimators=estimators, metadata=metadata,
     )
+
+
+def load_model_bundle(path: Path, *, expected_bundle_id: str | None = None) -> ModelBundle:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return model_bundle_from_payload(payload, expected_bundle_id=expected_bundle_id)
 
 
 def _sigmoid(value: float) -> float:

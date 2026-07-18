@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from time import perf_counter
+from typing import Callable, Protocol
 
 from .domain import (
-    Candidate, CandidateSet, DecisionStatus, FrozenDecision, LayerOutputs,
+    Candidate, CandidateSet, DecisionStatus, FeatureBatch, FrozenDecision, LayerOutputs,
     ModelPredictions, PortfolioContext, RankedCandidate, ReasonCode, RiskIntent,
-    SelectionResult, TradeSide,
+    ScientificContext, SelectionResult, TradeSide,
 )
+from .layers import ScientificLayers
+from .models import ModelRuntime
 from .utils import HashProvider
 
 
@@ -20,6 +23,44 @@ class CandidateBuilder(Protocol):
 
 class SelectionPolicy(Protocol):
     def select(self, candidates: CandidateSet, context: PortfolioContext, now: datetime) -> SelectionResult: ...
+
+
+@dataclass(frozen=True)
+class ScientificPipelineResult:
+    """Complete authoritative result before decision freeze and evidence persistence."""
+
+    predictions: ModelPredictions
+    layers: LayerOutputs
+    candidates: CandidateSet
+    selection: SelectionResult
+
+
+def evaluate_scientific_pipeline(
+    *, model_runtime: ModelRuntime, scientific_layers: ScientificLayers,
+    candidate_builder: CandidateBuilder, selection_policy: SelectionPolicy,
+    request_id: str, decision_cycle_id: str, closed_at: datetime, timeframe: str,
+    portfolio: PortfolioContext, features: FeatureBatch, now: datetime,
+    stage_observer: Callable[[str, float], None] | None = None,
+) -> ScientificPipelineResult:
+    """Single training/serving path for every scientific transformation and gate."""
+    stage = perf_counter()
+    predictions = model_runtime.predict(features)
+    if stage_observer is not None:
+        stage_observer("models", perf_counter() - stage)
+    context = ScientificContext(request_id, decision_cycle_id, closed_at, timeframe, portfolio, features)
+    stage = perf_counter()
+    layers = scientific_layers.apply(predictions, context)
+    if stage_observer is not None:
+        stage_observer("layers", perf_counter() - stage)
+    stage = perf_counter()
+    candidates = candidate_builder.build(decision_cycle_id, predictions, layers)
+    if stage_observer is not None:
+        stage_observer("candidates", perf_counter() - stage)
+    stage = perf_counter()
+    selection = selection_policy.select(candidates, portfolio, now)
+    if stage_observer is not None:
+        stage_observer("selection", perf_counter() - stage)
+    return ScientificPipelineResult(predictions, layers, candidates, selection)
 
 
 @dataclass(frozen=True)

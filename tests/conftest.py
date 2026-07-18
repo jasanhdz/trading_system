@@ -62,7 +62,16 @@ def scenario_bundle_factory():
             universe_id="aegis-operational-eleven-v1", symbol_set_hash=CANONICAL_SYMBOL_SET_HASH,
             timeframe="5m", approved=True, content_hash="f" * 64,
             normalizer=FrozenNormalizer(), estimators=(estimator,),
-            metadata=BundleMetadata("TEST_FIXTURE", False, None, None, None, 0, "fixture", "1", "tests", "NONE", 39, {}),
+            metadata=BundleMetadata(
+                "TEST_FIXTURE", True, None, None, None, 0, "fixture", "1", "tests", "FIXED_FIXTURE", 39,
+                {
+                    "direction": 0.50,
+                    "selection": 0.45,
+                    "trrm_max_tail_probability": 0.70,
+                    "qmae_max_fraction": 0.03,
+                    "eqm_min_score": 0.0,
+                },
+            ),
         )
     return build
 

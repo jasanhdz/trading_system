@@ -16,11 +16,19 @@ import numpy as np
 import yaml
 
 from ..config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
-from ..domain import Candle, FeedQuality, MarketSnapshot, PortfolioContext, Regime, SymbolSeries
+from ..decision import (
+    GlobalSelectionPolicy, ScientificCandidateBuilder, ScientificPipelineResult,
+    evaluate_scientific_pipeline,
+)
+from ..domain import (
+    Candle, FeedQuality, FeatureBatch, FeatureQuality, FeatureRow, MarketSnapshot,
+    PortfolioContext, Regime, SymbolSeries, TradeSide,
+)
 from ..features import DeterministicFeaturePipeline, FEATURE_HASH, FEATURE_NAMES, FEATURE_SCHEMA_VERSION, FrozenNormalizer
-from ..layers import classify_regime
+from ..layers import LayerSettings, OrderedScientificLayers, classify_regime
+from ..models import DeterministicModelRuntime, ModelBundle, model_bundle_from_payload
 from ..utils import Sha256HashProvider, canonical_json
-from .dataset import TrainingDataset, TrainingRow, TrainingTarget
+from .dataset import TrainingDataset, TrainingRow, TrainingTarget, walk_forward_splits
 from .train import DeterministicLinearTrainer, ModelArtifact
 
 
@@ -261,9 +269,45 @@ def subset(dataset: TrainingDataset, indices: Sequence[int], suffix: str, hashin
                            dataset.feature_hash, dataset.symbols, dataset.timeframe, rows, digest)
 
 
-def _prediction(artifact: ModelArtifact, row: TrainingRow) -> dict[str, float]:
-    values = np.asarray(row.features)
-    return {name: float(values @ np.asarray(weights) + artifact.intercepts[name]) for name, weights in artifact.coefficients.items()}
+def _feature_batch(rows: Sequence[TrainingRow], bundle: ModelBundle) -> FeatureBatch:
+    by_symbol = {row.symbol: row for row in rows}
+    if set(by_symbol) != set(CANONICAL_SYMBOLS):
+        raise ExperimentDataError("authoritative evaluation requires one row for every canonical symbol")
+    feature_rows = []
+    for symbol in CANONICAL_SYMBOLS:
+        raw = by_symbol[symbol].features
+        normalized = tuple(bundle.normalizer.normalize(name, value)[0] for name, value in zip(FEATURE_NAMES, raw))
+        feature_rows.append(FeatureRow(symbol, raw, normalized, FeatureQuality(0, 0, True, 60)))
+    return FeatureBatch(FEATURE_SCHEMA_VERSION, FEATURE_NAMES, FEATURE_HASH, tuple(feature_rows))
+
+
+def _layer_settings(bundle: ModelBundle, config: Mapping[str, Any]) -> LayerSettings:
+    thresholds = bundle.metadata.thresholds
+    return LayerSettings(
+        trrm_max_tail_probability=float(thresholds.get("trrm_max_tail_probability", 0.70)),
+        qmae_max_fraction=float(thresholds.get("qmae_max_fraction", 0.03)),
+        eqm_min_score=float(thresholds.get("eqm_min_score", 0.0)),
+        estimated_round_trip_cost_fraction=float(config["protocol"]["friction_fraction"]),
+        direction_threshold=float(thresholds["direction"]),
+    )
+
+
+def evaluate_authoritative_feature_batch(
+    bundle: ModelBundle, features: FeatureBatch, *, timestamp: datetime,
+    config: Mapping[str, Any], request_id: str = "experiment", decision_cycle_id: str = "experiment-cycle",
+    portfolio: PortfolioContext | None = None,
+) -> ScientificPipelineResult:
+    """Experiment adapter over the exact production model/layer/candidate/policy path."""
+    hashing = Sha256HashProvider()
+    context = portfolio or PortfolioContext(available_slots=1, operational_time=timestamp)
+    return evaluate_scientific_pipeline(
+        model_runtime=DeterministicModelRuntime(bundle, float(bundle.metadata.thresholds["direction"])),
+        scientific_layers=OrderedScientificLayers(_layer_settings(bundle, config)),
+        candidate_builder=ScientificCandidateBuilder(hashing),
+        selection_policy=GlobalSelectionPolicy(float(bundle.metadata.thresholds["selection"])),
+        request_id=request_id, decision_cycle_id=decision_cycle_id, closed_at=timestamp,
+        timeframe="5m", portfolio=context, features=features, now=timestamp,
+    )
 
 
 def _class_metrics(actual: Sequence[int], predicted: Sequence[int]) -> tuple[float, float, float]:
@@ -279,21 +323,29 @@ def _class_metrics(actual: Sequence[int], predicted: Sequence[int]) -> tuple[flo
     return sum(precision) / 3, sum(recall) / 3, sum(f1) / 3
 
 
-def evaluate_strategies(dataset: TrainingDataset, indices: Sequence[int], artifact: ModelArtifact, config: Mapping[str, Any]) -> Mapping[str, StrategyMetrics]:
+def evaluate_strategies(
+    dataset: TrainingDataset, indices: Sequence[int], bundle: ModelBundle, config: Mapping[str, Any],
+) -> Mapping[str, StrategyMetrics]:
     friction = float(config["protocol"]["friction_fraction"])
-    threshold = float(config["protocol"]["direction_threshold"])
     seed = int(config["protocol"]["seed"])
-    groups: dict[datetime, list[tuple[int, TrainingRow, dict[str, float]]]] = defaultdict(list)
+    groups: dict[datetime, list[tuple[int, TrainingRow]]] = defaultdict(list)
     for index in indices:
         row = dataset.rows[index]
-        groups[row.timestamp].append((index, row, _prediction(artifact, row)))
+        groups[row.timestamp].append((index, row))
     feature_index = {name: index for index, name in enumerate(FEATURE_NAMES)}
     strategy_predictions: dict[str, dict[int, int]] = {name: {} for name in ("no_trade", "random", "momentum", "mean_reversion", "last_candle", "model_no_layers", "model_full_layers")}
     probabilities: dict[int, float] = {}
     rng = random.Random(seed)
     for timestamp in sorted(groups):
         rows = groups[timestamp]
-        strategy_predictions["random"][rng.choice(rows)[0]] = rng.choice((-1, 1))
+        by_symbol = {row.symbol: index for index, row in rows}
+        batch = _feature_batch([row for _, row in rows], bundle)
+        authoritative = evaluate_authoritative_feature_batch(
+            bundle, batch, timestamp=timestamp, config=config,
+            request_id=f"experiment-{timestamp.isoformat()}", decision_cycle_id=f"cycle-{timestamp.isoformat()}",
+        )
+        predictions = {item.symbol: item for item in authoritative.predictions.predictions}
+        strategy_predictions["random"][rng.choice(rows)[0]] = -1
         rules = {
             "momentum": lambda row: row.features[feature_index["ret_12"]],
             "mean_reversion": lambda row: -row.features[feature_index["ret_12"]],
@@ -301,26 +353,16 @@ def evaluate_strategies(dataset: TrainingDataset, indices: Sequence[int], artifa
         }
         for name, scorer in rules.items():
             selected = max(rows, key=lambda item: (abs(scorer(item[1])), item[1].symbol))
-            value = scorer(selected[1]); strategy_predictions[name][selected[0]] = 1 if value > 0 else -1 if value < 0 else 0
-        bare = max(rows, key=lambda item: (abs(item[2]["direction"]), item[1].symbol))
-        if abs(bare[2]["direction"]) >= threshold:
-            strategy_predictions["model_no_layers"][bare[0]] = 1 if bare[2]["direction"] > 0 else -1
-        eligible = []
-        for item in rows:
-            prediction = item[2]
-            direction = prediction["direction"]
-            tail = max(0.0, min(1.0, prediction["tail_event"]))
-            qmae = max(0.0, prediction["qmae"])
-            quality = max(0.0, min(1.0, prediction["clean_quality"]))
-            side = 1 if direction > 0 else -1
-            directional_edge = side * prediction["expected_return"]
-            score = min(1.0, abs(direction)) * (1 - tail) * max(0.0, 1 - qmae / 0.03) * quality
-            if abs(direction) >= threshold and tail <= 0.70 and qmae <= 0.03 and directional_edge > friction and score >= 0.50:
-                eligible.append((score, item[1].symbol, item[0], side))
-            probabilities[item[0]] = max(0.0, min(1.0, (direction + 1.0) / 2.0))
-        if eligible:
-            _, _, index, side = max(eligible, key=lambda item: (item[0], item[1]))
-            strategy_predictions["model_full_layers"][index] = side
+            strategy_predictions[name][selected[0]] = -1
+        bare = max(predictions.values(), key=lambda item: (item.short_probability, item.symbol))
+        if bare.side is TradeSide.SHORT:
+            strategy_predictions["model_no_layers"][by_symbol[bare.symbol]] = -1
+        for index, row in rows:
+            probabilities[index] = predictions[row.symbol].short_probability
+        if authoritative.selection.selected:
+            selected = authoritative.selection.selected[0]
+            if selected.side is TradeSide.SHORT:
+                strategy_predictions["model_full_layers"][by_symbol[selected.symbol]] = -1
 
     actual_all = [int(dataset.rows[index].target.direction) for index in indices]
     results: dict[str, StrategyMetrics] = {}
@@ -343,7 +385,7 @@ def evaluate_strategies(dataset: TrainingDataset, indices: Sequence[int], artifa
             equity += value; peak = max(peak, equity); drawdown = max(drawdown, peak - equity)
         brier = None
         if name.startswith("model"):
-            brier = sum((probabilities[index] - (dataset.rows[index].target.direction + 1) / 2) ** 2 for index in indices) / len(indices)
+            brier = sum((probabilities[index] - float(dataset.rows[index].target.direction < 0)) ** 2 for index in indices) / len(indices)
         results[name] = StrategyMetrics(
             len(returns), precision, recall, f1, brier,
             sum(value > 0 for value in returns) / len(returns) if returns else 0.0,
@@ -377,7 +419,9 @@ def build_candidate_bundle(artifact: ModelArtifact, normalizer: FrozenNormalizer
                      "test_window": list(partition.test_window), "seed": int(config["protocol"]["seed"]),
                      "framework": "numpy-linear-ridge", "framework_version": np.__version__, "code_version": "phase2-working-tree",
                      "calibration_method": "HELD_OUT_VALIDATION_FIXED_THRESHOLD", "feature_count": len(FEATURE_NAMES),
-                     "thresholds": {"direction": float(config["protocol"]["direction_threshold"]), "selection": 0.50}},
+                     "thresholds": {"direction": float(config["protocol"]["direction_threshold"]), "selection": 0.50,
+                                    "trrm_max_tail_probability": 0.70, "qmae_max_fraction": 0.03,
+                                    "eqm_min_score": 0.0}},
         "normalizer": {"means": dict(normalizer.means), "scales": dict(normalizer.scales), "clip_absolute": normalizer.clip_absolute},
         "schema_version": "aegis-model-bundle-v1", "symbol_set_hash": CANONICAL_SYMBOL_SET_HASH,
         "timeframe": "5m", "universe_id": "aegis-operational-eleven-v1",
@@ -396,20 +440,21 @@ def run_experiment(config_path: Path) -> ExperimentResult:
     dataset = normalize_dataset(raw_dataset, normalizer, hashing)
     train_dataset = subset(dataset, partition.train, "train", hashing)
     artifact = DeterministicLinearTrainer(hashing, ridge=1e-4).train(train_dataset)
-    baselines = evaluate_strategies(dataset, partition.test, artifact, config)
+    provisional_payload = build_candidate_bundle(artifact, normalizer, partition, config, "EXPERIMENTAL")
+    provisional_bundle = model_bundle_from_payload(provisional_payload)
+    baselines = evaluate_strategies(raw_dataset, partition.test, provisional_bundle, config)
 
-    times = sorted({row.timestamp for row in dataset.rows})
     fold_metrics = []
-    for fold in range(int(config["protocol"]["fold_count"])):
-        train_end = times[int(len(times) * (0.50 + fold * 0.10))]
-        validation_end = times[int(len(times) * (0.60 + fold * 0.10))]
-        embargo = timedelta(minutes=int(config["protocol"]["embargo_minutes"]))
-        train_indices = tuple(index for index, row in enumerate(raw_dataset.rows) if row.timestamp <= train_end - embargo)
-        validation_indices = tuple(index for index, row in enumerate(raw_dataset.rows) if train_end < row.timestamp <= validation_end)
+    folds = walk_forward_splits(
+        raw_dataset, fold_count=int(config["protocol"]["fold_count"]),
+        embargo=timedelta(minutes=int(config["protocol"]["embargo_minutes"])),
+    )
+    for fold, (train_indices, validation_indices) in enumerate(folds):
         fold_normalizer = fit_normalizer(raw_dataset, train_indices)
         fold_dataset = normalize_dataset(raw_dataset, fold_normalizer, hashing)
         fold_artifact = DeterministicLinearTrainer(hashing, ridge=1e-4).train(subset(fold_dataset, train_indices, f"fold-{fold}", hashing))
-        metric = evaluate_strategies(fold_dataset, validation_indices, fold_artifact, config)["model_full_layers"]
+        fold_payload = build_candidate_bundle(fold_artifact, fold_normalizer, partition, config, "EXPERIMENTAL")
+        metric = evaluate_strategies(raw_dataset, validation_indices, model_bundle_from_payload(fold_payload), config)["model_full_layers"]
         fold_metrics.append({"fold": float(fold + 1), "signals": float(metric.signals), "expectancy": metric.expectancy,
                              "profit_factor": metric.profit_factor, "f1_macro": metric.f1_macro})
 
