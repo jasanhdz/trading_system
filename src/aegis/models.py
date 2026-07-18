@@ -11,6 +11,7 @@ from typing import Any, Mapping, Protocol
 
 from .domain import FeatureBatch, ModelPrediction, ModelPredictions, TradeSide
 from .features import FrozenNormalizer, feature_contract
+from .tree_models import TreeEnsemble, TreeModelError
 from .utils import Sha256HashProvider
 
 
@@ -40,6 +41,19 @@ class LinearHead:
         if not math.isfinite(result):
             raise ModelBundleError("non-finite linear head output")
         return result
+
+
+@dataclass(frozen=True)
+class TreeHead:
+    ensemble_id: str
+    output_kind: str
+
+    def __post_init__(self) -> None:
+        if not self.ensemble_id or self.output_kind not in {"RAW", "PROBABILITY"}:
+            raise ModelBundleError("tree head contract is invalid")
+
+
+PredictiveHead = LinearHead | TreeHead
 
 
 @dataclass(frozen=True)
@@ -101,8 +115,8 @@ class CalibrationBlock:
 
 @dataclass(frozen=True)
 class QuantileHeadSpec:
-    q50: LinearHead
-    q90: LinearHead
+    q50: PredictiveHead
+    q90: PredictiveHead
     conformal_adjustment: float
     empirical_coverage: float
     coverage_min: float = 0.87
@@ -120,13 +134,13 @@ class QuantileHeadSpec:
 class EstimatorSpec:
     model_id: str
     horizon_bars: int
-    long: LinearHead
-    short: LinearHead
-    neutral: LinearHead
-    expected_return: LinearHead
-    tail_risk: LinearHead
-    qmae_mean: LinearHead
-    quality: LinearHead
+    long: PredictiveHead
+    short: PredictiveHead
+    neutral: PredictiveHead
+    expected_return: PredictiveHead
+    tail_risk: PredictiveHead
+    qmae_mean: PredictiveHead
+    quality: PredictiveHead
     qmae_quantiles: QuantileHeadSpec | None = None
 
 
@@ -161,9 +175,12 @@ class ModelBundle:
     estimators: tuple[EstimatorSpec, ...]
     metadata: BundleMetadata
     calibration: CalibrationBlock | None = None
+    tree_ensembles: tuple[TreeEnsemble, ...] = ()
 
 
-def _head(payload: Mapping[str, Any], allowed_names: tuple[str, ...]) -> LinearHead:
+def _head(payload: Mapping[str, Any], allowed_names: tuple[str, ...]) -> PredictiveHead:
+    if "tree_ensemble_id" in payload:
+        return TreeHead(str(payload["tree_ensemble_id"]), str(payload.get("output_kind", "RAW")))
     weights = payload.get("weights", {})
     if not isinstance(weights, Mapping):
         raise ModelBundleError("head weights must be a mapping")
@@ -250,7 +267,7 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
     bundle_id = str(payload.get("bundle_id", ""))
     if expected_bundle_id is not None and bundle_id != expected_bundle_id:
         raise ModelBundleError("bundle ID mismatch")
-    if payload.get("schema_version") != "aegis-model-bundle-v1":
+    if payload.get("schema_version") not in {"aegis-model-bundle-v1", "aegis-model-bundle-v2"}:
         raise ModelBundleError("unsupported model bundle schema")
     if payload.get("feature_hash") is None or payload.get("feature_schema_version") is None:
         raise ModelBundleError("bundle feature contract is incomplete")
@@ -260,6 +277,12 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
         raise ModelBundleError("unsupported bundle feature schema") from exc
     if str(payload["feature_hash"]) != expected_feature_hash:
         raise ModelBundleError("bundle feature hash does not match its schema")
+    try:
+        tree_ensembles = tuple(TreeEnsemble.from_payload(item) for item in payload.get("tree_ensembles", ()))
+    except (TypeError, TreeModelError) as exc:
+        raise ModelBundleError("tree ensemble block is invalid") from exc
+    if len({item.ensemble_id for item in tree_ensembles}) != len(tree_ensembles):
+        raise ModelBundleError("tree ensemble IDs must be unique")
     normalizer_data = payload.get("normalizer", {})
     if not isinstance(normalizer_data, Mapping):
         raise ModelBundleError("normalizer must be a mapping")
@@ -284,6 +307,19 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
         raise ModelBundleError("bundle requires uniquely named estimators")
     if any(item.horizon_bars <= 0 for item in estimators):
         raise ModelBundleError("estimator horizon must be positive")
+    tree_ids = {item.ensemble_id for item in tree_ensembles}
+    referenced_tree_ids = {
+        head.ensemble_id
+        for estimator in estimators
+        for head in (
+            estimator.long, estimator.short, estimator.neutral, estimator.expected_return,
+            estimator.tail_risk, estimator.qmae_mean, estimator.quality,
+            *((estimator.qmae_quantiles.q50, estimator.qmae_quantiles.q90) if estimator.qmae_quantiles else ()),
+        )
+        if isinstance(head, TreeHead)
+    }
+    if not referenced_tree_ids <= tree_ids:
+        raise ModelBundleError("estimator references an unknown tree ensemble")
     means = {str(k): float(v) for k, v in normalizer_data.get("means", {}).items()}
     scales = {str(k): float(v) for k, v in normalizer_data.get("scales", {}).items()}
     if set(means) != set(scales) or set(means) - set(feature_names):
@@ -316,6 +352,7 @@ def model_bundle_from_payload(payload: Mapping[str, Any], *, expected_bundle_id:
             clip_absolute=float(normalizer_data.get("clip_absolute", 12.0)),
         ),
         estimators=estimators, metadata=metadata, calibration=_calibration(payload.get("calibration")),
+        tree_ensembles=tree_ensembles,
     )
 
 
@@ -352,10 +389,21 @@ class DeterministicModelRuntime:
         if features.schema_version != self.bundle.feature_schema_version or features.feature_hash != self.bundle.feature_hash:
             raise ModelBundleError("feature schema does not match model bundle")
         predictions: list[ModelPrediction] = []
+        tree_ensembles = {item.ensemble_id: item for item in self.bundle.tree_ensembles}
+
+        def evaluate(head: PredictiveHead, values: Mapping[str, float], ordered: tuple[float, ...]) -> float:
+            if isinstance(head, LinearHead):
+                return head.evaluate(values)
+            return tree_ensembles[head.ensemble_id].evaluate(ordered)
+
         for row in features.rows:
             values = dict(zip(features.feature_names, row.normalized_values))
             for estimator in self.bundle.estimators:
-                probabilities = _softmax((estimator.long.evaluate(values), estimator.short.evaluate(values), estimator.neutral.evaluate(values)))
+                ordered = row.normalized_values
+                probabilities = _softmax((
+                    evaluate(estimator.long, values, ordered), evaluate(estimator.short, values, ordered),
+                    evaluate(estimator.neutral, values, ordered),
+                ))
                 calibration_valid = self.bundle.calibration is not None and self.bundle.calibration.valid
                 if calibration_valid:
                     assert self.bundle.calibration is not None
@@ -374,23 +422,25 @@ class DeterministicModelRuntime:
                     side = TradeSide.NO_TRADE
                 else:
                     side = TradeSide.LONG if long_probability >= short_probability else TradeSide.SHORT
-                raw_tail = _sigmoid(estimator.tail_risk.evaluate(values))
-                raw_quality = _sigmoid(estimator.quality.evaluate(values))
+                tail_value = evaluate(estimator.tail_risk, values, ordered)
+                quality_value = evaluate(estimator.quality, values, ordered)
+                raw_tail = tail_value if isinstance(estimator.tail_risk, TreeHead) and estimator.tail_risk.output_kind == "PROBABILITY" else _sigmoid(tail_value)
+                raw_quality = quality_value if isinstance(estimator.quality, TreeHead) and estimator.quality.output_kind == "PROBABILITY" else _sigmoid(quality_value)
                 tail_probability = self.bundle.calibration.tail_risk.apply(raw_tail) if calibration_valid else raw_tail  # type: ignore[union-attr]
                 quality_probability = self.bundle.calibration.quality.apply(raw_quality) if calibration_valid else raw_quality  # type: ignore[union-attr]
-                qmae_mean = max(0.0, estimator.qmae_mean.evaluate(values))
+                qmae_mean = max(0.0, evaluate(estimator.qmae_mean, values, ordered))
                 qmae_q50 = qmae_q90 = coverage = None
                 qmae_valid = estimator.qmae_quantiles is not None and estimator.qmae_quantiles.valid
                 if qmae_valid:
                     assert estimator.qmae_quantiles is not None
-                    qmae_q50 = max(0.0, estimator.qmae_quantiles.q50.evaluate(values))
-                    qmae_q90 = max(qmae_q50, estimator.qmae_quantiles.q90.evaluate(values))
+                    qmae_q50 = max(0.0, evaluate(estimator.qmae_quantiles.q50, values, ordered))
+                    qmae_q90 = max(qmae_q50, evaluate(estimator.qmae_quantiles.q90, values, ordered))
                     qmae_q90 += estimator.qmae_quantiles.conformal_adjustment
                     coverage = estimator.qmae_quantiles.empirical_coverage
                 predictions.append(ModelPrediction(
                     model_id=estimator.model_id, symbol=row.symbol, horizon_bars=estimator.horizon_bars, side=side,
                     long_probability=long_probability, short_probability=short_probability, neutral_probability=neutral_probability,
-                    expected_return=estimator.expected_return.evaluate(values), tail_risk_probability=tail_probability,
+                    expected_return=evaluate(estimator.expected_return, values, ordered), tail_risk_probability=tail_probability,
                     qmae_mean=qmae_mean, quality_probability=quality_probability, uncertainty=1.0 - best,
                     qmae_q50=qmae_q50, qmae_q90=qmae_q90, qmae_coverage=coverage,
                     calibration_valid=calibration_valid, qmae_valid=qmae_valid,
