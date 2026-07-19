@@ -1,0 +1,160 @@
+{
+  "schema_version": "aegis-e3-official-validation-summary-v1",
+  "experiment_id": "aegis-short-candidate-e3",
+  "result": "VALIDATION_PRE_LOCKBOX_COMPLETE",
+  "code_commit": "aea3437e0a969aa72ba6adb2331ca6e87020c7ad",
+  "run_id": "d742d9bc0ae867bb",
+  "preregistration_physical_sha256": "281e27f93f8be0f9c4fbe78673d55f1a4f3391aa421c3fcaf90823113dc81e62",
+  "preregistration_canonical_hash": "a6ef59d56d5d367deda79d02fe77bf79f1a43b2458962d3b8743be2f9e8a5d69",
+  "competition_physical_sha256": "70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79",
+  "attempts": {
+    "attempt_1": {
+      "duration_seconds": 1696.589817,
+      "state": "VALIDATION_COMPLETED",
+      "lockbox_consumed": false,
+      "run_dir": "reports/experiments/e3_validation_official/attempt_1/aegis-short-candidate-e3/runs/d742d9bc0ae867bb"
+    },
+    "attempt_2": {
+      "duration_seconds": 1691.817614,
+      "state": "VALIDATION_COMPLETED",
+      "lockbox_consumed": false,
+      "run_dir": "reports/experiments/e3_validation_official/attempt_2/aegis-short-candidate-e3/runs/d742d9bc0ae867bb"
+    }
+  },
+  "determinism": {
+    "tolerance": 1e-12,
+    "scientific_artifacts_byte_identical": true,
+    "scientific_aggregate_hash": "67a976ffcb0c90bad9440afb361293ab95ec4ae11baa1e33efb8b2fb475f8347",
+    "all_trades_hash": "7f27431517d3cd146e98cc6f3ada0c158f9e7bfcd1a19ff3b95c1ec0bd3861d5",
+    "full_stack_b_base_trade_hash": "7cf1bd1a9a4a78ac8557672acd95e0c2366ed8cfbe9029055edbb5b419c752c7",
+    "artifact_sha256": {
+      "dataset_manifest.json": "6c2e97c8ac7bb28a167c0a0783dab9b27ebff69e1ecf34e7052869e9944c5a1c",
+      "folds_manifest.json": "c2bf619fd3372583119b0d7ad7808609e72e8c926705a29349e33f8b018398a7",
+      "competition_report.json": "54be83b545b103586293a4174f945f0bc9c59d7a75c8dfff385c5f062eac4214",
+      "calibration_report.json": "366d3d2c6422ef5266d4f4f7ee446e0a05ea046f33e946028ca0e3e5267e04d5",
+      "qmae_report.json": "75819e46c422ad3852985cd4efdb1fe9240de476f2bf75a1a182a9c9e41c30b3",
+      "experimental_bundle.json": "386742c20d74a3b67d47cd95629c646195472e05e9e8d136587d40989a82e3d1",
+      "threshold_draft.json": "8c800c5322824f718e86bb7b7c8603793b3cc12e0ba625ea1e49c09e7e4b8208",
+      "econ_report.json": "bff472758eacc211dff1b3e2209cbd96e8a845a68f45b9e31526ca2968e6e085"
+    }
+  },
+  "dataset": {
+    "dataset_hash": "1ffd0eaf07515d3a1a5fd6363f09c2d8ffe1e1f3925989486dee398e25b8c294",
+    "cycles": 15680,
+    "rows": 172480,
+    "symbols": 11,
+    "rows_per_symbol": 15680,
+    "skipped_history_cycles": 0,
+    "quarantined_labels": 0,
+    "start": "2024-07-12T16:00:00+00:00",
+    "end": "2026-04-26T23:00:00+00:00"
+  },
+  "competition": {
+    "artifact_hash": "00b4e0f9d7c3d1aa9307d1ddfdef15f7209dc95fd2e0b13bbd0c12d785ab20c5",
+    "selected_models": {
+      "trrm": "trrm_logistic_baseline",
+      "eqm_clean": "eqm_random_forest_clean",
+      "eqm_net": "eqm_linear_net_baseline",
+      "qmae": "qmae_hist_gradient_boosting"
+    },
+    "model_not_beaten": true
+  },
+  "calibration": {
+    "valid": true,
+    "maximum_ece": 0.024506121208181495,
+    "maximum_allowed_ece": 0.08
+  },
+  "qmae": {
+    "valid": true,
+    "coverage_by_fold": {
+      "1": 0.9161918916687309,
+      "2": 0.8999256873916275,
+      "3": 0.8893062860005009,
+      "4": 0.8870600151937199
+    },
+    "required_band": [0.87, 0.93]
+  },
+  "experimental_bundle": {
+    "bundle_id": "aegis-short-candidate-e3-experimental",
+    "content_hash": "941f6b462812d1779f53bec3aba35741719116ecf37392b380f62207fface0ba",
+    "lifecycle": "EXPERIMENTAL",
+    "trained": true,
+    "approved": false,
+    "selection_threshold_draft": 5.994241878766537e-05,
+    "trrm_absolute_threshold": 0.689795918367347
+  },
+  "econ_full_stack": {
+    "A_OPTIMISTIC": {
+      "trades": 1292,
+      "profit_factor": 0.6447944935609881,
+      "expectancy": -0.0010841790376828054,
+      "win_rate": 0.4357585139318885,
+      "maximum_drawdown": 1.4332523126078658,
+      "bootstrap_ci_90": [-0.0013777300584898733, -0.0007771642992600472]
+    },
+    "B_BASE": {
+      "trades": 1292,
+      "profit_factor": 0.5370443650824593,
+      "expectancy": -0.0015341790376828055,
+      "win_rate": 0.40479876160990713,
+      "maximum_drawdown": 2.0079023126078686,
+      "cvar_05": -0.01715058370286662,
+      "worst_trade": -0.03135074626865674,
+      "maximum_symbol_share": 0.11919504643962849,
+      "bootstrap_ci_90": [-0.0018277300584898734, -0.0012271642992600475]
+    },
+    "C_PESSIMISTIC": {
+      "trades": 1292,
+      "profit_factor": 0.40405649595893,
+      "expectancy": -0.002234179037682806,
+      "win_rate": 0.35371517027863775,
+      "maximum_drawdown": 2.905428268781314,
+      "bootstrap_ci_90": [-0.0025277300584898733, -0.0019271642992600476]
+    }
+  },
+  "b_base_by_fold": {
+    "1": {"trades": 364, "profit_factor": 0.5210834477450804, "expectancy": -0.0015894926343469923, "win_rate": 0.3873626373626374},
+    "2": {"trades": 338, "profit_factor": 0.44707023873880697, "expectancy": -0.002087233579310901, "win_rate": 0.3905325443786982},
+    "3": {"trades": 331, "profit_factor": 0.5727122037500615, "expectancy": -0.0014120264981850096, "win_rate": 0.4169184290030212},
+    "4": {"trades": 259, "profit_factor": 0.6721378229427333, "expectancy": -0.0008908041586006065, "win_rate": 0.43243243243243246}
+  },
+  "b_base_baselines": {
+    "no_trade": {"trades": 0, "profit_factor": null, "expectancy": 0.0},
+    "random_directional_with_gates": {"trades": 1292, "profit_factor": 0.5296985682342442, "expectancy": -0.0016823614718373021},
+    "momentum_rule": {"trades": 1292, "profit_factor": 0.6749516731222978, "expectancy": -0.0015515688185610533},
+    "mean_reversion_rule": {"trades": 1292, "profit_factor": 0.7715478699458197, "expectancy": -0.0010857550835754921},
+    "volatility_rule": {"trades": 1292, "profit_factor": 0.7004191955935294, "expectancy": -0.001890226342925447},
+    "eqm_only": {"trades": 1292, "profit_factor": 0.5926713836214182, "expectancy": -0.001554445321395947},
+    "trrm_only": {"trades": 1292, "profit_factor": 0.2404328296183229, "expectancy": -0.0013751346759604953}
+  },
+  "preregistered_criteria_comparison": {
+    "all_mandatory_passed_on_dev": false,
+    "checks": [
+      {"name": "minimum_test_signals", "expected": 100, "actual": 1292, "passed": true},
+      {"name": "minimum_positive_folds", "expected": 3, "actual": 0, "passed": false},
+      {"name": "minimum_profit_factor_base", "expected": 1.05, "actual": 0.5370443650824593, "passed": false},
+      {"name": "minimum_net_expectancy_base", "expected": 0.0, "actual": -0.0015341790376828055, "passed": false},
+      {"name": "minimum_worst_fold_expectancy", "expected": 0.0, "actual": -0.002087233579310901, "passed": false},
+      {"name": "beat_best_directional_baseline_expectancy", "expected": true, "actual": false, "passed": false},
+      {"name": "maximum_symbol_concentration", "expected": 0.3, "actual": 0.11919504643962849, "passed": true},
+      {"name": "maximum_ece_each_fold", "expected": 0.08, "actual": 0.024506121208181495, "passed": true},
+      {"name": "models_beaten", "expected": true, "actual": false, "passed": false},
+      {"name": "calibration_valid", "expected": true, "actual": true, "passed": true},
+      {"name": "qmae_coverage_valid", "expected": true, "actual": true, "passed": true},
+      {"name": "econ_positive_robust", "expected": true, "actual": false, "passed": false},
+      {"name": "no_known_leakage", "expected": true, "actual": true, "passed": true},
+      {"name": "side_separated", "expected": "SHORT", "actual": "SHORT", "passed": true}
+    ]
+  },
+  "safety": {
+    "lockbox_status": "NOT_CONSUMED",
+    "consumed_queries": [],
+    "semi_blind_accessed": false,
+    "candidate_created": false,
+    "selection_policy_created": false,
+    "system_freeze_created": false,
+    "shadow_executed": false,
+    "operational_execution": false,
+    "scientific_parameters_modified": false
+  }
+}
