@@ -1,0 +1,33 @@
+{
+  "schema_version": "aegis-e4a-classification-contract-v1",
+  "experiment_id": "E4A_MECHANICAL_EXIT",
+  "bound_before_implementation": true,
+  "preregistration_physical_sha256": "7b2dc98969c967895550a1610dd3c1341d94a45e1cf6ed230b11de743f7d0ac3",
+  "primary_policy": "P4",
+  "baseline_policy": "P0",
+  "primary_intrabar_mode": "CONSERVATIVE",
+  "primary_cost_scenario": "B_BASE",
+  "classification_order": [
+    {
+      "classification": "MECHANICAL_EXIT_DIAGNOSTIC_INCONCLUSIVE",
+      "condition": "valid_trajectory_fraction < 1.0 or any primary metric is non-finite"
+    },
+    {
+      "classification": "MECHANICAL_EXIT_ECONOMICALLY_PROMISING",
+      "condition": "P4 net expectancy > 0 and P4 net expectancy > P0 net expectancy"
+    },
+    {
+      "classification": "MECHANICAL_EXIT_GROSS_ONLY",
+      "condition": "P4 gross expectancy > P0 gross expectancy but the economically-promising condition is false"
+    },
+    {
+      "classification": "MECHANICAL_EXIT_NO_VALUE",
+      "condition": "none of the preceding conditions holds"
+    }
+  ],
+  "e4b_decision": {
+    "justified": "all twelve preregistered e4b_justification_criteria pass",
+    "not_justified": "one or more preregistered e4b_justification_criteria fail"
+  },
+  "selection_or_promotion_authority": false
+}
