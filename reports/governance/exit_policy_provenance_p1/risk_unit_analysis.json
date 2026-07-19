@@ -1,0 +1,60 @@
+{
+  "schema_version": "aegis-phase-o-risk-unit-analysis-v1",
+  "experiment_id": "EXIT_POLICY_PROVENANCE_P1",
+  "historical_r_symbol_found": false,
+  "historical_r_definition_found": false,
+  "recoverable_equivalent_risk_unit": {
+    "definition": "absolute unleveraged price distance from entry to the initial stop",
+    "short_formula": "R_price = entry_price * abs(stop_roe) / leverage",
+    "fraction_formula": "R_fraction = abs(stop_roe) / leverage",
+    "roe_formula_short": "roe = ((entry_price - current_price) / entry_price) * leverage",
+    "price_move_from_roe_short": "price_move_fraction = roe / leverage",
+    "pnl_fraction_of_margin_approximation": "pnl_on_margin_fraction = roe before fees and funding",
+    "not_equity_risk": true
+  },
+  "examples": [
+    {
+      "entry_price": 100.0,
+      "leverage": 20,
+      "stop_roe": -0.4,
+      "stop_price_short": 102.0,
+      "price_move_percent": 2.0,
+      "interpretation": "A 2% adverse price move at 20x produces approximately -40% ROE; it is not a 40% price move."
+    },
+    {
+      "entry_price": 100.0,
+      "leverage": 10,
+      "stop_roe": -0.4,
+      "stop_price_short": 104.0,
+      "price_move_percent": 4.0,
+      "interpretation": "The same -40% ROE stop is twice as wide in price at 10x as at 20x."
+    },
+    {
+      "entry_price": 100.0,
+      "leverage": 20,
+      "break_even_activation_roe": 0.08,
+      "activation_price_short": 99.6,
+      "break_even_stop_price_short": 99.7,
+      "interpretation": "The 8% ROE trigger corresponds to 40 bps favorable price movement; the configured stop offset locks approximately 30 bps before execution costs."
+    }
+  ],
+  "callback_units": [
+    {
+      "rule": "legacy ProfitGuardian callback",
+      "unit": "fraction of observed peak ROE",
+      "formula": "trigger_roe = peak_roe * (1 - 0.08)"
+    },
+    {
+      "rule": "ExitEye/profit protection giveback",
+      "unit": "absolute leveraged ROE points",
+      "formula": "protected_roe = max(0.01, peak_roe - 0.05)"
+    },
+    {
+      "rule": "ATR trailing",
+      "unit": "absolute price distance",
+      "formula": "distance = ATR(14, 5m) * 1.5"
+    }
+  ],
+  "owner_definition_required": true,
+  "reason": "A future D1A-based experiment must bind leverage per entry and choose whether R means the historical leveraged initial stop, a fixed price-risk unit, or another explicitly preregistered unit. The audit cannot make that choice."
+}

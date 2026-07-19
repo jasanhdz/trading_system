@@ -1,0 +1,98 @@
+{
+  "schema_version": "aegis-exit-policy-provenance-manifest-v1",
+  "experiment_id": "EXIT_POLICY_PROVENANCE_P1",
+  "classification": "READ_ONLY_HISTORICAL_PROVENANCE_AUDIT",
+  "created_at_utc": "2026-07-19T17:09:05Z",
+  "repository": {
+    "branch": "feature/aegis-ts-clean-rebuild",
+    "python_head_at_audit_start": "915327c3af53855416c51595707b2ec46c4891ad",
+    "typescript_head_at_audit_start": "53105ee34c6e29f960c37c3516a58fffd2aa5906"
+  },
+  "temporal_cutoff": {
+    "d1a_commit": "fcd046cb12fbbd278aee4a0443d37737158fe818",
+    "d1a_commit_timestamp_utc": "2026-07-19T15:38:28Z",
+    "rule": "Only evidence created before this timestamp may establish historical independence."
+  },
+  "artifacts": [
+    {
+      "path": "reports/governance/exit_policy_provenance_p1/provenance_summary.json",
+      "sha256": "effde53c0c6103e5048e0d2d4c3eced8e98c06abda190c7f02970272b8693038"
+    },
+    {
+      "path": "reports/governance/exit_policy_provenance_p1/phase_o_exit_rules_inventory.json",
+      "sha256": "9a8f64ae4e828a33ee09bd15517759fd3c971a9f53e5955056463b4fc95d8a21"
+    },
+    {
+      "path": "reports/governance/exit_policy_provenance_p1/historical_parameters.json",
+      "sha256": "c7a4a63a7bd5cf8b9d722db88c871827786b0bd4697538e55edf12210bd733a8"
+    },
+    {
+      "path": "reports/governance/exit_policy_provenance_p1/evidence_table.csv",
+      "sha256": "c7f5c8304f9b9eb18b5cbc52d2c21ec6149554d7aeb03517c48b00f938d19e10"
+    },
+    {
+      "path": "reports/governance/exit_policy_provenance_p1/risk_unit_analysis.json",
+      "sha256": "e7f2847838a414535372710edf32e3f1a63f6a2ca46ca75850b720c7bfec6d27"
+    },
+    {
+      "path": "reports/governance/exit_policy_provenance_p1/d1a_compatibility_assessment.json",
+      "sha256": "cf9cbf999607905ec66f0886d53ee7b366be789b57e3c4dc4c0ab4d68f395fa0"
+    },
+    {
+      "path": "reports/governance/exit_policy_provenance_p1/provenance_report.md",
+      "sha256": "4d08ef027df0b916c6941f8d4c54488cc7a6ab03e58ff7f41fc65b23f4066552"
+    }
+  ],
+  "frozen_evidence": [
+    {
+      "path": "config/experiments/aegis_short_candidate_e3.yaml",
+      "sha256": "281e27f93f8be0f9c4fbe78673d55f1a4f3391aa421c3fcaf90823113dc81e62"
+    },
+    {
+      "path": "config/scientific_competition_v2.yaml",
+      "sha256": "70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79"
+    },
+    {
+      "path": "reports/governance/aegis-short-candidate-e3/closure/final_disposition.json",
+      "sha256": "779cafbf828620cbf13c455b779e49c88224bf7e54e520b8af88df58036b957a"
+    },
+    {
+      "path": "reports/experiments/exit_excursion_d1a/scientific_aggregate.json",
+      "sha256": "fc6edaddb2621cb1b66aebc01935ff69d52d5c5f4b336fb84e89a4ab4b07b13d"
+    },
+    {
+      "path": "reports/experiments/exit_excursion_d1a/trajectories.parquet",
+      "sha256": "22ffbd9e8f02c63ea5c222a6ae47cad5cc73620f066ee4cf8e6447bb0299d5cc"
+    },
+    {
+      "path": "reports/experiments/lockbox_semi_blind_20260427_20260711.json",
+      "sha256": "623e0979f3e31c80aa1a56d3dd733b97e3c1906784129b92164d29668ee09ec0"
+    }
+  ],
+  "external_read_only_evidence": [
+    {
+      "path": "binance-futures-bot-ts/logs/aegis/turbo_trades_2026-06-01.jsonl",
+      "sha256": "04e82260a9520922622cb163b6148077f292adb8c28176a8e578ea765d6e4dad"
+    },
+    {
+      "path": "binance-futures-bot-ts/logs/aegis/turbo_trade_events_2026-06-01.jsonl",
+      "sha256": "398a9024438132bce4b0865ce0d8708d6e86066aa1e7e0a592097641fcfa7264"
+    }
+  ],
+  "conclusions": {
+    "provenance_verdict": "PHASE_O_POLICY_PARTIALLY_RECOVERABLE",
+    "e4_recommendation": "E4_REQUIRES_OWNER_RISK_DEFINITION",
+    "post_d1a_evidence_used_as_authority": false
+  },
+  "execution_attestation": {
+    "training": false,
+    "backtest": false,
+    "replay": false,
+    "econ": false,
+    "d1a": false,
+    "e3": false,
+    "binance": false,
+    "pm2": false,
+    "lockbox_query": false
+  }
+}

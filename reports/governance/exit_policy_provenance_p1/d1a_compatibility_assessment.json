@@ -1,0 +1,77 @@
+{
+  "schema_version": "aegis-phase-o-d1a-compatibility-v1",
+  "experiment_id": "EXIT_POLICY_PROVENANCE_P1",
+  "d1a_source": {
+    "path": "reports/experiments/exit_excursion_d1a/trajectories.parquet",
+    "sha256": "22ffbd9e8f02c63ea5c222a6ae47cad5cc73620f066ee4cf8e6447bb0299d5cc",
+    "rows": 15504,
+    "trades": 1292,
+    "bars_per_trade": 12,
+    "timeframe": "5m",
+    "horizon": "60m"
+  },
+  "available": {
+    "entry_price": true,
+    "signal_timestamp": true,
+    "entry_timestamp": true,
+    "five_minute_ohlcv": true,
+    "direction_short": true,
+    "fold": true,
+    "cost_scenarios_in_e3_evidence": true,
+    "funding_in_e3_evidence": true
+  },
+  "missing_for_exact_historical_policy": {
+    "phase_o_leverage_per_entry": true,
+    "pre_entry_atr_window_in_trajectory_artifact": true,
+    "contemporaneous_exit_eye_actions_votes_and_scores": true,
+    "exchange_order_event_sequence": true,
+    "eight_hour_path": true,
+    "sub_five_minute_intrabar_path": true
+  },
+  "rule_compatibility": [
+    {
+      "rule": "initial stop and fixed take profit",
+      "status": "PARTIAL",
+      "reason": "formulas are exact, but price levels depend on leverage and same-candle order is unresolved at 5m"
+    },
+    {
+      "rule": "break-even",
+      "status": "PARTIAL",
+      "reason": "activation and stop formulas are exact, but leverage and intrabar ordering are not bound"
+    },
+    {
+      "rule": "ATR trailing",
+      "status": "PARTIAL",
+      "reason": "canonical dev data can provide earlier candles, but the D1A trajectory artifact itself starts at entry and exact live polling/order timing is absent"
+    },
+    {
+      "rule": "legacy ROE callback",
+      "status": "PARTIAL",
+      "reason": "formula is exact, but this was a fallback whose activation depends on ATR availability"
+    },
+    {
+      "rule": "ExitEye",
+      "status": "INCOMPATIBLE_WITH_D1A_ALONE",
+      "reason": "requires future model actions, scores, votes and consecutive counters not frozen by D1A"
+    },
+    {
+      "rule": "conditional timeout",
+      "status": "INCOMPATIBLE_WITH_D1A_HORIZON",
+      "reason": "the historical rule starts after eight hours; D1A ends after one hour"
+    }
+  ],
+  "intrabar_limitations": [
+    "A five-minute candle can cross initial stop and take profit without revealing which executed first.",
+    "A candle can cross a trailing activation and its resulting stop without revealing event order.",
+    "The live service managed marks and exchange orders asynchronously; OHLC bars do not encode that schedule.",
+    "Fail-conservative ordering would be a new simulation convention, not recovered historical behavior."
+  ],
+  "exact_application_without_new_decisions": false,
+  "required_owner_decisions": [
+    "bind a leverage rule to each D1A entry",
+    "define deterministic conservative intrabar ordering",
+    "choose whether to exclude ExitEye or reconstruct a separately frozen signal stream",
+    "choose an evaluation horizon compatible with the eight-hour conditional timeout",
+    "define the risk unit used for any R-denominated policy"
+  ]
+}

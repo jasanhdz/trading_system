@@ -1,0 +1,57 @@
+{
+  "schema_version": "aegis-exit-policy-provenance-summary-v1",
+  "experiment_id": "EXIT_POLICY_PROVENANCE_P1",
+  "classification": "READ_ONLY_HISTORICAL_PROVENANCE_AUDIT",
+  "audit_cutoff": {
+    "event": "D1A implementation commit",
+    "commit": "fcd046cb12fbbd278aee4a0443d37737158fe818",
+    "timestamp_utc": "2026-07-19T15:38:28Z"
+  },
+  "provenance_verdict": "PHASE_O_POLICY_PARTIALLY_RECOVERABLE",
+  "e4_recommendation": "E4_REQUIRES_OWNER_RISK_DEFINITION",
+  "core_finding": "Phase O did not own a standalone exit policy. It inherited the composite AEGIS_TURBO TypeScript policy: exchange-native initial brackets, break-even and trailing management, ExitEye profit protection or profitable signal exit, and a conditional eight-hour time exit.",
+  "independent_historical_evidence": true,
+  "post_d1a_evidence_used_as_authority": false,
+  "post_d1a_or_contaminated_evidence_found": false,
+  "last_pre_d1a_policy_revision": {
+    "typescript_commit": "7f47abd216e7ac419e3d54006ce945bafcc83d90",
+    "timestamp_utc": "2026-06-07T03:12:22Z",
+    "config_blob": "fd651587d0931ad22ab8035f0f2f675bd136274e",
+    "config_sha256": "4767cd424af055edb2c5b797a6ab47fa86391fc5b08e3f28a03c06730d5ef7b5"
+  },
+  "historically_executed_parameters": {
+    "initial_stop_roe": -0.4,
+    "fixed_take_profit_roe": 0.5,
+    "break_even_activation_roe": 0.08,
+    "break_even_price_offset_fraction": 0.003,
+    "trailing_activation_peak_roe": 0.15,
+    "legacy_peak_roe_callback_fraction": 0.08,
+    "atr_trailing_multiplier": 1.5,
+    "profit_protection_min_peak_roe": 0.08,
+    "profit_protection_giveback_roe": 0.05,
+    "profit_protection_min_locked_roe": 0.01,
+    "conditional_timeout_ms": 28800000,
+    "conditional_timeout_min_current_roe": 0.02,
+    "fixed_take_profit_present": true,
+    "partial_close_present": false
+  },
+  "risk_unit": {
+    "historical_named_r_unit_present": false,
+    "recoverable_equivalent": "entry-to-initial-stop distance",
+    "formula_short": "1R_price_fraction = abs(initial_stop_roe) / leverage",
+    "ambiguity": "D1A does not bind a Phase O leverage to each E3 entry, while historical Phase O could execute at multiple leverage tiers."
+  },
+  "blocking_elements_for_exact_d1a_replay": [
+    "per-entry Phase O leverage is not present in the D1A trajectory artifact",
+    "ATR(14) requires pre-entry candles not contained in the 12-bar D1A trajectory rows",
+    "ExitEye requires contemporaneous model actions and votes that D1A did not freeze",
+    "five-minute OHLC cannot recover exchange event order when bracket or moved-stop events share a candle",
+    "the historical conditional timeout is eight hours, while D1A trajectories stop at H12/60 minutes"
+  ],
+  "safety": {
+    "experiments_executed": false,
+    "backtests_executed": false,
+    "lockbox_accessed": false,
+    "operational_actions": false
+  }
+}
