@@ -1,0 +1,48 @@
+{
+  "schema_version": "aegis-exit-excursion-diagnostic-v1",
+  "experiment_id": "EXIT_EXCURSION_D1A",
+  "classification": "EXPLORATORY_DESCRIPTIVE",
+  "side": "SHORT",
+  "timeframe_minutes": 5,
+  "holding_bars": 12,
+  "entry_rule": "NEXT_BAR_OPEN",
+  "exit_rule": "H12_CLOSE",
+  "dev_boundary_inclusive": "2026-04-26T23:59:59Z",
+  "entry_source": {
+    "path": "reports/experiments/e3_validation_official/attempt_1/aegis-short-candidate-e3/runs/d742d9bc0ae867bb/econ_report.json",
+    "physical_sha256": "bff472758eacc211dff1b3e2209cbd96e8a845a68f45b9e31526ca2968e6e085",
+    "strategy_id": "full_stack",
+    "scenario_id": "B_BASE",
+    "expected_trade_count": 1292,
+    "expected_trade_set_hash": "7cf1bd1a9a4a78ac8557672acd95e0c2366ed8cfbe9029055edbb5b419c752c7"
+  },
+  "canonical_source": {
+    "path": "/home/jasan/Develop/aegis_gen2/d3/canonical_series/v1",
+    "manifest_sha256": "00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916",
+    "read_only": true
+  },
+  "temporal_horizons_bars": [1, 2, 3, 6, 9, 12],
+  "favorable_thresholds_bps": [5, 10, 15, 20, 25, 30, 40, 50, 75, 100],
+  "adverse_thresholds_bps": [10, 20, 30],
+  "percentiles": [1, 5, 10, 25, 50, 75, 90, 95, 99],
+  "cost_scenarios": [
+    {"scenario_id": "A_OPTIMISTIC", "fee_bps_per_side": 4.0, "slippage_bps_per_side": 1.0, "funding_bps_per_hour": 0.5},
+    {"scenario_id": "B_BASE", "fee_bps_per_side": 5.0, "slippage_bps_per_side": 2.0, "funding_bps_per_hour": 1.0},
+    {"scenario_id": "C_PESSIMISTIC", "fee_bps_per_side": 5.0, "slippage_bps_per_side": 5.0, "funding_bps_per_hour": 2.0}
+  ],
+  "bootstrap": {"block": "ISO_WEEK", "repetitions": 2000, "seed": 20260718, "ci": 0.90},
+  "interpretation_contract": {
+    "material_excursion": "median_mfe_at_least_10_bps_or_half_reach_10_bps",
+    "frequent_giveback": "half_give_back_at_least_50pct_or_quarter_finish_negative_after_positive_or_median_giveback_at_least_half_median_mfe",
+    "too_adverse": "median_mae_above_twice_median_mfe_and_mfe_precedes_mae_below_40pct",
+    "adaptive_exit_research": "only_material_excursion_with_frequent_giveback"
+  },
+  "tabular_serialization": {
+    "format": "CANONICAL_CSV",
+    "reason": "The repository environment has no pyarrow or fastparquet engine; canonical D3 already uses verified CSV."
+  },
+  "forbidden": [
+    "RISK_R", "STOP_LOSS", "TAKE_PROFIT", "TRAILING", "CALLBACK", "BREAK_EVEN",
+    "LOCKBOX", "SEMI_BLIND", "CANDIDATE", "SELECTION_POLICY", "SYSTEM_FREEZE"
+  ]
+}
