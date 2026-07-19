@@ -1,0 +1,33 @@
+{
+  "schema_version": "aegis-e4a-owner-decision-v1",
+  "experiment_id": "E4A_MECHANICAL_EXIT",
+  "decision": "AUTHORIZE_PREREGISTERED_DEV_MECHANICAL_EXIT_EXPERIMENT",
+  "authorization_source": "owner_direct_instruction",
+  "authorized_at_utc": "2026-07-19T17:32:00Z",
+  "fixed_leverage": 20.0,
+  "maximum_horizon_hours": 8,
+  "maximum_horizon_bars": 96,
+  "side": "SHORT",
+  "entry_count": 1292,
+  "entry_trade_set_hash": "7cf1bd1a9a4a78ac8557672acd95e0c2366ed8cfbe9029055edbb5b419c752c7",
+  "mechanical_parameters": {
+    "stop_roe": -0.4,
+    "take_profit_roe": 0.5,
+    "break_even_activation_roe": 0.08,
+    "break_even_price_offset_fraction": 0.003,
+    "trailing_activation_peak_roe": 0.15,
+    "atr_period": 14,
+    "atr_multiplier": 1.5,
+    "callback_fraction_of_peak_roe": 0.08,
+    "profit_protection_min_peak_roe": 0.08,
+    "profit_protection_giveback_roe": 0.05,
+    "profit_protection_min_protected_roe": 0.01
+  },
+  "timeout": "UNCONDITIONAL_CLOSE_AT_BAR_96",
+  "exit_eye": "EXCLUDED",
+  "partial_exits": "FORBIDDEN",
+  "lockbox_authorized": false,
+  "semi_blind_authorized": false,
+  "candidate_authorized": false,
+  "operational_execution_authorized": false
+}
