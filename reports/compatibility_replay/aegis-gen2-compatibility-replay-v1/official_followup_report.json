@@ -1,0 +1,69 @@
+{
+  "schema_version": "aegis-official-followup-report-v1",
+  "code_commit": "0fda9fe1ffc956b3d6d3c48711ac0f48e01abcac",
+  "stage_1b": {
+    "answer": "EDGE_ABSENT_ON_HOURLY",
+    "dataset_hash": "7b18372533999092ef8b03144fddda45c3cd89a1eb4e7ee79ea4fcf79558ffe0",
+    "scientific_hash": "069474f465c120181e2721ef9687c8da515110df6ff8b53a47e9e05b089c8112",
+    "trade_keys_hash": "5b9d27a5e490556a16a2cb70b553351573c897fa857e88e8fb9eeec8647a8420",
+    "trades": 2404,
+    "profit_factor": 0.636280075688563,
+    "net_expectancy": -0.13113471462724516,
+    "folds": {
+      "fold_1": {"trades": 601, "profit_factor": 0.6035944297974433, "net_expectancy": -0.15912677422804472},
+      "fold_2": {"trades": 601, "profit_factor": 0.535883999094308, "net_expectancy": -0.14973564656588073},
+      "fold_3": {"trades": 601, "profit_factor": 0.690472968935537, "net_expectancy": -0.11505599109370379},
+      "fold_4": {"trades": 601, "profit_factor": 0.7095129747030686, "net_expectancy": -0.10062044662135129}
+    },
+    "deterministic_attempts": 2,
+    "canonical_identical": true,
+    "trade_keys_identical": true,
+    "numeric_tolerance": 1e-12,
+    "minimum_trades_each_fold_satisfied": true
+  },
+  "stage_4b": {
+    "scientific_hash": "9deaaf96acfe288f8a506dacf8439964636569bfbccaaa456972bc0d2310f36b",
+    "control_stage_0": {"trades": 688, "profit_factor": 1.7408239691566603, "net_expectancy": 0.1401245909604157},
+    "compound_stage_4": {"trades": 715, "profit_factor": 0.9495922780028794, "net_expectancy": -0.0210625043232995},
+    "variants": {
+      "STAGE_4B_A": {
+        "changed_axis": "veto",
+        "trades": 895,
+        "profit_factor": 0.8646432522560281,
+        "net_expectancy": -0.053218888783140905,
+        "scientific_hash": "477ff7e9ea616ebd36f6619ddd1afb7efb0e6c042c9cdbd945af2b0ddbd36abf"
+      },
+      "STAGE_4B_B": {
+        "changed_axis": "selection",
+        "trades": 848,
+        "profit_factor": 1.1963682476520132,
+        "net_expectancy": 0.045778539295699736,
+        "scientific_hash": "b9799af2332038244d5b4638758bdd52388f07ac25dac486f1947e8eaad2522b"
+      },
+      "STAGE_4B_C": {
+        "changed_axis": "threshold",
+        "trades": 492,
+        "profit_factor": 2.311016807863731,
+        "net_expectancy": 0.22804312478964237,
+        "scientific_hash": "cdd80ec6379e5cb2b02360982e971806e0f573224eb5e06fa67fb61edb6d27d5"
+      }
+    },
+    "attempts_each_variant": 2,
+    "all_variants_deterministic": true
+  },
+  "descriptive_answers": {
+    "stage_1b": "Coherent hourly training and scoring did not produce positive pooled expectancy or three positive folds under the frozen protocol.",
+    "stage_4b": "The isolated absolute veto was negative; isolated top-1 selection and isolated E2 threshold were positive. The compound Stage 4 result cannot be represented as an additive sum of these effects.",
+    "assumption_change": "Stage 1b closes the previously open question of whether coherent hourly retraining restored edge under this exact design: it did not. Stage 4b separates the three preregistered selection levers descriptively.",
+    "fable_consistency": "No inconsistency. The executions answer questions that the independent audit explicitly left unresolved."
+  },
+  "verdict": "READY_FOR_E3_VALIDATION",
+  "safety": {
+    "e3_validation_executed": false,
+    "stage_5b_executed": false,
+    "lockbox_accessed_by_experiments": false,
+    "semi_blind_accessed": false,
+    "typescript_modified": false,
+    "operational_execution": false
+  }
+}

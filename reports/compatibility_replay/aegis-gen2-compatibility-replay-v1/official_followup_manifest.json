@@ -1,0 +1,59 @@
+{
+  "schema_version": "aegis-official-followup-manifest-v1",
+  "code_commit": "0fda9fe1ffc956b3d6d3c48711ac0f48e01abcac",
+  "frozen_inputs": {
+    "e1_physical_sha256": "2604df3461ca891db05b6d877ab2e6373eac8fc7b7412d08571b2644f351ae39",
+    "e2_physical_sha256": "759a7c87d2afaec2f6ede7b6451154a287ea5527e00036e040beb26c32732b8e",
+    "e3_physical_sha256": "281e27f93f8be0f9c4fbe78673d55f1a4f3391aa421c3fcaf90823113dc81e62",
+    "competition_v1_physical_sha256": "6eb6e89b42ec518ddc7b277cec1ec7df22dd5f5b2fdbb78341d9885aaf27988c",
+    "competition_v2_physical_sha256": "70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79",
+    "stage_1b_preregistration_sha256": "3fd8b6f59aaf0ffe538a5cc66b4cffc2223a7b78ebd03b1243b8bcbf16f1431f",
+    "stage_4b_preregistration_sha256": "330a3385109547893ed11fbb0d9c0079fa519df0db251ece338c1c050bc0865e"
+  },
+  "historical_controls": {
+    "stage_0_sha256": "6a10dccbea5ede8a1e863bd14d93b1a7e71b5d68f4403b509e4484b3e157ba17",
+    "stage_1_sha256": "f9934bc318f6ab6f1aef8074e30b4e923bf61dc9b169804a535efc2fade9264f",
+    "stage_2_sha256": "f213c521df29e4b4c7d9fecfa72e56f3d54d3f95ada8ae85409ef00fec8efb38",
+    "stage_3_sha256": "d6c349bf6da4e3f307c6048a578f28de1e7160c476231c042a6994712313303a",
+    "stage_4_sha256": "f434f0ff45a331552ac0877c6c2faead2125abea478be3f6d21141ad1c2307a3",
+    "stage_5_sha256": "952cb81b68c9413c7df89af6fdeb0124707cf49f7ac1eec37facdbb0dee7e5af"
+  },
+  "stage_1b": {
+    "attempt_1_physical_sha256": "39de85d591ea6c7b61ecfcaf8565f113fa83fccd3bc17677cd7b1819dc0afd92",
+    "attempt_2_physical_sha256": "566a0c4f5edc54437ece52c586e95057e7ba241564d3af975b5b77f5734f02a8",
+    "summary_physical_sha256": "de676f698af856173c0215878f1bf83d49cd4d797363dc04d31e23c04d412eb8",
+    "scientific_hash": "069474f465c120181e2721ef9687c8da515110df6ff8b53a47e9e05b089c8112",
+    "trade_keys_hash": "5b9d27a5e490556a16a2cb70b553351573c897fa857e88e8fb9eeec8647a8420",
+    "deterministic": true,
+    "answer": "EDGE_ABSENT_ON_HOURLY"
+  },
+  "stage_4b": {
+    "stage_4b_a_attempt_1_physical_sha256": "77e2037cb7cc7eb055d6e749ce68250cf8745eca6c72c063d9a5c8dbbae87a68",
+    "stage_4b_a_attempt_2_physical_sha256": "e59ced687366fe93b63d89190f9bdee26c5d2ff42f6c232a50141005c9de3f5b",
+    "stage_4b_b_attempt_1_physical_sha256": "9811ccffc61c9566d2317f13e5c25501696fd36d3817d33c7dd4a295a4607a1d",
+    "stage_4b_b_attempt_2_physical_sha256": "d01c02ce0e5306ee564a5437fc6929e131559c34018007fd3d2b767b894fd6bf",
+    "stage_4b_c_attempt_1_physical_sha256": "d01feee376732d0540943218e298b49549a825c988a941f3c9d07c24d0742e70",
+    "stage_4b_c_attempt_2_physical_sha256": "ad7f7314e8177944012bb3741fa4da23938e3b8b4e884496a430003f409cd6c9",
+    "summary_physical_sha256": "a135c207d04bb41253ce81c71ee48f9f7a64849133d2c7ac3ed02bc378f3fc87",
+    "scientific_hash": "9deaaf96acfe288f8a506dacf8439964636569bfbccaaa456972bc0d2310f36b",
+    "deterministic": true,
+    "closed_variants": [
+      "STAGE_4B_A",
+      "STAGE_4B_B",
+      "STAGE_4B_C"
+    ]
+  },
+  "reports": {
+    "json_physical_sha256": "b8dabb0a9ec4c4c894b0f757f36ff935a65ed4010e4006dd8207979400a29d99",
+    "markdown_physical_sha256": "883dae160670771c9caf4229441426450863b34c2a38a33ca515789854046bbe"
+  },
+  "safety": {
+    "e3_validation_executed": false,
+    "lockbox_consumed": false,
+    "semi_blind_accessed": false,
+    "stage_5b_executed": false,
+    "typescript_modified": false,
+    "push_performed": false
+  },
+  "verdict": "READY_FOR_E3_VALIDATION"
+}
