@@ -1,0 +1,90 @@
+{
+  "schema_version": "aegis-experiment-final-disposition-v1",
+  "experiment_id": "aegis-short-candidate-e3",
+  "previous_status": "PRE_REGISTERED_UNEXECUTED",
+  "execution_status": "VALIDATION_COMPLETED",
+  "final_status": "REJECTED",
+  "formal_verdict": "E3_REJECTED_PRE_LOCKBOX",
+  "rejection_classification": [
+    "PREDICTIVE",
+    "ECONOMIC",
+    "NOT_TECHNICAL"
+  ],
+  "closed_at_utc": "2026-07-19T10:41:59Z",
+  "closed_permanently": true,
+  "repeat_authorized": false,
+  "lockbox": {
+    "status": "NOT_CONSUMED",
+    "lockbox_consumed": false,
+    "consumed_queries": [],
+    "budget_remaining": 1,
+    "authority_path": "reports/experiments/lockbox_semi_blind_20260427_20260711.json",
+    "authority_physical_sha256": "623e0979f3e31c80aa1a56d3dd733b97e3c1906784129b92164d29668ee09ec0"
+  },
+  "publication_and_execution": {
+    "candidate_generated": false,
+    "selection_policy_generated": false,
+    "system_freeze_generated": false,
+    "shadow_authorized": false,
+    "paper_authorized": false,
+    "live_authorized": false
+  },
+  "scientific_result": {
+    "positive_folds": 0,
+    "fold_count": 4,
+    "b_base_trades": 1292,
+    "b_base_profit_factor": 0.5370443650824593,
+    "b_base_expectancy": -0.0015341790376828055,
+    "optimistic_expectancy": -0.0010841790376828054,
+    "best_directional_baseline": "no_trade",
+    "best_directional_baseline_expectancy": 0.0,
+    "all_mandatory_passed_on_dev": false
+  },
+  "evidence": {
+    "preregistration": {
+      "path": "config/experiments/aegis_short_candidate_e3.yaml",
+      "physical_sha256": "281e27f93f8be0f9c4fbe78673d55f1a4f3391aa421c3fcaf90823113dc81e62",
+      "canonical_hash": "a6ef59d56d5d367deda79d02fe77bf79f1a43b2458962d3b8743be2f9e8a5d69"
+    },
+    "competition_protocol": {
+      "path": "config/scientific_competition_v2.yaml",
+      "physical_sha256": "70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79"
+    },
+    "dataset": {
+      "scientific_hash": "1ffd0eaf07515d3a1a5fd6363f09c2d8ffe1e1f3925989486dee398e25b8c294",
+      "artifact_physical_sha256": "6c2e97c8ac7bb28a167c0a0783dab9b27ebff69e1ecf34e7052869e9944c5a1c"
+    },
+    "scientific_aggregate_hash": "67a976ffcb0c90bad9440afb361293ab95ec4ae11baa1e33efb8b2fb475f8347",
+    "b_base_trade_hash": "7cf1bd1a9a4a78ac8557672acd95e0c2366ed8cfbe9029055edbb5b419c752c7",
+    "calibration": {
+      "scientific_hash": "207733d73d3c4d31b765ccef9452ec4208666fb0413aa42c47f5d9f407cce9f2",
+      "artifact_physical_sha256": "366d3d2c6422ef5266d4f4f7ee446e0a05ea046f33e946028ca0e3e5267e04d5"
+    },
+    "qmae": {
+      "scientific_hash": "a0c701413258b482399dc27797fca723a2a435fcaa15b3a145824b14a1e7ce8c",
+      "artifact_physical_sha256": "75819e46c422ad3852985cd4efdb1fe9240de476f2bf75a1a182a9c9e41c30b3"
+    },
+    "econ": {
+      "scientific_hash": "c05d82ed91fd0f6a6d5c0775ba0476c40ce5d3beba1752a198e592a90e3874de",
+      "artifact_physical_sha256": "bff472758eacc211dff1b3e2209cbd96e8a845a68f45b9e31526ca2968e6e085"
+    },
+    "validation_summary": {
+      "path": "reports/experiments/e3_validation_official/validation_summary.json",
+      "physical_sha256": "2288271bc78c8a4cbb07a0ec56949df4154925c2958e87e75eeda322991b3d19"
+    }
+  },
+  "commits": {
+    "validation_preflight_binding": "aea3437e0a969aa72ba6adb2331ca6e87020c7ad",
+    "validation_evidence": "4f143f90674d1cb0a06a390e7410defea9c66371",
+    "owner_authorization": "50b969d118928b1531a6608b80e5446246183a85",
+    "disposition_commit_binding": "git_commit_containing_this_artifact"
+  },
+  "owner_authorization": {
+    "path": "reports/governance/aegis-short-candidate-e3/closure/owner_authorization.json",
+    "physical_sha256": "4655752516915d57c8697b844b2ef3ce714ec631c8c5d7b47f51b1ef291feb9d"
+  },
+  "registry": {
+    "central_registry_found": false,
+    "authoritative_status_source": "this_final_disposition_artifact"
+  }
+}
