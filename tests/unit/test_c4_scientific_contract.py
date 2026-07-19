@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -9,8 +10,10 @@ from aegis.training.competition import (
     load_scientific_competition_contract,
     rank_based_survivor_indices,
 )
-from aegis.training.phase_e import ProductionScientificBackend
-from aegis.training.run_state import PhaseETechnicalError
+import aegis.training.phase_e as phase_e_module
+import aegis.training.preregistration as preregistration_module
+from aegis.training.phase_e import PhaseEPreflight, ProductionScientificBackend
+from aegis.training.run_state import PhaseETechnicalError, RunMode
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +49,39 @@ def test_e3_backend_hash_binds_v2_and_rejects_e2_execution() -> None:
     assert contract.physical_sha256 == e3["models"]["competition_protocol"]["physical_sha256"]
     with pytest.raises(PhaseETechnicalError, match="PROTOCOL_VERSION_NOT_EXECUTABLE"):
         backend._require_e3(yaml.safe_load(E2.read_text(encoding="utf-8")))
+
+
+def test_e3_preflight_uses_frozen_v2_and_audits_shared_lockbox_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority_path = ROOT / "reports/experiments/lockbox_semi_blind_20260427_20260711.json"
+    before = hashlib.sha256(authority_path.read_bytes()).hexdigest()
+
+    class AuditedCanonicalSource:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def audit(self, *, verify_content: bool):
+            assert verify_content is True
+            return type("Audit", (), {
+                "manifest_sha256": "00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916",
+                "artifact_id": "canonical-d3-fixture",
+            })()
+
+    monkeypatch.setattr(phase_e_module, "CanonicalSeriesSource", AuditedCanonicalSource)
+    monkeypatch.setattr(preregistration_module, "CanonicalSeriesSource", AuditedCanonicalSource)
+    result = PhaseEPreflight(
+        repository_root=ROOT,
+        typescript_root=ROOT / "binance-futures-bot-ts",
+        preregistration_path=E3,
+        competition_path=V2,
+        strict_git=False,
+    ).run(RunMode.VALIDATION_RUN)[1]
+
+    assert result.competition_file_hash == yaml.safe_load(E3.read_text())["models"]["competition_protocol"]["physical_sha256"]
+    assert result.lockbox_consumed is False
+    assert result.threshold_pending is True
+    assert hashlib.sha256(authority_path.read_bytes()).hexdigest() == before
 
 
 def test_rank_veto_is_exactly_thirty_percent_and_deterministic_on_ties() -> None:

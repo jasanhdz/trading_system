@@ -39,8 +39,8 @@ from .econ import (
 from .labels import SHORT_LABEL_SCHEMA_VERSION
 from .experiment import _feature_batch, evaluate_authoritative_feature_batch, fit_normalizer
 from .preregistration import (
-    E1_CANONICAL_HASH, E1_PHYSICAL_SHA256, LockboxBudget, SharedLockboxAuthority,
-    load_and_validate_preregistration,
+    E1_CANONICAL_HASH, E1_PHYSICAL_SHA256, E2_CANONICAL_HASH, E2_PHYSICAL_SHA256,
+    LockboxBudget, SharedLockboxAuthority, load_and_validate_preregistration,
 )
 from .run_state import (
     EnvironmentFingerprint, LockboxLease, LockboxLeaseRecord, PhaseEErrorCode,
@@ -239,7 +239,16 @@ class PhaseEPreflight:
                 or audit.content_hash != EXPECTED_PREREGISTRATION_CANONICAL_HASH
             ):
                 raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "Phase-E preregistration hash mismatch")
-            if competition_hash != EXPECTED_COMPETITION_FILE_HASH:
+            competition_binding = payload.get("models", {}).get("competition_protocol", {})
+            if audit.protocol_version >= 3:
+                bound_competition_path = (self.root / str(competition_binding.get("path", ""))).resolve()
+                competition_matches = (
+                    self.competition_path == bound_competition_path
+                    and competition_hash == competition_binding.get("physical_sha256")
+                )
+            else:
+                competition_matches = competition_hash == EXPECTED_COMPETITION_FILE_HASH
+            if not competition_matches:
                 raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "competition protocol hash mismatch")
             branch = _git(self.root, "branch", "--show-current")
             commit = _git(self.root, "rev-parse", "HEAD")
@@ -260,18 +269,35 @@ class PhaseEPreflight:
                 raise PhaseETechnicalError(
                     PhaseEErrorCode.D3_HASH_MISMATCH, "canonical D3 audit failed",
                 ) from exc
-            if audit.protocol_version == 2:
+            if audit.protocol_version >= 2:
                 lockbox_state = self.root / str(payload["lockbox"]["authority_path"])
                 authority = SharedLockboxAuthority(
                     lockbox_state, str(payload["lockbox"]["window_id"]),
                     str(payload["lockbox"]["semi_blind_start"]), str(payload["lockbox"]["semi_blind_end"]),
                     int(payload["lockbox"]["maximum_queries_total_across_preregistrations"]),
                 )
-                authority.initialize(
-                    e1_hashes={"physical": E1_PHYSICAL_SHA256, "canonical": E1_CANONICAL_HASH},
-                    e2_hashes={"physical": physical_hash, "canonical": audit.content_hash},
-                )
-                authority.audit_available()
+                lockbox_payload = authority.audit_available()
+                expected_preregistrations = {
+                    "aegis-short-candidate-e1": {
+                        "physical": E1_PHYSICAL_SHA256, "canonical": E1_CANONICAL_HASH,
+                    },
+                    "aegis-short-candidate-e2": {
+                        "physical": E2_PHYSICAL_SHA256, "canonical": E2_CANONICAL_HASH,
+                    },
+                }
+                if audit.protocol_version >= 3:
+                    expected_preregistrations[str(payload["experiment_id"])] = {
+                        "physical": physical_hash, "canonical": audit.content_hash,
+                    }
+                actual_preregistrations = lockbox_payload.get("preregistrations", {})
+                if any(
+                    actual_preregistrations.get(experiment_id) != hashes
+                    for experiment_id, hashes in expected_preregistrations.items()
+                ):
+                    raise PhaseETechnicalError(
+                        PhaseEErrorCode.PREREGISTRATION_MISMATCH,
+                        "shared lockbox preregistration binding mismatch",
+                    )
                 lease = lockbox_state.with_suffix(".lease.json")
                 consumed = lease.exists()
             else:
@@ -289,7 +315,11 @@ class PhaseEPreflight:
             long_disabled = "allowedSides:\n    - SHORT" in ts_config and payload.get("allowed_sides") == ["SHORT"]
             if execution_enabled or not long_disabled:
                 raise PhaseETechnicalError(PhaseEErrorCode.PRECHECK_FAILED, "operational safety contract mismatch")
-            if payload["protocol"].get("threshold_value") is not None or payload.get("status") != "PRE_REGISTERED_NOT_EXECUTED":
+            expected_status = (
+                "PRE_REGISTERED_UNEXECUTED" if audit.protocol_version >= 3
+                else "PRE_REGISTERED_NOT_EXECUTED"
+            )
+            if payload["protocol"].get("threshold_value") is not None or payload.get("status") != expected_status:
                 raise PhaseETechnicalError(PhaseEErrorCode.PREREGISTRATION_MISMATCH, "experiment was already modified or executed")
             environment = EnvironmentFingerprint.current()
             result = PhaseEPreflightResult(
