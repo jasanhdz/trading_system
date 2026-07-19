@@ -4,6 +4,7 @@ import pytest
 
 from aegis.data import CanonicalBar
 from scripts.diagnostics.exit_excursion_d1a.experiment import (
+    atomic_parquet,
     build_trajectories,
     cumulative_short_mfe,
     giveback_and_capture,
@@ -106,3 +107,16 @@ def test_temporal_exit_metrics_are_deterministic_and_charge_duration_costs() -> 
     assert t5["cost_per_trade"] == pytest.approx(COST_SCENARIOS[1].cost_fraction(1))
     assert t10["cost_per_trade"] == pytest.approx(COST_SCENARIOS[1].cost_fraction(2))
     assert t5["trades"] == 3
+
+
+def test_parquet_artifact_round_trip_is_deterministic(tmp_path) -> None:
+    import pyarrow.parquet as pq
+    from aegis.utils import sha256_file
+
+    rows = [{"trade_id": "a", "value": 1.25}, {"trade_id": "b", "value": -0.5}]
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    atomic_parquet(first, rows, ("trade_id", "value"))
+    atomic_parquet(second, rows, ("trade_id", "value"))
+    assert sha256_file(first) == sha256_file(second)
+    assert pq.read_table(first).to_pylist() == rows

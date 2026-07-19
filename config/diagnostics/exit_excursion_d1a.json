@@ -38,8 +38,9 @@
     "adaptive_exit_research": "only_material_excursion_with_frequent_giveback"
   },
   "tabular_serialization": {
-    "format": "CANONICAL_CSV",
-    "reason": "The repository environment has no pyarrow or fastparquet engine; canonical D3 already uses verified CSV."
+    "format": "PARQUET_WITH_CANONICAL_CSV_AUDIT_COPY",
+    "engine": "pyarrow",
+    "parquet_compression": "zstd"
   },
   "forbidden": [
     "RISK_R", "STOP_LOSS", "TAKE_PROFIT", "TRAILING", "CALLBACK", "BREAK_EVEN",

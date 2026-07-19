@@ -100,6 +100,22 @@ def atomic_csv(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequen
     os.replace(temporary, path)
 
 
+def atomic_parquet(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequence[str]) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    table = pa.Table.from_pylist([{name: row.get(name) for name in fieldnames} for row in rows])
+    pq.write_table(
+        table, temporary, compression="zstd", use_dictionary=False,
+        write_statistics=True, data_page_version="1.0",
+    )
+    with temporary.open("rb") as handle:
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
 def load_preregistration(path: Path) -> Mapping[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     required = {
@@ -597,8 +613,8 @@ EXCURSION_FIELDS = (
     "mfe_t15", "mtm_t15", "mfe_t30", "mtm_t30", "mfe_t45", "mtm_t45", "mfe_t60", "mtm_t60",
 )
 SCIENTIFIC_FILES = (
-    "entry_source_manifest.json", "trajectory_manifest.json", "trajectories.csv",
-    "excursions_per_trade.csv", "excursion_summary.json", "temporal_exit_results.json",
+    "entry_source_manifest.json", "trajectory_manifest.json", "trajectories.csv", "trajectories.parquet",
+    "excursions_per_trade.csv", "excursions_per_trade.parquet", "excursion_summary.json", "temporal_exit_results.json",
     "fold_results.json", "outlier_sensitivity.json", "diagnostic_summary.json", "diagnostic_summary.md",
     "scientific_aggregate.json",
 )
@@ -652,6 +668,11 @@ def execute_attempt(repository: Path, preregistration_path: Path, output: Path) 
         "ohlc_semantics": "bar timestamp is open time; entry is next bar open; H12 exits at bar 12 close",
         "intrabar_order": "not inferred; same-bar MFE/MAE order is marked ambiguous",
     }
+    import pyarrow
+    trajectory_manifest["tabular_serialization"] = {
+        "primary": "PARQUET", "audit_copy": "CANONICAL_CSV", "engine": "pyarrow",
+        "engine_version": pyarrow.__version__, "compression": "zstd",
+    }
     original = entry_manifest["e3_b_base_metrics"]
     reproduced = temporal["horizons"]["T60"]["B_BASE"]["pooled"]
     aggregate_checks = {
@@ -675,7 +696,9 @@ def execute_attempt(repository: Path, preregistration_path: Path, output: Path) 
     atomic_json(output / "entry_source_manifest.json", entry_manifest)
     atomic_json(output / "trajectory_manifest.json", trajectory_manifest)
     atomic_csv(output / "trajectories.csv", trajectories, TRAJECTORY_FIELDS)
+    atomic_parquet(output / "trajectories.parquet", trajectories, TRAJECTORY_FIELDS)
     atomic_csv(output / "excursions_per_trade.csv", excursions, EXCURSION_FIELDS)
+    atomic_parquet(output / "excursions_per_trade.parquet", excursions, EXCURSION_FIELDS)
     atomic_json(output / "excursion_summary.json", excursion_summary)
     atomic_json(output / "temporal_exit_results.json", temporal)
     atomic_json(output / "fold_results.json", fold_results)
