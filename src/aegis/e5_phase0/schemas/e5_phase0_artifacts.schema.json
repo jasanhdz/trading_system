@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "e5-phase0-artifacts-v1",
+  "title": "E5 Phase 0 synthetic artifact registry",
+  "type": "object",
+  "required": ["schema_version", "synthetic", "scientific_use", "artifacts"],
+  "properties": {
+    "schema_version": {"const": "e5-phase0-artifacts-v1"},
+    "synthetic": {"const": true},
+    "scientific_use": {"const": false},
+    "artifacts": {
+      "type": "array",
+      "minItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["name", "required_fields"],
+        "properties": {
+          "name": {"type": "string"},
+          "required_fields": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
