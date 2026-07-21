@@ -1,0 +1,67 @@
+{
+  "activation_id": "original-ts-live-activation-01",
+  "activation_record_path": "reports/governance/aegis_prospective_validation/live/activation/original_ts_live_activation_01.json",
+  "activation_record_sha256": "5b79b1618d8648ac5f06fe5e9a86940f3b33d23c970073ed8440fc60ed8f0576",
+  "account_reconciliation": {
+    "account_mode": "ONE_WAY",
+    "account_surface_consistency": "PASS",
+    "active_positions": 0,
+    "algo_open_orders": 0,
+    "audit_completeness": "COMPLETE",
+    "regular_open_orders": 0,
+    "unknown_open_orders": 0
+  },
+  "baseline_commit": "7f47abd216e7ac419e3d54006ce945bafcc83d90",
+  "baseline_equivalence": "PASS",
+  "credential_status": "PRESENT_ACCEPTED_NOT_EXPOSED",
+  "initial_observation": {
+    "bot_generated_exchange_mutations": 0,
+    "crash_loop": false,
+    "evaluated_signals": 6479,
+    "naturally_created_orders": 0,
+    "naturally_opened_positions": 0,
+    "observed_uptime_seconds": 1359,
+    "required_duration_seconds": 900,
+    "restart_count": 0,
+    "unstable_restart_count": 0
+  },
+  "local_exchange_consistency": {
+    "effective_result": "PASS_WITH_OWNER_RESOLVED_STALE_RESIDUE",
+    "exchange_active_positions": 0,
+    "exchange_open_orders": 0,
+    "irreconcilable_runtime_mismatch": false,
+    "known_preserved_state": "STALE_TERMINAL_BRACKET_RESIDUE_CONFIRMED",
+    "local_managed_positions": 0,
+    "local_mutation_in_flight": false
+  },
+  "newly_authorized_guards": "NONE",
+  "newly_authorized_limits": "NONE",
+  "pm2": {
+    "executable_identity": "PASS",
+    "pm2_id": 21,
+    "pm2_save": "PASS",
+    "process_state": "ONLINE",
+    "service_name": "01-Trading-Bot",
+    "single_instance": true
+  },
+  "report_timestamp_utc": "2026-07-21T22:50:30.023Z",
+  "schema_id": "aegis-original-ts-live-initial-validation-v1",
+  "shadow_coexistence": {
+    "checkpoint": "VALID",
+    "credential_reads": 0,
+    "events_duplicated": 0,
+    "events_lost": 0,
+    "journal_integrity": "PASS",
+    "order_calls": 0,
+    "private_calls": 0,
+    "restart_count_after": 1,
+    "restart_count_before": 1,
+    "service_state_after": "ONLINE",
+    "service_state_before": "ONLINE"
+  },
+  "software_enforced_usd16_cap": "NONE",
+  "status": "AEGIS_ORIGINAL_TS_LIVE_ACTIVE_NO_INITIAL_ORDER",
+  "task_generated_exchange_mutations": 0,
+  "typescript_commit": "4ae6895636677b7b898dfd6b48f71abd0b4b1b8a",
+  "usd100_stage": "INACTIVE"
+}
