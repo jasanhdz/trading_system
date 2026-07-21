@@ -1,14 +1,6 @@
 {
-  "blocking_conditions": [
-    {
-      "code": "PROSPECTIVE_MODEL_NOT_APPROVED",
-      "detail": "config/bundles/aegis-offline-reference-v1.json declares approved=false"
-    },
-    {
-      "code": "PROSPECTIVE_MODEL_NOT_TRAINED",
-      "detail": "config/bundles/aegis-offline-reference-v1.json declares trained=false and purpose=OFFLINE_REFERENCE_ONLY"
-    }
-  ],
+  "activation_boundary": "NOT_OPENED",
+  "blocking_conditions": [],
   "gates": {
     "checkpoint_resume": "PASS",
     "complete_component_evidence_contract": "PASS_SYNTHETIC",
@@ -18,8 +10,10 @@
     "historical_e5_closure_committed": "PASS",
     "historical_resources_denied": "PASS",
     "model_artifact_hash_frozen": "PASS",
-    "model_approved": "FAIL",
-    "model_trained": "FAIL",
+    "model_approved": "PASS_PROSPECTIVE_SHADOW_ONLY",
+    "model_lineage": "PASS",
+    "model_reproducibility": "PASS_BYTE_IDENTICAL_ARTIFACT_REUSE",
+    "model_trained": "PASS",
     "observational_equivalence": "PASS",
     "order_denial": "PASS",
     "outcome_label_contract_frozen": "PASS",
@@ -33,8 +27,10 @@
   "historical_confirmation": "NOT_STARTED_NOT_EXECUTABLE",
   "historical_discovery": "NOT_STARTED_NOT_EXECUTABLE",
   "lockbox": "NOT_CONSUMED",
+  "model_identity": "aegis-prospective-shadow-candidate-v1",
+  "model_artifact_sha256": "386742c20d74a3b67d47cd95629c646195472e05e9e8d136587d40989a82e3d1",
   "prospective_collection": "NOT_STARTED",
   "schema_id": "aegis-shadow-readiness-v1",
   "semi_blind": "NOT_ACCESSED",
-  "verdict": "NOT_READY_FOR_SHADOW"
+  "verdict": "READY_FOR_SEPARATELY_AUTHORIZED_SHADOW_START"
 }

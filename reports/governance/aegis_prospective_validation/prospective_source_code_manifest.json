@@ -1,16 +1,20 @@
 {
   "files": {
+    "binance-futures-bot-ts/src/prospective/candidate-model.ts": "6f379b0041b4287fb0350f9606440551283be4ab221315d33feb2fafbe153bb3",
     "binance-futures-bot-ts/src/prospective/canonical.ts": "86e8e873e6be50bc70de5fcc655352204586bf314725443097410ae9c34fc6cf",
     "binance-futures-bot-ts/src/prospective/evidence.ts": "43849dba51a3538756b97360210d207153d9163f1a6ff754abbd1599b8107ffc",
     "binance-futures-bot-ts/src/prospective/identity.ts": "69609744223b477d02e2a00b860b155381578e8b9c31241ec1d6089c2d695370",
-    "binance-futures-bot-ts/src/prospective/prospective.test.ts": "5576ea13cf7903102a7315786272a5833a5be34ff12fcc3e67f92a10cb2ac6ae",
-    "binance-futures-bot-ts/src/prospective/shadow-harness.ts": "2781f3cb2e38774e0daa6d9761dec6c18353553170d7e7af77cbc00b945ac356",
+    "binance-futures-bot-ts/src/prospective/prospective.test.ts": "943bb7f96e0a369bebacb42fcbe378dcf1675b087c2ebc9a889e15dec651c9eb",
+    "binance-futures-bot-ts/src/prospective/shadow-harness.ts": "4102360bfe10365ddebd6484ee3d8669696e24320819a0b0648fa8a55529d585",
     "src/aegis/prospective/__init__.py": "f0ebcdb4d66cdc8e4acb6841be68816c563c7b1197f6491968b87f25d1707da2",
     "src/aegis/prospective/outcomes.py": "d82527959c69e463967dbba8c4251a280021dbc0f4b75b6250e0303881e0c971",
+    "src/aegis/prospective/model_qualification.py": "71ea4a0ad42840376375af3cd991127b698e8608ac8f85f07dc42ba25635781b",
     "src/aegis/prospective/safety.py": "0454382ef7ed450a16c174f08d18e46724a1f0ee6ad3ae5fa8383fa1ff007dea",
+    "tests/unit/test_prospective_model_qualification.py": "dd119a5387c2189d3ebdc5ad8fe4f087e64698c15bc15d1c2e644f8772cc3030",
     "tests/unit/test_prospective_outcomes.py": "7e674dc1d70ba47d1bccf76038d218e22133fe504e63f2909e0298b4d0e094d5"
   },
+  "model_qualification_python_commit": "ad64c0e2982c287a69c32ec9ab7d319992995bf8",
   "python_implementation_commit": "bf5c10a5eeda55ce3d855898ed29572e446803a9",
   "schema_id": "aegis-prospective-source-code-manifest-v1",
-  "typescript_implementation_commit": "9451dc4e254046a048db80e0c6dfe01db6555c3f"
+  "typescript_implementation_commit": "38a2ddf03432ff5bfadfd0edf86c0aa0b410b75e"
 }
