@@ -1,0 +1,18 @@
+{
+  "checks": {
+    "duplicate_train_validation_event_policy": "PASS_FROZEN_FAIL_CLOSED",
+    "feature_after_information_cutoff": "PASS_CAUSAL_FEATURE_CONTRACT",
+    "future_funding_input": "PASS_NOT_A_MODEL_INPUT",
+    "future_market_input": "PASS_CAUSAL_FEATURE_CONTRACT",
+    "historical_e5_fold3_access": "PASS_DENIED",
+    "historical_e5_fold4_access": "PASS_DENIED",
+    "lockbox_access": "PASS_DENIED",
+    "normalizer_lineage": "PASS_FROZEN_TRAINING_PIPELINE",
+    "prospective_event_use": "PASS_NONE",
+    "semi_blind_access": "PASS_DENIED"
+  },
+  "lineage_basis": "FROZEN_PHASE_E_MANIFESTS_AND_SOURCE_CONTRACTS_NO_ROW_REOPENING",
+  "prohibited_data_accessed": [],
+  "result": "PASS_NO_LEAKAGE_DETECTED",
+  "schema_id": "aegis-prospective-model-leakage-report-v1"
+}

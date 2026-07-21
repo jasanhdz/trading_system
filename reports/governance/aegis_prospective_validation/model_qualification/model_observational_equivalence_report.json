@@ -1,0 +1,13 @@
+{
+  "candidate_decision_with_recorder_equals_without_recorder": "PASS",
+  "component_inputs_unchanged": "PASS",
+  "component_results_unchanged": "PASS",
+  "final_action_unchanged": "PASS",
+  "model_inputs_unchanged": "PASS",
+  "model_outputs_unchanged": "PASS",
+  "order_intent_added": false,
+  "qualification_event_classification": "PREACTIVATION_NON_COHORT",
+  "risk_intent_unchanged": "PASS",
+  "schema_id": "aegis-prospective-model-observational-equivalence-v1",
+  "signal_ordering_unchanged": "PASS"
+}

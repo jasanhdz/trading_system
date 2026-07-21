@@ -1,0 +1,13 @@
+{
+  "batch_single_agreement": "PASS",
+  "finite_output": "PASS",
+  "inference_elapsed_ns": 3527625,
+  "model_artifact_sha256": "386742c20d74a3b67d47cd95629c646195472e05e9e8d136587d40989a82e3d1",
+  "model_identity": "aegis-prospective-shadow-candidate-v1",
+  "non_degeneracy": "PASS",
+  "output_digest": "088514bd63942f318205a10e9207e58d51ad376aa8623a7b4472993942c6c0e9",
+  "prediction_count": 3,
+  "repeated_inference": "BYTE_IDENTICAL",
+  "schema_id": "aegis-prospective-model-inference-validation-v1",
+  "validation_fixture": "PREACTIVATION_NON_COHORT_SYNTHETIC"
+}

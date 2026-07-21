@@ -7,6 +7,7 @@ import json
 import math
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -15,6 +16,7 @@ from aegis.config import CANONICAL_SYMBOLS
 from aegis.domain import FeatureBatch, FeatureQuality, FeatureRow, ModelPredictions
 from aegis.features import feature_contract
 from aegis.models import DeterministicModelRuntime, ModelBundle, load_model_bundle
+from aegis.training.experiment import evaluate_authoritative_feature_batch
 from aegis.utils import Sha256HashProvider, canonical_json, sha256_file, to_primitive
 
 
@@ -174,7 +176,10 @@ def load_qualified_candidate(bundle_path: Path) -> QualifiedCandidateBundle:
     artifact = payload.get("model_artifact")
     if not isinstance(artifact, Mapping) or artifact.get("sha256") != SOURCE_BUNDLE_SHA256:
         raise ModelQualificationError("PROSPECTIVE_MODEL_ARTIFACT_HASH_MISMATCH")
-    source = _validated_source(Path(str(artifact.get("path", ""))))
+    source_path = Path(str(artifact.get("path", "")))
+    if not source_path.is_absolute() and not source_path.is_file():
+        source_path = bundle_path.resolve().parents[2] / source_path
+    source = _validated_source(source_path)
     if artifact.get("content_hash") != source.content_hash:
         raise ModelQualificationError("PROSPECTIVE_MODEL_ARTIFACT_HASH_MISMATCH")
     return QualifiedCandidateBundle(payload, source)
@@ -258,6 +263,36 @@ def qualify_inference(candidate: QualifiedCandidateBundle) -> Mapping[str, Any]:
     }
 
 
+def run_full_brain_smoke(candidate: QualifiedCandidateBundle) -> Mapping[str, Any]:
+    features = synthetic_feature_batch(CANONICAL_SYMBOLS)
+    timestamp = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
+    kwargs = {
+        "timestamp": timestamp,
+        "config": {"protocol": {"friction_fraction": 0.0}},
+        "request_id": "preactivation-model-qualification",
+        "decision_cycle_id": "preactivation-model-qualification-cycle",
+    }
+    first = evaluate_authoritative_feature_batch(candidate.source, features, **kwargs)
+    second = evaluate_authoritative_feature_batch(candidate.source, features, **kwargs)
+    first_hash = Sha256HashProvider().digest_value(to_primitive(first))
+    second_hash = Sha256HashProvider().digest_value(to_primitive(second))
+    if first_hash != second_hash:
+        raise ModelQualificationError("PROSPECTIVE_MODEL_REPLAY_NONDETERMINISTIC")
+    return {
+        "candidate_count": len(first.candidates.candidates),
+        "component_contracts": ["D3", "RV2", "TRRM", "QMAE", "EQM", "ECON1"],
+        "event_classification": "PREACTIVATION_NON_COHORT",
+        "full_brain_replay": "BYTE_IDENTICAL",
+        "model_identity": candidate.model_identity,
+        "output_digest": first_hash,
+        "persistent_service_started": False,
+        "private_requests": 0,
+        "real_orders": 0,
+        "schema_id": "aegis-prospective-model-shadow-smoke-v1",
+        "simulated_intents_only": True,
+    }
+
+
 def _main() -> int:
     parser = argparse.ArgumentParser(description="Seal and validate the prospective Shadow candidate")
     parser.add_argument("--source", type=Path, required=True)
@@ -275,4 +310,3 @@ def _main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_main())
-

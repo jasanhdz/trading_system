@@ -1,0 +1,18 @@
+{
+  "activation_boundary": "NOT_OPENED",
+  "approval_scope": "PROSPECTIVE_SHADOW_ONLY",
+  "approved": true,
+  "approved_for_live": false,
+  "blocking_conditions": [],
+  "candidate_identity": "aegis-prospective-shadow-candidate-v1",
+  "determinism": "BYTE_IDENTICAL_ARTIFACT_REUSE",
+  "historical_e5": "CLOSED_NON_EXECUTABLE",
+  "leakage": "PASS_NO_LEAKAGE_DETECTED",
+  "lockbox": "NOT_CONSUMED",
+  "model_artifact_sha256": "386742c20d74a3b67d47cd95629c646195472e05e9e8d136587d40989a82e3d1",
+  "qualification_protocol_commit": "db5787a",
+  "qualification_protocol_sha256": "3d84edcea5c7f84931279434879150087159355c7776fe36d9b52e1c872f5b81",
+  "schema_id": "aegis-prospective-model-qualification-verdict-v1",
+  "trained": true,
+  "verdict": "QUALIFIED_FOR_PROSPECTIVE_SHADOW_ONLY"
+}

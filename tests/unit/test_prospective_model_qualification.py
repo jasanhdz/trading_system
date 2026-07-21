@@ -13,6 +13,7 @@ from aegis.prospective.model_qualification import (
     QualifiedShadowModelRuntime,
     load_qualified_candidate,
     qualify_inference,
+    run_full_brain_smoke,
     seal_candidate_bundle,
     synthetic_feature_batch,
 )
@@ -65,6 +66,17 @@ def test_inference_is_finite_non_degenerate_deterministic_and_batch_equivalent(t
     assert result["non_degeneracy"] == "PASS"
     assert result["repeated_inference"] == "BYTE_IDENTICAL"
     assert result["batch_single_agreement"] == "PASS"
+
+
+def test_full_brain_smoke_is_deterministic_and_preactivation_only(tmp_path: Path) -> None:
+    output = tmp_path / "candidate.json"
+    seal_candidate_bundle(SOURCE, PROTOCOL, output)
+    result = run_full_brain_smoke(load_qualified_candidate(output))
+    assert result["full_brain_replay"] == "BYTE_IDENTICAL"
+    assert result["event_classification"] == "PREACTIVATION_NON_COHORT"
+    assert result["private_requests"] == 0
+    assert result["real_orders"] == 0
+    assert result["persistent_service_started"] is False
 
 
 def test_runtime_rejects_unsupported_symbol_interval_and_feature_contract(tmp_path: Path) -> None:

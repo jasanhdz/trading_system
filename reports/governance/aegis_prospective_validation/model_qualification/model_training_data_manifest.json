@@ -1,0 +1,21 @@
+{
+  "access_during_qualification": "MANIFEST_ONLY_NO_ROW_PAYLOAD_ACCESS",
+  "dataset_identity": "1ffd0eaf07515d3a1a5fd6363f09c2d8ffe1e1f3925989486dee398e25b8c294",
+  "dataset_manifest_path": "reports/experiments/e3_validation_official/attempt_1/aegis-short-candidate-e3/runs/d742d9bc0ae867bb/dataset_manifest.json",
+  "dataset_manifest_sha256": "6c2e97c8ac7bb28a167c0a0783dab9b27ebff69e1ecf34e7052869e9944c5a1c",
+  "duplicate_policy": "FROZEN_PHASE_E_FAIL_CLOSED",
+  "end_utc": "2026-04-26T23:00:00Z",
+  "feature_schema": "aegis-features-v2",
+  "feature_schema_sha256": "2dc278b4353585fe22503233187e12832cabfd67e2a2e58f4cd683ee6f3b9454",
+  "label_schema": "aegis-labels-short-v4",
+  "lineage_status": "VERIFIED",
+  "missingness_policy": "FROZEN_PHASE_E_QUARANTINE_FAIL_CLOSED",
+  "prohibited_partitions_accessed": [],
+  "row_count": 172480,
+  "schema_id": "aegis-prospective-model-training-data-manifest-v1",
+  "source_code_commit": "aea3437e0a969aa72ba6adb2331ca6e87020c7ad",
+  "start_utc": "2024-07-12T16:00:00Z",
+  "symbol_count": 11,
+  "temporal_cutoff_policy": "CAUSAL_FEATURES_AND_CHRONOLOGICAL_EMBARGOED_SPLITS",
+  "training_configuration_sha256": "70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79"
+}
