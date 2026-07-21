@@ -1,0 +1,14 @@
+{
+  "credential_reads": 0,
+  "dns_tls_http": "PASS",
+  "endpoint": "https://fapi.binance.com/fapi/v1/klines",
+  "endpoint_class": "PUBLIC_REST",
+  "interval": "5m",
+  "market_timestamp_available": true,
+  "order_calls": 0,
+  "private_calls": 0,
+  "schema_id": "aegis-shadow-public-connectivity-report-v1",
+  "status": "PASS",
+  "symbol": "BTCUSDT",
+  "websocket": "NOT_APPLICABLE_REST_RUNTIME"
+}

@@ -1,0 +1,10 @@
+{
+  "activation_id": "shadow-cohort-1-1784656035861",
+  "checkpoint_path": "data/prospective_shadow/cohort_1/checkpoints/shadow_service_v1.json",
+  "checkpoint_sha256_after_second_cycle": "16bdf94b0c8078d68b778403d49c3df06801b4e1eb89ae5b8944aeff0c962cef",
+  "checkpoint_sha256_before_restart": "d331181334b31dbda413e961e2eff43812a2dc5feda2a58a9894f1b498cf2ab6",
+  "conflicts": 0,
+  "recovery_validation": "PASS",
+  "schema_id": "aegis-shadow-checkpoint-report-v1",
+  "status": "VALID"
+}
