@@ -92,4 +92,3 @@ Deterministic terminal failures include candidate ambiguity, unauthorized traini
 ## Unchanged safety state
 
 Historical E5 remains non-executable. Historical Discovery and Confirmation remain `NOT_STARTED_NOT_EXECUTABLE`. The lockbox remains `NOT_CONSUMED`, `consumed_queries=[]`, and `budget_remaining=1`. The prospective activation boundary, persistent Shadow, USD 16 stage, USD 100 stage, and Live remain inactive.
-
