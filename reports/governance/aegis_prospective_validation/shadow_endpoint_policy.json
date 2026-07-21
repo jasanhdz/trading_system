@@ -1,0 +1,12 @@
+{
+  "allowed": [
+    {"host": "fapi.binance.com", "method": "GET", "path_prefix": "/fapi/v1/klines"},
+    {"host": "fstream.binance.com", "method": "WEBSOCKET", "path_prefix": "/ws/"}
+  ],
+  "credential_access": "PROHIBITED",
+  "default": "DENY",
+  "live_adapter": "PROHIBITED",
+  "private_path_fragments": ["/account", "/balance", "/listenKey", "/order", "/position", "/leverage", "/marginType"],
+  "request_signing": "PROHIBITED",
+  "schema_id": "aegis-shadow-endpoint-policy-v1"
+}

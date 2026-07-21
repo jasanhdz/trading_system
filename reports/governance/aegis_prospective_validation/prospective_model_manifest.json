@@ -1,0 +1,13 @@
+{
+  "artifact_path": "config/bundles/aegis-offline-reference-v1.json",
+  "artifact_sha256": "05d9999c46f1b2c3530a4aeef69cec95da1ad43a837b6666486321131e4f0c56",
+  "bundle_content_hash": "fe60895ce1acb2e503d996a32264bf5da925834330810af6aa7fa2f36ea0ddc0",
+  "bundle_id": "aegis-offline-reference-v1",
+  "collection_authorized": false,
+  "lifecycle_state": "EXPERIMENTAL",
+  "model_approved": false,
+  "model_trained": false,
+  "purpose": "OFFLINE_REFERENCE_ONLY",
+  "readiness_failure_code": "PROSPECTIVE_MODEL_NOT_APPROVED",
+  "schema_id": "aegis-prospective-model-manifest-v1"
+}

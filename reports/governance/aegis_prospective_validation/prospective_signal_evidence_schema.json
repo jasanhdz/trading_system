@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis-prospective-signal-evidence-v1",
+  "additionalProperties": false,
+  "properties": {
+    "component_evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "d3": {"$ref": "#/$defs/component"},
+        "econ1": {"$ref": "#/$defs/component"},
+        "eqm": {"$ref": "#/$defs/component"},
+        "qmae": {"$ref": "#/$defs/component"},
+        "rv2": {"$ref": "#/$defs/component"},
+        "trrm": {"$ref": "#/$defs/component"}
+      },
+      "required": ["d3", "rv2", "trrm", "qmae", "eqm", "econ1"],
+      "type": "object"
+    },
+    "configuration_hash": {"$ref": "#/$defs/hash"},
+    "cohort_id": {"minLength": 1, "type": "string"},
+    "evaluation_id": {"minLength": 1, "type": "string"},
+    "event_sequence_id": {"minLength": 1, "type": "string"},
+    "final_decision": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {"enum": ["ENTER_NOW", "WAIT_CONFIRMATION", "MANUAL_ONLY", "DO_NOT_ENTER", "NO_TRADE"]},
+        "component_results_hash": {"$ref": "#/$defs/hash"},
+        "reason_codes": {"items": {"type": "string"}, "type": "array"},
+        "risk_intent": {"type": "object"}
+      },
+      "required": ["action", "reason_codes", "component_results_hash", "risk_intent"],
+      "type": "object"
+    },
+    "information_cutoff_utc": {"format": "date-time", "type": "string"},
+    "model_artifact_hash": {"$ref": "#/$defs/hash"},
+    "model_identity": {"minLength": 1, "type": "string"},
+    "operational_context": {
+      "additionalProperties": false,
+      "properties": {
+        "cost_policy_identity": {"type": "string"},
+        "intended_entry": {"const": "SIGNAL_CLOSE"},
+        "risk_policy_identity": {"type": "string"},
+        "shadow_routing_result": {"enum": ["HYPOTHETICAL_INTENT", "NO_INTENT", "BLOCKED"]},
+        "sizing_policy_identity": {"type": "string"}
+      },
+      "required": ["intended_entry", "risk_policy_identity", "sizing_policy_identity", "cost_policy_identity", "shadow_routing_result"],
+      "type": "object"
+    },
+    "prospective_signal_id": {"$ref": "#/$defs/hash"},
+    "protocol_version": {"const": "aegis-prospective-validation-v1"},
+    "schema_id": {"const": "aegis-prospective-signal-evidence-v1"},
+    "side": {"enum": ["SHORT", "NO_TRADE"]},
+    "signal_timestamp_utc": {"format": "date-time", "type": "string"},
+    "source_python_commit": {"pattern": "^[0-9a-f]{40}$", "type": "string"},
+    "source_typescript_commit": {"pattern": "^[0-9a-f]{40}$", "type": "string"},
+    "symbol": {"pattern": "^[A-Z0-9]+$", "type": "string"},
+    "upstream_model": {"type": "object"}
+  },
+  "required": ["schema_id", "prospective_signal_id", "evaluation_id", "event_sequence_id", "cohort_id", "protocol_version", "symbol", "side", "signal_timestamp_utc", "information_cutoff_utc", "source_typescript_commit", "source_python_commit", "model_identity", "model_artifact_hash", "configuration_hash", "upstream_model", "component_evidence", "final_decision", "operational_context"],
+  "type": "object",
+  "$defs": {
+    "component": {
+      "additionalProperties": false,
+      "properties": {
+        "input_hash": {"$ref": "#/$defs/hash"},
+        "output": {"type": "object"},
+        "output_hash": {"$ref": "#/$defs/hash"},
+        "status": {"enum": ["PASS", "REJECT", "NOT_APPLICABLE", "ERROR"]}
+      },
+      "required": ["status", "input_hash", "output_hash", "output"],
+      "type": "object"
+    },
+    "hash": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+  }
+}
