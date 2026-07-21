@@ -1,0 +1,30 @@
+{
+  "authority": "e5-owner-authorized-amendment-07",
+  "budget_remaining": 1,
+  "classification": "HISTORICAL_E5_NON_EXECUTABLE_MISSING_CONTEMPORANEOUS_ROW_TARGETS",
+  "consumed_queries": [],
+  "fold_3_4_values_exposed": 0,
+  "historical_confirmation": "NOT_STARTED_NOT_EXECUTABLE",
+  "historical_discovery": "NOT_STARTED_NOT_EXECUTABLE",
+  "historical_entry_manifest": {
+    "row_count": 702,
+    "sha256": "c2fe7c9bb52b355255d8e15453a90a3ae8177d12fa174fb5062961a2cea5f45f",
+    "status": "PRESERVED_FOR_AUDIT"
+  },
+  "historical_result": "INCONCLUSIVE_INPUT_EVIDENCE_UNAVAILABLE",
+  "lockbox": "NOT_CONSUMED",
+  "missing_mandatory_targets": [
+    "clean_quality",
+    "label_valid",
+    "net_quality_after_costs",
+    "qmae",
+    "tail_event"
+  ],
+  "phase0": "VALID_ENGINEERING_ACCOMPLISHMENT",
+  "phase1a": "VALID_ENGINEERING_ACCOMPLISHMENT",
+  "reopen_condition": "VERIFIED_AUTHENTIC_CONTEMPORANEOUS_IMMUTABLE_ROW_TARGET_ARTIFACT_AND_SEPARATE_OWNER_AUTHORIZATION",
+  "schema_id": "historical-e5-closure-report-v1",
+  "scientific_rows_manually_inspected": 0,
+  "semi_blind": "NOT_ACCESSED",
+  "status": "CLOSED_NON_EXECUTABLE"
+}
