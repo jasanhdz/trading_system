@@ -1,0 +1,43 @@
+{
+  "activation_id": "original-ts-live-activation-01",
+  "activation_record_path": "reports/governance/aegis_prospective_validation/live/activation/original_ts_live_activation_01.json",
+  "authorization_commit": "296e9326b783c6939ae3f04799f08ba577f4d6cf",
+  "authorization_document_sha256": "f6eba8f6bc5aceb9859139e07146679255aae7f64a4065aed5de7e6fda616fb4",
+  "baseline_commit": "7f47abd216e7ac419e3d54006ce945bafcc83d90",
+  "build_validation": {
+    "audit_safety_tests": "PASS_59_OF_59",
+    "focused_operational_tests": "PASS_117_OF_117",
+    "full_regression": "PASS_719_OF_719",
+    "operational_blob_equivalence": "PASS",
+    "restoration_harness": "PASS_18_OF_18",
+    "static_forbidden_import_validation": "PASS",
+    "strict_type_check": "PASS",
+    "typescript_build": "PASS"
+  },
+  "capital_source": "BINANCE_USDM_AVAILABLE_USDT_BALANCE",
+  "credential_loading_mechanism": "DOTENV_CONFIG_PATH=.env with node -r dotenv/config",
+  "declared_bot_mode": "AEGIS_TURBO_MICRO_LIVE",
+  "executable": "/home/jasan/Develop/trading_system/binance-futures-bot-ts/dist/main.js",
+  "executable_sha256": "47aebfe8052954dc34d423e948874b0fc963bf0b108300bb67f66f7feca0b835",
+  "live_enable_state": "AEGIS_LIVE_ENABLED=1",
+  "newly_authorized_guards": "NONE",
+  "newly_authorized_limits": "NONE",
+  "pm2_service_name": "01-Trading-Bot",
+  "preflight_result": "COMPLETE_FLAT_ORDER_EMPTY",
+  "real_order_authority": "ORIGINAL_TYPESCRIPT_BOT_ONLY",
+  "restart_policy": {
+    "autorestart": true,
+    "max_restarts": null,
+    "restart_delay_ms": 0,
+    "source": "PRESERVED_PM2_RECOVERY_SNAPSHOT"
+  },
+  "schema_id": "aegis-original-ts-live-start-manifest-v1",
+  "shadow_dependency_added": false,
+  "shadow_service_state": "ONLINE_INDEPENDENT",
+  "startup_state_at_manifest_creation": "PENDING_START",
+  "task_generated_exchange_mutations": 0,
+  "typescript_commit": "4ae6895636677b7b898dfd6b48f71abd0b4b1b8a",
+  "usd100_stage": "INACTIVE",
+  "usd16_software_cap": "NONE",
+  "working_directory": "/home/jasan/Develop/trading_system/binance-futures-bot-ts"
+}
