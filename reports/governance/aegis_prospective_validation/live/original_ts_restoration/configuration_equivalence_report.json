@@ -1,0 +1,11 @@
+{
+  "baseline_configuration_files": "BYTE_IDENTICAL",
+  "baseline_defaults": "IDENTICAL",
+  "baseline_environment_parsing": "IDENTICAL",
+  "baseline_fallbacks": "IDENTICAL",
+  "baseline_required_fields": "IDENTICAL",
+  "new_operational_requirements": [],
+  "regimen_config_classification": "SHADOW_ONLY_UNREACHABLE_FROM_ORIGINAL_RUNTIME",
+  "schema_id": "aegis-original-typescript-configuration-equivalence-v1",
+  "status": "PASS"
+}

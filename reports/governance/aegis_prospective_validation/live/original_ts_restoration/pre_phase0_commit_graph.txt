@@ -1,0 +1,21 @@
+feature/aegis-ts-integration
+|
+* 7f47abd216e7ac419e3d54006ce945bafcc83d90 fix: recognize Phase O SHORT metadata
+|\
+| * 1d0e33af780673631c3d7939795e7b382e22469a feat: scaffold Aegis brain integration contracts
+| * 1ffffe0f6ad0142054d7b1fc46ab6b67c84e7c80 feat: implement Aegis brain contract integration
+| * cfe758a7816e44fa34f11179ffa01bf8cf554fab test: validate Aegis brain integration contract
+| * c158aa31ec073f9fec3cc57e879d8c9c076eebb7 feat: implement explicit shadow brain mode
+| * 24237a481b5ce6a2cb014c2f5ab078d371a259fd test: validate shadow replay contract
+| * 53105ee34c6e29f960c37c3516a58fffd2aa5906 P2: enforce SHORT-only brain integration
+| * 9451dc4e254046a048db80e0c6dfe01db6555c3f feat(aegis): add prospective evidence and shadow harness
+| * 38a2ddf03432ff5bfadfd0edf86c0aa0b410b75e feat(prospective): integrate shadow candidate model
+| * e05ced9f9300a7ceef32e9b6040c3e8252851a4d feat(prospective): add persistent shadow cohort service
+| * f905f62ea13d81768c91900c05468c89d35924c7 feat(prospective): add shadow health command
+| * 8cddb0a58589c899a565f250607f101240e551ea fix(prospective): decouple connectivity preflight
+| * 96f4ad175dcf3c90c2f058211ed4523b804d3853 style(prospective): format shadow runtime
+| * 672334381ece7c39437e678a99c652102f9fc7d8 feat(audit): add mutation-guarded Binance USD-M reconciliation
+| * 4ae6895636677b7b898dfd6b48f71abd0b4b1b8a test(trading): bind original operational semantics
+
+Branch creation reflog: feature/aegis-ts-clean-rebuild created from 7f47abd.
+PRE_PHASE0_TYPESCRIPT_BASELINE_COMMIT=7f47abd216e7ac419e3d54006ce945bafcc83d90

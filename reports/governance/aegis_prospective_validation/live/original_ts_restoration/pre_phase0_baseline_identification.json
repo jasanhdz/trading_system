@@ -1,0 +1,16 @@
+{
+  "ambiguity_result": "NONE",
+  "baseline_commit": "7f47abd216e7ac419e3d54006ce945bafcc83d90",
+  "branch": "feature/aegis-ts-clean-rebuild",
+  "confidence": "CONCLUSIVE",
+  "determination_method": [
+    "branch reflog records creation from 7f47abd216e7ac419e3d54006ce945bafcc83d90",
+    "reverse first-parent history identifies 1d0e33af780673631c3d7939795e7b382e22469a as first unique commit",
+    "commit-parent inspection proves 1d0e33a has sole parent 7f47abd",
+    "merge-base with feature/aegis-ts-integration is 7f47abd"
+  ],
+  "first_unique_feature_commit": "1d0e33af780673631c3d7939795e7b382e22469a",
+  "merge_base": "7f47abd216e7ac419e3d54006ce945bafcc83d90",
+  "schema_id": "aegis-pre-phase0-typescript-baseline-identification-v1",
+  "upstream_comparison_reference": "feature/aegis-ts-integration"
+}

@@ -1,0 +1,21 @@
+{
+  "items": {
+    "activation_record_dependency": "NOT_PRESENT",
+    "approved_for_live_dependency": "NOT_PRESENT",
+    "concurrency_cap": "NOT_PRESENT",
+    "fee_reserves": "NOT_PRESENT",
+    "funding_reserves": "NOT_PRESENT",
+    "governance_dependency": "NOT_PRESENT",
+    "isolated_only_rule": "EXISTED_IN_BASELINE",
+    "lifecycle_cap": "NOT_PRESENT",
+    "model_hash_dependency": "NOT_PRESENT",
+    "new_capital_ledger": "NOT_PRESENT",
+    "new_exhaustion_state_machine": "NOT_PRESENT",
+    "per_lifecycle_4_usdt_cap": "NOT_PRESENT",
+    "shadow_evaluation_dependency": "NOT_PRESENT",
+    "slippage_reserves": "NOT_PRESENT",
+    "usd16_lifecycle_state_machine": "NOT_PRESENT"
+  },
+  "note": "The baseline TradingService itself calls ensureMarginType(symbol, ISOLATED); it was preserved rather than added or removed.",
+  "schema_id": "aegis-removed-additional-restrictions-v1"
+}
