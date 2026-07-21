@@ -1,0 +1,10 @@
+{
+  "canonical_key_ordering": "PASS",
+  "checkpoint_resume": "BYTE_IDENTICAL_STATE",
+  "dictionary_order_independence": "PASS",
+  "identity_repeat": "BYTE_IDENTICAL",
+  "outcome_journal_restart": "BYTE_IDENTICAL_UNMODIFIED_JOURNAL",
+  "schema_id": "aegis-prospective-determinism-report-v1",
+  "signal_input_order_independence": "PASS",
+  "status": "PASS"
+}

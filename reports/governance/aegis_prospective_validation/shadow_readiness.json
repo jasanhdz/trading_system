@@ -1,0 +1,40 @@
+{
+  "blocking_conditions": [
+    {
+      "code": "PROSPECTIVE_MODEL_NOT_APPROVED",
+      "detail": "config/bundles/aegis-offline-reference-v1.json declares approved=false"
+    },
+    {
+      "code": "PROSPECTIVE_MODEL_NOT_TRAINED",
+      "detail": "config/bundles/aegis-offline-reference-v1.json declares trained=false and purpose=OFFLINE_REFERENCE_ONLY"
+    }
+  ],
+  "gates": {
+    "checkpoint_resume": "PASS",
+    "complete_component_evidence_contract": "PASS_SYNTHETIC",
+    "credential_denial": "PASS",
+    "deterministic_replay": "PASS",
+    "evidence_schemas_frozen": "PASS",
+    "historical_e5_closure_committed": "PASS",
+    "historical_resources_denied": "PASS",
+    "model_artifact_hash_frozen": "PASS",
+    "model_approved": "FAIL",
+    "model_trained": "FAIL",
+    "observational_equivalence": "PASS",
+    "order_denial": "PASS",
+    "outcome_label_contract_frozen": "PASS",
+    "private_endpoint_denial": "PASS",
+    "prospective_identity": "PASS",
+    "prospective_protocol_committed": "PASS",
+    "public_endpoint_allowlist": "PASS",
+    "row_level_target_persistence": "PASS",
+    "stale_and_duplicate_handling": "PASS"
+  },
+  "historical_confirmation": "NOT_STARTED_NOT_EXECUTABLE",
+  "historical_discovery": "NOT_STARTED_NOT_EXECUTABLE",
+  "lockbox": "NOT_CONSUMED",
+  "prospective_collection": "NOT_STARTED",
+  "schema_id": "aegis-shadow-readiness-v1",
+  "semi_blind": "NOT_ACCESSED",
+  "verdict": "NOT_READY_FOR_SHADOW"
+}

@@ -1,0 +1,15 @@
+{
+  "balance_source": "SYNTHETIC_ONLY",
+  "credential_access": "DENIED_TESTED",
+  "hard_interlock": "PASS",
+  "live_adapter": "UNAVAILABLE_TO_PROSPECTIVE_HARNESS",
+  "live_mode": "DENIED_TESTED",
+  "money_moved_usd": 0,
+  "order_operations": "DENIED_TESTED",
+  "private_endpoint_access": "DENIED_TESTED",
+  "private_network_calls": 0,
+  "public_endpoint_allowlist": "PASS",
+  "schema_id": "aegis-shadow-safety-report-v1",
+  "signed_requests": "DENIED_TESTED",
+  "status": "PASS"
+}

@@ -1,0 +1,15 @@
+{
+  "checkpoint_contains_credentials": false,
+  "checkpoint_contains_outcomes": false,
+  "checkpoint_identity_fields": [
+    "configuration_hash",
+    "model_artifact_hash",
+    "processed_event_ids",
+    "schema_id"
+  ],
+  "conflicting_checkpoint_denied": true,
+  "duplicate_event_denied_after_resume": true,
+  "restart_state_equal": true,
+  "schema_id": "aegis-prospective-checkpoint-resume-report-v1",
+  "status": "PASS"
+}
