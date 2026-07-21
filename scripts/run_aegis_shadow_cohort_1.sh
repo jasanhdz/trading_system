@@ -11,7 +11,7 @@ exec env -i \
   NODE_ENV=production \
   AEGIS_SHADOW_PYTHON=/home/jasan/.venv_rocm62/bin/python \
   AEGIS_SHADOW_PYTHON_COMMIT=94174efa02e957fff95b85f98979e6e041a54d36 \
-  AEGIS_SHADOW_TYPESCRIPT_COMMIT=f905f62ea13d81768c91900c05468c89d35924c7 \
+  AEGIS_SHADOW_TYPESCRIPT_COMMIT=8cddb0a58589c899a565f250607f101240e551ea \
   AEGIS_SHADOW_ACTIVATION_PATH="$ROOT/reports/governance/aegis_prospective_validation/activation/shadow_cohort_1_activation.json" \
   AEGIS_SHADOW_MODEL_BUNDLE="$ROOT/config/bundles/aegis-prospective-shadow-candidate-v1.json" \
   AEGIS_SHADOW_DATA_ROOT="$ROOT/data/prospective_shadow/cohort_1" \
