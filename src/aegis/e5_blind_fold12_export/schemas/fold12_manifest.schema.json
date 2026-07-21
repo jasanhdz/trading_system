@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "e5-historical-entry-manifest-v1",
+  "title": "E5 Fold 1-2 Historical Entry Manifest Row",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trade_id",
+    "symbol",
+    "fold",
+    "signal_timestamp",
+    "entry_timestamp",
+    "entry_price",
+    "side",
+    "score",
+    "strategy_id"
+  ],
+  "properties": {
+    "trade_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "symbol": {"type": "string", "pattern": "^[A-Z0-9]+$"},
+    "fold": {"enum": ["F1", "F2"]},
+    "signal_timestamp": {"type": "integer"},
+    "entry_timestamp": {"type": "integer"},
+    "entry_price": {"type": "number", "exclusiveMinimum": 0},
+    "side": {"const": "SHORT"},
+    "score": {"type": "number"},
+    "strategy_id": {"const": "full_stack"}
+  }
+}
