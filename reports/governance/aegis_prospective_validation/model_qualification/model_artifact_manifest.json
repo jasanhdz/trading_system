@@ -17,6 +17,7 @@
   "model_identity": "aegis-prospective-shadow-candidate-v1",
   "normalization_state_authority": "MODEL_ARTIFACT_CONTENT_HASH",
   "qualification_protocol_sha256": "1e9346a857feb642c60780754243624c94487ac24f9c26be2e72d631d7bec8b6",
+  "qualification_protocol_normalization_commit": "287b5cbde44b38c294eb3deb14a20193c9e43cd3",
   "qualification_validation_commit": "ad64c0e2982c287a69c32ec9ab7d319992995bf8",
   "schema_id": "aegis-prospective-model-artifact-manifest-v1",
   "seed": 20260718,
