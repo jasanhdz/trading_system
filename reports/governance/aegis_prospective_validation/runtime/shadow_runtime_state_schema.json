@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "activation_id": {"type": "string"},
+    "cohort_id": {"const": "aegis-prospective-shadow-cohort-1"},
+    "schema_id": {"const": "aegis-shadow-runtime-state-v1"},
+    "service_state": {"type": "string"}
+  },
+  "required": ["schema_id", "service_state", "activation_id", "cohort_id"],
+  "title": "Aegis Shadow Runtime State v1",
+  "type": "object"
+}

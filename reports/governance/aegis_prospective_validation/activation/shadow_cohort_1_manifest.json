@@ -1,0 +1,29 @@
+{
+  "activation_id": "shadow-cohort-1-1784656035861",
+  "automatic_live_transition": false,
+  "cohort_id": "aegis-prospective-shadow-cohort-1",
+  "completion_states": [
+    "READY_FOR_SEPARATELY_AUTHORIZED_SHADOW_EVALUATION",
+    "SHADOW_COHORT_REVIEW_REQUIRED"
+  ],
+  "maximum_review_timestamp_utc": "2026-08-20T17:47:15.861Z",
+  "minimum_conditions": {
+    "calendar_days": 14,
+    "complete_evidence_fraction": 1.0,
+    "complete_matured_outcome_fraction": 1.0,
+    "enter_now_intents": 5,
+    "evaluated_candidates": 100,
+    "money_movement_count": 0,
+    "order_call_count": 0,
+    "private_call_count": 0,
+    "public_feed_reconnects": 1,
+    "validated_restart_resume_events": 1
+  },
+  "minimum_duration_timestamp_utc": "2026-08-04T17:47:15.861Z",
+  "performance_dependent_inclusion": false,
+  "schema_id": "aegis-prospective-shadow-cohort-manifest-v1",
+  "status": "ACTIVE_OBSERVATION",
+  "threshold_mutation": "PROHIBITED",
+  "usd100_stage": "INACTIVE",
+  "usd16_stage": "INACTIVE"
+}

@@ -1,0 +1,27 @@
+{
+  "activation_id": "shadow-cohort-1-1784656035861",
+  "activation_record": "reports/governance/aegis_prospective_validation/activation/shadow_cohort_1_activation.json",
+  "checkpoint_root": "data/prospective_shadow/cohort_1/checkpoints",
+  "configuration_sha256": "f944b0210b31928a519dc63459be3f1d53de811517dc1bbe9753596314579ec1",
+  "credential_environment": "DENY_ALL_SUPPORTED_ALIASES",
+  "environment_policy": "EMPTY_ENVIRONMENT_EXPLICIT_ALLOWLIST",
+  "executable": "node binance-futures-bot-ts/dist/prospective/shadow-service.js",
+  "health_command": "node binance-futures-bot-ts/dist/prospective/shadow-service.js --health",
+  "journal_root": "data/prospective_shadow/cohort_1/journals",
+  "live_adapter": "PROHIBITED",
+  "mode": "SHADOW",
+  "model_bundle_sha256": "23b22403b70f7d6c385d1214e6543197f4ca4e57269af19b1013987891ed550a",
+  "order_operations": "PROHIBITED",
+  "python_runtime_commit": "94174efa02e957fff95b85f98979e6e041a54d36",
+  "restart_policy": {
+    "backoff_seconds": [1, 2, 4, 8, 16],
+    "maximum_restarts": 5,
+    "quarantine_after_limit": true
+  },
+  "safe_stop_command": "pm2 stop aegis-prospective-shadow-cohort-1",
+  "schema_id": "aegis-prospective-shadow-service-manifest-v1",
+  "service_id": "aegis-prospective-shadow-cohort-1",
+  "supervisor": "PM2_USER",
+  "typescript_runtime_commit": "96f4ad175dcf3c90c2f058211ed4523b804d3853",
+  "working_directory": "/home/jasan/Develop/trading_system"
+}
