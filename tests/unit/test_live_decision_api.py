@@ -12,6 +12,9 @@ from aegis.config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
 from aegis.domain import Candle, FeedQuality, MarketSnapshot, PortfolioContext, SymbolSeries
 from aegis.live_api import create_app
 from aegis.live_decision import (
+    CANONICAL_DECISION_CONTRACT,
+    CANONICAL_LIVE_AUTHORITY,
+    CONFIGURATION_SHA256,
     FEATURE_COUNT,
     FEATURE_SCHEMA,
     MODEL_ARTIFACT_SHA256,
@@ -139,7 +142,17 @@ def test_all_configured_symbols_have_valid_current_outputs(canonical_batch, symb
     assert response["features"]["fallback"] is False
     assert response["features"]["schema"] == "aegis-features-v2"
     assert response["features"]["count"] == 83
-    assert response["aegis"]["decision_brain"]["decision"] in {"ENTER_NOW", "DO_NOT_ENTER"}
+    brain = response["aegis"]["decision_brain"]
+    assert brain["decision"] in {"ENTER_NOW", "DO_NOT_ENTER"}
+    assert brain["contract_version"] == CANONICAL_DECISION_CONTRACT
+    assert brain["authority"] == CANONICAL_LIVE_AUTHORITY
+    assert brain["selected"] is brain["execute"]
+    assert brain["model_sha256"] == MODEL_ARTIFACT_SHA256
+    assert brain["bundle_sha256"] == MODEL_BUNDLE_SHA256
+    assert brain["configuration_sha256"] == CONFIGURATION_SHA256
+    assert brain["feature_schema"] == FEATURE_SCHEMA
+    assert brain["feature_count"] == FEATURE_COUNT
+    assert brain["fallback"] is False
 
 
 def test_single_estimator_is_not_inflated_into_legacy_consensus(canonical_batch) -> None:

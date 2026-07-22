@@ -41,6 +41,8 @@ MODEL_ARTIFACT_SHA256 = SOURCE_BUNDLE_SHA256
 CONFIGURATION_SHA256 = "f944b0210b31928a519dc63459be3f1d53de811517dc1bbe9753596314579ec1"
 FEATURE_COUNT = 83
 SERVICE_VERSION = "aegis-current-brain-http-v1"
+CANONICAL_DECISION_CONTRACT = "aegis-current-brain-live-decision-v1"
+CANONICAL_LIVE_AUTHORITY = "OWNER_AUTHORIZED_CURRENT_PYTHON_COMMITTEE_LIVE_INTEGRATION"
 PUBLIC_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 INTERVAL_MS = 300_000
 
@@ -357,11 +359,20 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 "missing_features": [],
             },
             "decision_brain": {
+                "contract_version": CANONICAL_DECISION_CONTRACT,
+                "authority": CANONICAL_LIVE_AUTHORITY,
                 "mode": "CURRENT_BRAIN_LIVE",
                 "execute": selected,
+                "selected": selected,
                 "production_allowed": True,
                 "status": "LOADED",
                 "model_version": batch["model_identifier"],
+                "model_sha256": batch["model_sha256"],
+                "bundle_sha256": batch["bundle_sha256"],
+                "configuration_sha256": batch["configuration_sha256"],
+                "feature_schema": result["feature_schema"],
+                "feature_count": result["feature_count"],
+                "fallback": False,
                 "symbol": normalized,
                 "side": side if side in {"LONG", "SHORT"} else "HOLD",
                 "decision": "ENTER_NOW" if selected else "DO_NOT_ENTER",
