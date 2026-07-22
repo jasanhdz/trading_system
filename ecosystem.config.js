@@ -17,8 +17,9 @@ module.exports = {
         },
         {
             name: "02-Aegis-API",
-            script: "aegis_alpha/inference/server.py",
-            interpreter: "/home/jasan/.venv_rocm62/bin/python",
+            script: "/home/jasan/.venv_rocm62/bin/python",
+            args: "-m aegis.live_api --host 127.0.0.1 --port 8001",
+            interpreter: "none",
             cwd: "/home/jasan/Develop/trading_system",
             instances: 1,
             autorestart: true,
@@ -27,9 +28,7 @@ module.exports = {
             max_restarts: 10,
             watch: false,
             env: {
-                "PYTHONPATH": "/home/jasan/Develop/trading_system",
-                "AEGIS_CONFIG": "aegis_alpha/configs/production.yaml",
-                "AEGIS_PORT": "8001",
+                "PYTHONPATH": "/home/jasan/Develop/trading_system/src",
                 "HSA_OVERRIDE_GFX_VERSION": "10.3.0",
                 "LD_LIBRARY_PATH": "/opt/rocm-6.2.0/lib:/opt/rocm-6.2.0/lib64",
                 "HIP_VISIBLE_DEVICES": ""  // CPU-only inference, frees GPUs for training

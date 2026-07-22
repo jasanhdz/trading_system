@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import math
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 import httpx
@@ -216,3 +217,11 @@ def test_live_http_modules_have_no_binance_mutation_surface() -> None:
     )
     assert all(value not in source for value in forbidden)
     assert "https://fapi.binance.com/fapi/v1/klines" in source
+
+
+def test_pm2_definition_uses_local_module_and_no_credentials() -> None:
+    text = (Path(__file__).parents[2] / "ecosystem.config.js").read_text(encoding="utf-8")
+    assert "-m aegis.live_api --host 127.0.0.1 --port 8001" in text
+    python_block = text.split('name: "02-Aegis-API"', 1)[1]
+    assert "BINANCE_API" not in python_block
+    assert '"PYTHONPATH": "/home/jasan/Develop/trading_system/src"' in python_block
