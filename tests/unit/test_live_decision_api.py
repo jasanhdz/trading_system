@@ -49,8 +49,7 @@ def real_engine() -> CurrentBrainEngine:
     return engine
 
 
-@pytest.fixture(scope="module")
-def current_snapshot():
+def synthetic_snapshot(variant: int = 0):
     end = recent_close()
     series = []
     bars = 96
@@ -60,9 +59,9 @@ def current_snapshot():
         for index in range(bars):
             close_time = end - timedelta(minutes=5 * (bars - 1 - index))
             open_time = close_time - timedelta(minutes=5)
-            drift = (symbol_index - 5) * 0.00008
+            drift = (symbol_index - 5) * 0.00008 + variant * 0.00001
             open_price = base * (1.0 + drift * index)
-            close = open_price * (1.0 + drift + ((index % 5) - 2) * 0.00003)
+            close = open_price * (1.0 + drift + (((index + variant) % 5) - 2) * 0.00003)
             high = max(open_price, close) * 1.001
             low = min(open_price, close) * 0.999
             candles.append(Candle(
@@ -72,10 +71,10 @@ def current_snapshot():
                 high,
                 low,
                 close,
-                1000.0 + symbol_index * 10 + index,
+                1000.0 + symbol_index * 10 + index + variant,
                 True,
                 "CURRENT_BRAIN_HTTP_FIXTURE",
-                str(index),
+                f"{variant}-{index}",
             ))
         series.append(SymbolSeries(symbol, tuple(candles), end, FeedQuality()))
     return MarketSnapshot(
@@ -85,6 +84,11 @@ def current_snapshot():
         tuple(reversed(series)),
         PortfolioContext(available_slots=1, operational_time=end),
     )
+
+
+@pytest.fixture(scope="module")
+def current_snapshot():
+    return synthetic_snapshot()
 
 
 @pytest.fixture(scope="module")
@@ -131,6 +135,44 @@ async def test_real_pipeline_and_http_adapter_are_lossless(real_engine, current_
                 )
                 assert response.json() == expected
     assert provider.calls == 1
+
+
+@pytest.mark.anyio
+async def test_twenty_distinct_snapshots_preserve_http_parity_and_feature_driven_selection(
+    real_engine,
+) -> None:
+    feature_hashes = {symbol: set() for symbol in CANONICAL_SYMBOLS}
+    calibrated_scores = {symbol: set() for symbol in CANONICAL_SYMBOLS}
+    probability_vectors = {symbol: set() for symbol in CANONICAL_SYMBOLS}
+    decisions = {symbol: set() for symbol in CANONICAL_SYMBOLS}
+
+    for variant in range(20):
+        snapshot = synthetic_snapshot(variant)
+        canonical = real_engine.evaluate(snapshot)
+        service = CurrentBrainDecisionService(real_engine, StaticProvider(snapshot), cache_seconds=60)
+        transport = httpx.ASGITransport(app=create_app(service))
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            for symbol in CANONICAL_SYMBOLS:
+                response = await client.post("/ml-v2/predict", json={"symbol": symbol})
+                assert response.status_code == 200
+                payload = response.json()
+                expected = compatibility_response(canonical, symbol, payload["metadata"]["trace_id"])
+                assert payload == expected
+
+                result = canonical["results"][symbol]
+                feature_hashes[symbol].add(result["feature_vector_hash"])
+                calibrated_scores[symbol].add(result["candidate"]["calibrated_score"])
+                probability_vectors[symbol].add(
+                    (payload["long_prob"], payload["short_prob"], payload["neutral_prob"])
+                )
+                decisions[symbol].add(payload["aegis"]["decision_brain"]["decision"])
+
+    assert all(len(values) == 20 for values in feature_hashes.values())
+    assert all(len(values) == 20 for values in calibrated_scores.values())
+    # The qualified artifact has one deliberately SHORT-only directional estimator.
+    # Entry variability comes from the feature-driven layers and global selection.
+    assert all(len(values) == 1 for values in probability_vectors.values())
+    assert any("ENTER_NOW" in values for values in decisions.values())
 
 
 @pytest.mark.parametrize("symbol", CANONICAL_SYMBOLS)
