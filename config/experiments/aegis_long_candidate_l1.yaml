@@ -1,0 +1,103 @@
+schema_version: aegis-long-candidate-preregistration-v1
+experiment_id: aegis-long-candidate-l1
+status: PRE_REGISTERED_OWNER_AUTHORIZED
+side: LONG
+timeframe: 5m
+universe_id: aegis-operational-eleven-v1
+feature_schema_version: aegis-features-v2
+feature_count: 83
+feature_hash: 2dc278b4353585fe22503233187e12832cabfd67e2a2e58f4cd683ee6f3b9454
+label_schema_version: aegis-labels-long-v1
+owner_authorization: OWNER_AUTHORIZED_GENUINE_LONG_MODEL_RESEARCH
+
+source:
+  kind: canonical_d3_series
+  path: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+  read_only: true
+  finality_gate_required: true
+
+sampling:
+  schema_version: aegis-sampling-v1
+  cadence: HOURLY_ANCHOR
+  stride_bars: 12
+  anchor_rule: CLOSE_TIME_ON_THE_HOUR
+  timezone: UTC
+  closed_final_candles_only: true
+  coordinated_symbols_required: 11
+  history_bars: 288
+  horizon_bars: 12
+  label_window: "(t, t + 60min]"
+  entry_rule: NEXT_BAR_OPEN
+  overlap_policy: NONE_BY_CONSTRUCTION
+  expected_rows:
+    first_anchor_utc: "2024-07-12T16:00:00Z"
+    last_dev_anchor_utc: "2026-04-26T23:00:00Z"
+    approximate_maximum_dev_rows: 172500
+    hard_stop_if_valid_rows_below_fraction: 0.90
+
+fold_protocol:
+  embargo_minutes: 120
+  folds:
+    - {id: 1, train_start: "2024-07-11T15:20:00Z", train_end: "2025-02-28T23:59:59Z", calibration_start: "2025-03-01T02:00:00Z", calibration_end: "2025-04-16T00:55:00Z", scoring_start: "2025-04-16T02:55:00Z", scoring_end: "2025-05-31T23:59:59Z"}
+    - {id: 2, train_start: "2024-07-11T15:20:00Z", train_end: "2025-05-31T23:59:59Z", calibration_start: "2025-06-01T02:00:00Z", calibration_end: "2025-07-17T00:55:00Z", scoring_start: "2025-07-17T02:55:00Z", scoring_end: "2025-08-31T23:59:59Z"}
+    - {id: 3, train_start: "2024-07-11T15:20:00Z", train_end: "2025-08-31T23:59:59Z", calibration_start: "2025-09-01T02:00:00Z", calibration_end: "2025-10-16T12:55:00Z", scoring_start: "2025-10-16T14:55:00Z", scoring_end: "2025-11-30T23:59:59Z"}
+    - {id: 4, train_start: "2024-07-11T15:20:00Z", train_end: "2025-11-30T23:59:59Z", calibration_start: "2025-12-01T02:00:00Z", calibration_end: "2026-01-15T00:55:00Z", scoring_start: "2026-01-15T02:55:00Z", scoring_end: "2026-02-28T23:59:59Z"}
+
+training:
+  seed: 20260725
+  label_field: clean_quality
+  maximum_acceptable_mae: 0.00275
+  minimum_symbol_calibration_rows: 100
+  symbol_calibration_shrinkage_rows: 500
+  candidates:
+    eqm_logistic_clean_baseline:
+      C: 1.0
+      max_iter: 1000
+      class_weight: balanced
+      solver: liblinear
+    eqm_random_forest_clean:
+      n_estimators: 200
+      max_depth: 12
+      min_samples_leaf: 25
+      class_weight: balanced_subsample
+    eqm_hgb_clean:
+      max_iter: 250
+      learning_rate: 0.06
+      max_leaf_nodes: 31
+      min_samples_leaf: 40
+      l2_regularization: 1.0
+
+threshold_derivation:
+  block: CALIBRATION_ONLY
+  probability_quantiles: [0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.925, 0.95, 0.975]
+  maximum_candidates_per_cycle: 1
+  minimum_calibration_selections: 100
+  require_positive_calibration_expectancy: true
+  maximum_mean_mae: 0.00275
+
+promotion:
+  minimum_total_scoring_signals: 100
+  minimum_positive_folds: 3
+  fold_count: 4
+  minimum_worst_fold_expectancy: 0.0
+  minimum_mean_expectancy: 0.0
+  minimum_average_precision_lift_over_prevalence: 0.005
+  maximum_ece_each_fold: 0.08
+  maximum_brier_each_fold: 0.25
+  maximum_symbol_concentration: 0.30
+  require_all_symbols_observed: true
+  automatic_live_activation: false
+
+lockbox:
+  semi_blind_start: "2026-04-27T00:00:00Z"
+  semi_blind_end: "2026-07-11T09:20:00Z"
+  access: FORBIDDEN
+  consumed_queries: []
+
+outputs:
+  artifact_path: config/bundles/aegis-entry-quality-v3-long-opportunity-balanced-v2.json
+  manifest_path: config/bundles/aegis-entry-quality-v3-long-opportunity-balanced-v2.manifest.json
+  validation_report_path: reports/experiments/aegis_entry_quality_v3_long_balanced_v2_validation.json
+  readiness_record_path: config/bundles/aegis-entry-quality-v3-long-balanced-v2-readiness.json
+  initial_runtime_mode: SHADOW

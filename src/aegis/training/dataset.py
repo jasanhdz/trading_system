@@ -13,7 +13,14 @@ from ..domain import Candle, FeedQuality, MarketSnapshot, PortfolioContext, Regi
 from ..features import DeterministicFeaturePipeline, FEATURE_HASH, FEATURE_NAMES, FEATURE_SCHEMA_VERSION, FeaturePipeline
 from ..layers import classify_market_regime
 from ..utils import HashProvider, canonical_json
-from .labels import SHORT_LABEL_SCHEMA_VERSION, ShortLabelConfig, build_short_path_label
+from .labels import (
+    LONG_LABEL_SCHEMA_VERSION,
+    SHORT_LABEL_SCHEMA_VERSION,
+    LongLabelConfig,
+    ShortLabelConfig,
+    build_long_path_label,
+    build_short_path_label,
+)
 
 
 @dataclass(frozen=True)
@@ -187,7 +194,42 @@ def build_e2_hourly_short_dataset(
     series: Mapping[str, Sequence[CanonicalBar]], sampling: Mapping[str, Any], *,
     dataset_id: str, source_finality_verified: bool,
 ) -> HourlyDatasetBuild:
+    return _build_e2_hourly_directional_dataset(
+        series,
+        sampling,
+        dataset_id=dataset_id,
+        source_finality_verified=source_finality_verified,
+        side="SHORT",
+    )
+
+
+def build_e2_hourly_long_dataset(
+    series: Mapping[str, Sequence[CanonicalBar]],
+    sampling: Mapping[str, Any],
+    *,
+    dataset_id: str,
+    source_finality_verified: bool,
+) -> HourlyDatasetBuild:
+    return _build_e2_hourly_directional_dataset(
+        series,
+        sampling,
+        dataset_id=dataset_id,
+        source_finality_verified=source_finality_verified,
+        side="LONG",
+    )
+
+
+def _build_e2_hourly_directional_dataset(
+    series: Mapping[str, Sequence[CanonicalBar]],
+    sampling: Mapping[str, Any],
+    *,
+    dataset_id: str,
+    source_finality_verified: bool,
+    side: str,
+) -> HourlyDatasetBuild:
     """Build causal E2 rows at exact hourly close anchors without overlap or interpolation."""
+    if side not in {"LONG", "SHORT"}:
+        raise ValueError("directional dataset side is invalid")
     if not source_finality_verified:
         raise ValueError("E2 requires final canonical candles")
     if set(series) != set(CANONICAL_SYMBOLS) or int(sampling["coordinated_symbols_required"]) != len(CANONICAL_SYMBOLS):
@@ -208,7 +250,11 @@ def build_e2_hourly_short_dataset(
     if any(right - left < timedelta(minutes=5 * horizon_bars) for left, right in zip(anchors, anchors[1:])):
         raise ValueError("E2 H12 anchors overlap")
     pipeline = DeterministicFeaturePipeline()
-    label_config = ShortLabelConfig(horizon_bars=horizon_bars, entry_rule="NEXT_BAR_OPEN")
+    label_config = (
+        LongLabelConfig(horizon_bars=horizon_bars, entry_rule="NEXT_BAR_OPEN")
+        if side == "LONG"
+        else ShortLabelConfig(horizon_bars=horizon_bars, entry_rule="NEXT_BAR_OPEN")
+    )
     training_rows: list[TrainingRow] = []
     skipped_history = quarantined = valid_cycles = 0
     rows_by_symbol = {symbol: 0 for symbol in CANONICAL_SYMBOLS}
@@ -243,14 +289,40 @@ def build_e2_hourly_short_dataset(
         cycle_quarantined = False
         for feature_row in batch.rows:
             history, future = selected[feature_row.symbol]
-            label = build_short_path_label(_candle(history[-1]), tuple(_candle(bar) for bar in future), label_config)
+            signal_candle = _candle(history[-1])
+            future_candles = tuple(_candle(bar) for bar in future)
+            label = (
+                build_long_path_label(
+                    signal_candle,
+                    future_candles,
+                    label_config,
+                )
+                if isinstance(label_config, LongLabelConfig)
+                else build_short_path_label(
+                    signal_candle,
+                    future_candles,
+                    label_config,
+                )
+            )
             if not label.valid:
                 cycle_quarantined = True; break
-            assert label.terminal_short_return is not None and label.mae_fraction is not None
+            terminal_return = (
+                label.terminal_long_return
+                if isinstance(label_config, LongLabelConfig)
+                else label.terminal_short_return
+            )
+            assert terminal_return is not None and label.mae_fraction is not None
             assert label.net_quality_after_costs is not None
-            direction = -1.0 if label.terminal_short_return > label_config.round_trip_cost_fraction else 0.0
+            direction = (
+                1.0 if terminal_return > label_config.round_trip_cost_fraction else 0.0
+            ) if side == "LONG" else (
+                -1.0 if terminal_return > label_config.round_trip_cost_fraction else 0.0
+            )
             target = TrainingTarget(
-                direction, -label.terminal_short_return, float(label.tail_event), label.mae_fraction,
+                direction,
+                terminal_return if side == "LONG" else -terminal_return,
+                float(label.tail_event),
+                label.mae_fraction,
                 float(label.clean_entry), label.net_quality_after_costs, float(label.bad_entry), True,
             )
             regime, _ = classify_market_regime(dict(zip(FEATURE_NAMES, feature_row.raw_values)))
@@ -267,7 +339,12 @@ def build_e2_hourly_short_dataset(
     dataset_hash = hashlib.sha256(
         canonical_json({
             "dataset_id": dataset_id, "feature_hash": FEATURE_HASH,
-            "label_schema": SHORT_LABEL_SCHEMA_VERSION, "sampling": sampling,
+            "label_schema": (
+                LONG_LABEL_SCHEMA_VERSION
+                if side == "LONG"
+                else SHORT_LABEL_SCHEMA_VERSION
+            ),
+            "sampling": sampling,
             "rows_sha256": hash_stream.hexdigest(), "row_count": len(training_rows),
         }).encode("utf-8")
     ).hexdigest()
@@ -299,5 +376,29 @@ def load_and_build_e2_hourly_dataset(
     loaded = source.load(start=start, end=end)
     return build_e2_hourly_short_dataset(
         loaded, sampling, dataset_id=str(preregistration["experiment_id"]),
+        source_finality_verified=audit.finality_verified,
+    )
+
+
+def load_and_build_e2_hourly_long_dataset(
+    source: CanonicalSeriesSource,
+    preregistration: Mapping[str, Any],
+) -> HourlyDatasetBuild:
+    sampling = preregistration["sampling"]
+    first_anchor = _utc(sampling["expected_rows"]["first_anchor_utc"])
+    last_anchor = _utc(sampling["expected_rows"]["last_dev_anchor_utc"])
+    semi_blind = _utc(preregistration["lockbox"]["semi_blind_start"])
+    if last_anchor >= semi_blind:
+        raise ValueError("SEMI_BLIND_ACCESS_FORBIDDEN_PRE_LOCKBOX")
+    start = first_anchor - timedelta(minutes=5 * int(sampling["history_bars"]))
+    end = last_anchor + timedelta(minutes=5 * int(sampling["horizon_bars"]))
+    if end > semi_blind:
+        raise ValueError("SEMI_BLIND_ACCESS_FORBIDDEN_PRE_LOCKBOX")
+    audit = source.audit(verify_content=True)
+    loaded = source.load(start=start, end=end)
+    return build_e2_hourly_long_dataset(
+        loaded,
+        sampling,
+        dataset_id=str(preregistration["experiment_id"]),
         source_finality_verified=audit.finality_verified,
     )

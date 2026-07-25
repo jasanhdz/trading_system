@@ -7,7 +7,11 @@ import yaml
 
 from aegis.config import CANONICAL_SYMBOLS
 from aegis.data import CanonicalBar
-from aegis.training.dataset import build_e2_hourly_short_dataset, load_and_build_e2_hourly_dataset
+from aegis.training.dataset import (
+    build_e2_hourly_long_dataset,
+    build_e2_hourly_short_dataset,
+    load_and_build_e2_hourly_dataset,
+)
 from aegis.training.phase_e import ProductionScientificBackend
 from aegis.models import CalibrationMethod, CalibratorSpec
 from aegis.training.preregistration import (
@@ -142,6 +146,33 @@ def test_hourly_sampling_uses_close_time_and_has_zero_h12_overlap() -> None:
     assert timestamps[1] - timestamps[0] == timedelta(minutes=60)
     assert result.valid_cycle_count == 2 and result.dataset.row_count == 22
     assert all(count == 2 for count in result.rows_by_symbol.values())
+
+
+def test_long_dataset_is_directional_and_does_not_change_short_hash() -> None:
+    short_before = build_e2_hourly_short_dataset(
+        _series(),
+        _sampling(),
+        dataset_id="fixture",
+        source_finality_verified=True,
+    )
+    long_result = build_e2_hourly_long_dataset(
+        _series(),
+        _sampling(),
+        dataset_id="fixture-long",
+        source_finality_verified=True,
+    )
+    short_after = build_e2_hourly_short_dataset(
+        _series(),
+        _sampling(),
+        dataset_id="fixture",
+        source_finality_verified=True,
+    )
+
+    assert short_before.dataset.artifact_hash == short_after.dataset.artifact_hash
+    assert short_before.dataset.rows == short_after.dataset.rows
+    assert any(row.target.direction == 1.0 for row in long_result.dataset.rows)
+    assert all(row.target.direction in {0.0, 1.0} for row in long_result.dataset.rows)
+    assert all(row.target.direction in {-1.0, 0.0} for row in short_before.dataset.rows)
 
 
 def test_nonfinal_data_and_non_h12_stride_are_rejected() -> None:

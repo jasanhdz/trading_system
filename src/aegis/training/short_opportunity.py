@@ -231,8 +231,35 @@ def write_short_opportunity_artifact(
 def load_short_opportunity_artifact(path: Path) -> ShortOpportunityArtifact:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
+        return short_opportunity_artifact_from_mapping(value)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("SHORT opportunity artifact is invalid") from exc
+
+
+def short_opportunity_artifact_from_mapping(
+    value: Mapping[str, object],
+) -> ShortOpportunityArtifact:
+    try:
         calibrator = value["calibrator"]
         metrics = value["scoring_metrics"]
+        if not isinstance(calibrator, Mapping) or not isinstance(metrics, Mapping):
+            raise ValueError("SHORT opportunity artifact sections are invalid")
+        normalizer = value["normalizer"]
+        if not isinstance(normalizer, Mapping):
+            raise ValueError("SHORT opportunity normalizer is invalid")
+        means = normalizer["means"]
+        scales = normalizer["scales"]
+        if not isinstance(means, Mapping) or not isinstance(scales, Mapping):
+            raise ValueError("SHORT opportunity normalizer values are invalid")
+        symbol_calibrators = calibrator["symbols"]
+        symbol_sample_counts = calibrator["symbol_sample_counts"]
+        per_symbol = metrics["per_symbol"]
+        if (
+            not isinstance(symbol_calibrators, Mapping)
+            or not isinstance(symbol_sample_counts, Mapping)
+            or not isinstance(per_symbol, Mapping)
+        ):
+            raise ValueError("SHORT opportunity calibration metrics are invalid")
         return ShortOpportunityArtifact(
             schema_version=str(value["schema_version"]),
             feature_schema_version=str(value["feature_schema_version"]),
@@ -247,31 +274,31 @@ def load_short_opportunity_artifact(path: Path) -> ShortOpportunityArtifact:
             coefficients=tuple(float(item) for item in value["coefficients"]),
             intercept=float(value["intercept"]),
             tree_ensemble=(
-                TreeEnsemble.from_payload(value["tree_ensemble"])
+                TreeEnsemble.from_payload(value["tree_ensemble"])  # type: ignore[arg-type]
                 if value.get("tree_ensemble") is not None
                 else None
             ),
             normalizer=FrozenNormalizer(
                 means={
                     str(name): float(metric)
-                    for name, metric in value["normalizer"]["means"].items()
+                    for name, metric in means.items()
                 },
                 scales={
                     str(name): float(metric)
-                    for name, metric in value["normalizer"]["scales"].items()
+                    for name, metric in scales.items()
                 },
-                clip_absolute=float(value["normalizer"]["clip_absolute"]),
+                clip_absolute=float(normalizer["clip_absolute"]),
             ),
             calibrator=HierarchicalProbabilityCalibrator(
                 schema_version=str(calibrator["schema_version"]),
-                global_calibrator=_calibrator_from_mapping(calibrator["global"]),
+                global_calibrator=_calibrator_from_mapping(calibrator["global"]),  # type: ignore[arg-type]
                 symbol_calibrators={
-                    str(symbol): _calibrator_from_mapping(spec)
-                    for symbol, spec in calibrator["symbols"].items()
+                    str(symbol): _calibrator_from_mapping(spec)  # type: ignore[arg-type]
+                    for symbol, spec in symbol_calibrators.items()
                 },
                 symbol_sample_counts={
                     str(symbol): int(count)
-                    for symbol, count in calibrator["symbol_sample_counts"].items()
+                    for symbol, count in symbol_sample_counts.items()
                 },
                 shrinkage_sample_count=int(calibrator["shrinkage_sample_count"]),
             ),
@@ -286,11 +313,11 @@ def load_short_opportunity_artifact(path: Path) -> ShortOpportunityArtifact:
                         str(name): float(metric) if isinstance(metric, float) else int(metric)
                         for name, metric in values.items()
                     }
-                    for symbol, values in metrics["per_symbol"].items()
+                    for symbol, values in per_symbol.items()  # type: ignore[union-attr]
                 },
             ),
         )
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("SHORT opportunity artifact is invalid") from exc
 
 
