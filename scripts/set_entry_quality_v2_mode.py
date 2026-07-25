@@ -43,10 +43,13 @@ def _atomic_write(path: Path, content: bytes) -> None:
 
 
 def candidate_config(path: Path, mode: str) -> bytes:
+    current = path.read_bytes()
     payload = _mapping(
-        yaml.safe_load(path.read_text(encoding="utf-8")),
+        yaml.safe_load(current),
         "entry_quality_v2",
     )
+    if payload.get("mode") == mode:
+        return current
     payload["mode"] = mode
     if mode == "LIVE":
         opportunity = _mapping(payload.get("opportunity"), "opportunity")
@@ -192,6 +195,9 @@ def main() -> int:
         validate_candidate(path, candidate, root)
     if args.check:
         print(f"ENTRY_QUALITY_V2_{args.mode}_SWITCH_VALID")
+        return 0
+    if candidate == before and not args.restart_python_api:
+        print(f"ENTRY_QUALITY_V2_MODE_ALREADY_{args.mode}")
         return 0
     _atomic_write(path, candidate)
     if not args.restart_python_api:

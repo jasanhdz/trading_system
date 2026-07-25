@@ -209,6 +209,7 @@ def test_live_mode_accepts_only_hash_bound_owner_approved_record(
 
 def test_mode_switch_validates_shadow_and_rejects_unapproved_live() -> None:
     shadow = candidate_config(CONFIG, "SHADOW")
+    assert shadow == CONFIG.read_bytes()
     validate_candidate(CONFIG, shadow, ROOT)
     live = candidate_config(CONFIG, "LIVE")
     with pytest.raises(
