@@ -55,6 +55,15 @@ class SnapshotProvider(Protocol):
     def snapshot(self) -> MarketSnapshot: ...
 
 
+class ResearchBatchObserver(Protocol):
+    @property
+    def mode(self) -> Any: ...
+
+    def observe_batch(self, batch: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+    def health(self) -> Mapping[str, Any]: ...
+
+
 def _utc(milliseconds: int) -> datetime:
     return datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc)
 
@@ -240,11 +249,13 @@ class CurrentBrainEngine:
         predictions = {item.symbol: pipeline.predictions.for_symbol(item.symbol) for item in features.rows}
         layers = {item.symbol: item for item in pipeline.layers.results}
         candidates = {item.symbol: item for item in pipeline.candidates.candidates}
+        market_series = {item.symbol: item for item in snapshot.series}
         results: dict[str, Any] = {}
         for row in features.rows:
             symbol_predictions = predictions[row.symbol]
             layer = layers[row.symbol]
             candidate = candidates[row.symbol]
+            market_bar = market_series[row.symbol].candles[-1]
             vector_hash = self._hashing.digest_value({"names": features.feature_names, "values": row.raw_values})
             results[row.symbol] = {
                 "symbol": row.symbol,
@@ -254,6 +265,16 @@ class CurrentBrainEngine:
                 "feature_vector_hash": vector_hash,
                 "feature_count": len(features.feature_names),
                 "feature_quality": to_primitive(row.quality),
+                "research_features": dict(zip(features.feature_names, row.raw_values)),
+                "research_normalized_features": dict(
+                    zip(features.feature_names, row.normalized_values)
+                ),
+                "market_bar": {
+                    "open": market_bar.open,
+                    "high": market_bar.high,
+                    "low": market_bar.low,
+                    "close": market_bar.close,
+                },
                 "predictions": [to_primitive(value) for value in symbol_predictions],
                 "layer": to_primitive(layer),
                 "candidate": to_primitive(candidate),
@@ -295,12 +316,24 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
     }
     candidate = result["candidate"]
     layer = result["layer"]
-    selected = bool(result["selected"])
+    v2_by_symbol = batch.get("_entry_quality_v2", {})
+    v2 = v2_by_symbol.get(normalized) if isinstance(v2_by_symbol, Mapping) else None
+    v2_live = isinstance(v2, Mapping) and v2.get("mode") == "LIVE"
+    selected = bool(v2["selected"]) if v2_live else bool(result["selected"])
     side_value = candidate["side"]
     side = str(getattr(side_value, "value", side_value))
+    if v2_live:
+        side = "SHORT"
     action = side if selected and side in {"LONG", "SHORT"} else "HOLD"
     reasons = [str(getattr(value, "value", value)) for value in candidate["reason_codes"]]
-    reason = "CURRENT_BRAIN_SELECTED" if selected else ",".join(reasons) or "CURRENT_BRAIN_NO_TRADE"
+    if v2_live:
+        reason = (
+            "ENTRY_QUALITY_V2_SELECTED"
+            if selected
+            else "ENTRY_QUALITY_V2_NOT_SELECTED"
+        )
+    else:
+        reason = "CURRENT_BRAIN_SELECTED" if selected else ",".join(reasons) or "CURRENT_BRAIN_NO_TRADE"
     eq_allowed = "EQM_QUALITY_LOW" not in reasons
     raw = {
         "action": action,
@@ -383,6 +416,17 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 "missing_features_count": 0,
                 "missing_features": [],
             },
+            "entry_quality_v2": (
+                dict(v2)
+                if isinstance(v2, Mapping)
+                else {
+                    "schema_id": "aegis-entry-quality-v2-http-shadow-v1",
+                    "mode": "UNAVAILABLE",
+                    "status": "NOT_CONFIGURED",
+                    "selected": False,
+                    "exchange_authority": False,
+                }
+            ),
         },
         "metadata": {
             "fallback": False,
@@ -402,15 +446,24 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
 
 
 class CurrentBrainDecisionService:
-    def __init__(self, engine: CurrentBrainEngine, provider: SnapshotProvider, *, cache_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        engine: CurrentBrainEngine,
+        provider: SnapshotProvider,
+        *,
+        cache_seconds: float = 30.0,
+        research_observer: ResearchBatchObserver | None = None,
+    ) -> None:
         self.engine = engine
         self.provider = provider
         self.cache_seconds = cache_seconds
+        self.research_observer = research_observer
         self.started_at = datetime.now(timezone.utc)
         self._cache: tuple[float, Mapping[str, Any]] | None = None
         self._lock = threading.Lock()
         self.request_count = 0
         self.error_count = 0
+        self.research_error_count = 0
         self.last_inference_at: datetime | None = None
 
     def initialize(self) -> None:
@@ -422,6 +475,18 @@ class CurrentBrainDecisionService:
             if self._cache is not None and now - self._cache[0] <= self.cache_seconds:
                 return self._cache[1]
             batch = self.engine.evaluate(self.provider.snapshot())
+            if self.research_observer is not None:
+                try:
+                    overlay = self.research_observer.observe_batch(batch)
+                except Exception as exc:
+                    self.research_error_count += 1
+                    mode = str(getattr(self.research_observer.mode, "value", self.research_observer.mode))
+                    if mode == "LIVE":
+                        raise CurrentBrainError(
+                            "AEGIS_ENTRY_QUALITY_V2_LIVE_EVALUATION_FAILED"
+                        ) from exc
+                    overlay = {}
+                batch = {**batch, "_entry_quality_v2": overlay}
             self._cache = (now, batch)
             self.last_inference_at = datetime.now(timezone.utc)
             return batch
@@ -435,7 +500,7 @@ class CurrentBrainDecisionService:
             raise
 
     def health(self) -> Mapping[str, Any]:
-        return {
+        health = {
             "status": "ready" if self.engine.ready else "not_ready",
             "ready": self.engine.ready,
             "model_identifier": CANDIDATE_IDENTITY,
@@ -453,7 +518,11 @@ class CurrentBrainDecisionService:
             ),
             "requests": self.request_count,
             "errors": self.error_count,
+            "research_errors": self.research_error_count,
         }
+        if self.research_observer is not None:
+            health["entry_quality_v2"] = dict(self.research_observer.health())
+        return health
 
 
 def trace_id() -> str:

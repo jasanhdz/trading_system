@@ -1,0 +1,52 @@
+schema_version: aegis-entry-quality-v2-runtime-v1
+mode: SHADOW
+
+evidence:
+  journal_root: ../data/entry_quality_v2_shadow
+  signal_journal: signals.jsonl
+  outcome_journal: outcomes.jsonl
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+
+opportunity:
+  source: SHORT_OPPORTUNITY_RF_SHADOW_CANDIDATE
+  artifact_path: config/bundles/aegis-entry-quality-v2-short-opportunity-rf-v2.json
+  artifact_sha256: 9afdf47d718c78583a2265b79da66473e1ea2b4bf714088bb891663b10ede175
+
+selection:
+  maximum_candidates_per_cycle: 1
+  minimum_score: 0.0
+  require_current_layer_eligible: true
+
+score:
+  schema_version: aegis-mae-aware-score-contract-v1
+  qmae_penalty: 0.05
+  tail_risk_penalty: 0.001
+  maximum_qmae_fraction: 0.03
+  maximum_tail_probability: 0.70
+  require_bearish_trend_context: false
+
+regime:
+  schema_version: aegis-regime-v2-research-settings-v1
+  history_window: 288
+  minimum_history: 48
+  low_volatility_quantile: 0.20
+  high_volatility_quantile: 0.80
+  trend_enter_fraction: 0.002
+  trend_exit_fraction: 0.001
+  trend_strength_enter: 0.50
+  trend_strength_exit: 0.35
+  chop_enter_fraction: 0.70
+  chop_exit_fraction: 0.60
+  high_expansion_ratio: 1.0
+  low_expansion_ratio: 0.0
+  minimum_state_bars: 3
+
+live_promotion:
+  required: true
+  technical_readiness_record_path: config/bundles/aegis-entry-quality-v2-live-readiness-rf-v2.json
+  technical_readiness_record_sha256: 7eb1bc8a03260642e80eab233eb86f9d6b866ef1c2626547c1eda91f239751d8
+  minimum_non_overlapping_episodes: 300
+  promotion_record_path: data/entry_quality_v2_shadow/live_promotion.json
+  promotion_record_sha256: null
+  required_opportunity_source: PROMOTED_SHORT_OPPORTUNITY_MODEL

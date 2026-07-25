@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -16,6 +17,7 @@ from aegis.live_decision import (
     PublicKlineSnapshotProvider,
     trace_id,
 )
+from aegis.research.shadow_runtime import build_entry_quality_v2_observer
 
 
 class PredictRequest(BaseModel):
@@ -24,7 +26,16 @@ class PredictRequest(BaseModel):
 
 
 def build_service() -> CurrentBrainDecisionService:
-    service = CurrentBrainDecisionService(CurrentBrainEngine(), PublicKlineSnapshotProvider())
+    root = Path(__file__).resolve().parents[2]
+    observer = build_entry_quality_v2_observer(
+        root / "config/entry_quality_v2.yaml",
+        repo_root=root,
+    )
+    service = CurrentBrainDecisionService(
+        CurrentBrainEngine(),
+        PublicKlineSnapshotProvider(),
+        research_observer=observer,
+    )
     service.initialize()
     return service
 

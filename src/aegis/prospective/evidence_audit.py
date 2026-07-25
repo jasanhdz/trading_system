@@ -259,13 +259,100 @@ def _unique_count(
     return len({format(_finite(extractor(row), "variability"), ".17g") for row in rows})
 
 
+def _qmae_diagnostics(
+    rows: Sequence[Mapping[str, Any]], threshold: float
+) -> dict[str, Any]:
+    valid = [
+        row
+        for row in rows
+        if row.get("qmae_valid") is True
+        and isinstance(row.get("qmae_q90"), (int, float))
+        and math.isfinite(float(row["qmae_q90"]))
+    ]
+    predicted = [_finite(row["qmae_q90"], "qmae_q90") for row in valid]
+    actual = [_finite(row["mae_fraction"], "mae_fraction") for row in valid]
+    selected = [row for row in valid if row["selected"]]
+    return {
+        "configured_threshold": threshold,
+        "valid_count": len(valid),
+        "threshold_exceedance_count": sum(value > threshold for value in predicted),
+        "empirical_coverage": (
+            sum(observed <= forecast for observed, forecast in zip(actual, predicted)) / len(valid)
+            if valid
+            else None
+        ),
+        "q90_to_realized_mae_correlation": _correlation(predicted, actual),
+        "selected": {
+            "count": len(selected),
+            "empirical_coverage": (
+                sum(
+                    _finite(row["mae_fraction"], "mae_fraction")
+                    <= _finite(row["qmae_q90"], "qmae_q90")
+                    for row in selected
+                )
+                / len(selected)
+                if selected
+                else None
+            ),
+            "q90_to_realized_mae_correlation": _correlation(
+                [_finite(row["qmae_q90"], "qmae_q90") for row in selected],
+                [_finite(row["mae_fraction"], "mae_fraction") for row in selected],
+            ),
+        },
+    }
+
+
+def _regime_diagnostics(
+    signals: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    by_symbol: dict[str, Any] = {}
+    collapsed: list[str] = []
+    for symbol in sorted({str(row["symbol"]) for row in signals}):
+        symbol_signals = [row for row in signals if str(row["symbol"]) == symbol]
+        counts: dict[str, int] = defaultdict(int)
+        for row in symbol_signals:
+            regime = (
+                row.get("component_evidence", {})
+                .get("d3", {})
+                .get("output", {})
+                .get("regime", "NOT_PRESENT")
+            )
+            counts[str(regime)] += 1
+        dominant_count = max(counts.values(), default=0)
+        dominant_fraction = dominant_count / len(symbol_signals) if symbol_signals else 0.0
+        if len(symbol_signals) >= 20 and dominant_fraction >= 0.98:
+            collapsed.append(symbol)
+        by_symbol[symbol] = {
+            "count": len(symbol_signals),
+            "regime_counts": dict(sorted(counts.items())),
+            "dominant_regime_fraction": dominant_fraction,
+        }
+    economics: dict[str, Any] = {}
+    for regime in sorted({str(row["d3_regime"]) for row in rows}):
+        regime_rows = [row for row in rows if row["d3_regime"] == regime]
+        economics[regime] = {
+            "all": _economic_metrics(regime_rows),
+            "selected": _economic_metrics([row for row in regime_rows if row["selected"]]),
+            "rejected": _economic_metrics([row for row in regime_rows if not row["selected"]]),
+        }
+    return {
+        "role": "OBSERVATIONAL_CONTEXT_NOT_INDEPENDENT_GATE",
+        "by_symbol": by_symbol,
+        "collapsed_symbol_labels": collapsed,
+        "economics": economics,
+    }
+
+
 def audit_evidence(
     signal_path: Path,
     outcome_path: Path,
     *,
     bootstrap_repetitions: int = 2_000,
     seed: int = DEFAULT_SEED,
+    qmae_threshold: float = 0.03,
 ) -> dict[str, Any]:
+    if not 0.0 < qmae_threshold < 1.0:
+        raise EvidenceAuditError("QMAE_THRESHOLD_INVALID")
     signal_payload = _stable_bytes(signal_path)
     outcome_payload = _stable_bytes(outcome_path)
     signals = _parse_jsonl(signal_payload, "prospective_signal_id")
@@ -291,6 +378,7 @@ def audit_evidence(
             "calibrated_score": components.get("econ1", {}).get("output", {}).get("calibrated_score"),
             "quality_probability": upstream.get("quality_probability"),
             "tail_risk_probability": upstream.get("tail_risk_probability"),
+            "qmae_q90": components.get("qmae", {}).get("output", {}).get("q90"),
             "d3_regime": components.get("d3", {}).get("output", {}).get("regime", "NOT_PRESENT"),
             "trrm_passed": components.get("trrm", {}).get("output", {}).get("passed") is True,
             "qmae_valid": components.get("qmae", {}).get("output", {}).get("valid") is True,
@@ -345,10 +433,22 @@ def audit_evidence(
         warnings.append("SELECTED_SYMBOL_PERFORMANCE_HETEROGENEOUS")
     stage_funnel = _stage_funnel(signals)
     score_deciles = _score_deciles(joined)
+    selected_score_deciles = _score_deciles(selected)
+    qmae_diagnostics = _qmae_diagnostics(joined, qmae_threshold)
+    regime_diagnostics = _regime_diagnostics(signals, joined)
     if stage_funnel["d3_decision_equals_final_decision_count"] == len(signals) and signals:
         warnings.append("D3_DECISION_FIELD_NOT_INDEPENDENT_OF_FINAL_SELECTION")
     if score_deciles["top_minus_bottom_mean_net_return"] is not None and not score_deciles["higher_rank_is_better"]:
         warnings.append("CALIBRATED_SCORE_TOP_DECILE_NOT_BETTER_THAN_BOTTOM_DECILE")
+    if (
+        selected_score_deciles["top_minus_bottom_mean_net_return"] is not None
+        and not selected_score_deciles["higher_rank_is_better"]
+    ):
+        warnings.append("SELECTED_SCORE_TOP_DECILE_NOT_BETTER_THAN_BOTTOM_DECILE")
+    if qmae_diagnostics["valid_count"] and qmae_diagnostics["threshold_exceedance_count"] == 0:
+        warnings.append("QMAE_THRESHOLD_NEVER_ACTIVATED")
+    if regime_diagnostics["collapsed_symbol_labels"]:
+        warnings.append("REGIME_LABEL_COLLAPSE_BY_SYMBOL")
 
     return {
         "schema_id": AUDIT_SCHEMA,
@@ -397,10 +497,25 @@ def audit_evidence(
                 if joined
                 else 0
             ),
+            "unique_qmae_q90": (
+                _unique_count(
+                    [
+                        row
+                        for row in joined
+                        if isinstance(row.get("qmae_q90"), (int, float))
+                    ],
+                    lambda row: row["qmae_q90"],
+                )
+                if joined
+                else 0
+            ),
         },
         "stage_funnel": stage_funnel,
         "stage_economics": _stage_economics(joined),
         "calibrated_score_ranking": score_deciles,
+        "selected_calibrated_score_ranking": selected_score_deciles,
+        "qmae_diagnostics": qmae_diagnostics,
+        "regime_diagnostics": regime_diagnostics,
         "by_symbol": by_symbol,
         "warnings": warnings,
         "evidence_verdict": (
@@ -436,6 +551,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--bootstrap-repetitions", type=int, default=2_000)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--qmae-threshold", type=float, default=0.03)
     arguments = parser.parse_args(argv)
     if arguments.bootstrap_repetitions <= 0:
         raise EvidenceAuditError("BOOTSTRAP_REPETITIONS_INVALID")
@@ -444,6 +560,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         arguments.outcomes,
         bootstrap_repetitions=arguments.bootstrap_repetitions,
         seed=arguments.seed,
+        qmae_threshold=arguments.qmae_threshold,
     )
     write_report(report, arguments.output)
     print(

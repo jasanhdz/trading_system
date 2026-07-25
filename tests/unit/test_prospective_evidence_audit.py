@@ -12,10 +12,13 @@ from aegis.prospective.evidence_audit import EvidenceAuditError, audit_evidence,
 def _signal(identity: str, cycle: str, symbol: str, selected: bool, score: float) -> dict:
     action = "ENTER_NOW" if selected else "DO_NOT_ENTER"
     components = {
-        "d3": {"status": "PASS", "output": {"decision": action, "regime": "RANGE"}},
+        "d3": {
+            "status": "PASS",
+            "output": {"decision": action, "regime": "RANGE", "regime_confidence": 0.7},
+        },
         "rv2": {"status": "PASS", "output": {"tail_risk_probability": 0.4}},
         "trrm": {"status": "PASS", "output": {"passed": True}},
-        "qmae": {"status": "PASS", "output": {"valid": True}},
+        "qmae": {"status": "PASS", "output": {"valid": True, "q90": 0.01}},
         "eqm": {"status": "PASS", "output": {"eligible": True}},
         "econ1": {
             "status": "PASS",
@@ -80,6 +83,9 @@ def test_audit_joins_evidence_and_reports_observational_metrics(tmp_path: Path) 
     assert "D3_DECISION_FIELD_NOT_INDEPENDENT_OF_FINAL_SELECTION" in report["warnings"]
     assert report["stage_economics"]["selected"]["passed"]["count"] == 2
     assert len(report["calibrated_score_ranking"]["deciles"]) == 4
+    assert report["qmae_diagnostics"]["valid_count"] == 4
+    assert report["qmae_diagnostics"]["threshold_exceedance_count"] == 0
+    assert report["regime_diagnostics"]["role"] == "OBSERVATIONAL_CONTEXT_NOT_INDEPENDENT_GATE"
     assert report["execution_recommendation"] == "NO_AUTOMATIC_RUNTIME_CHANGE"
 
 
