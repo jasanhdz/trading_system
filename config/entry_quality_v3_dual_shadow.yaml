@@ -1,0 +1,38 @@
+schema_version: aegis-entry-quality-v3-dual-shadow-runtime-v1
+enabled: true
+mode: SHADOW
+side: LONG
+feature_schema: aegis-features-v2
+feature_count: 83
+
+artifact:
+  path: config/bundles/aegis-entry-quality-v3-long-opportunity-balanced-v2.json
+  sha256: 73784e3d0b6f33a3242c276f7403940f3d4eb563e617effa93988fd450d3e538
+  readiness_path: config/bundles/aegis-entry-quality-v3-long-balanced-v2-readiness.json
+  readiness_sha256: ca6016b12083fdebaba8961472dcd31da45bc82bdc3dceae7a5241ace16cc079
+  offline_validation_state: OFFLINE_VALIDATION_FAILED
+  observational_use_only: true
+
+evidence:
+  journal_root: ../data/entry_quality_v3_dual_shadow
+  signal_journal: long_signal_journal.jsonl
+  outcome_journal: long_outcome_journal.jsonl
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+
+selection:
+  maximum_candidates_per_cycle: 1
+  ranking: CALIBRATED_EXPERIMENTAL_LONG_OPPORTUNITY
+  base_model_directional_authority: SHORT_ONLY
+  score_authority: OBSERVATIONAL_RANK_ONLY
+  regime_confirmed_variant:
+    direction: BULLISH
+    structure: TREND
+  production_authority: false
+
+promotion:
+  automatic_live_activation: false
+  owner_live_switch_required: true
+  require_offline_validation_pass: true
+  require_shadow_evidence_pass: true
+  current_live_eligible: false

@@ -17,7 +17,7 @@ from aegis.live_decision import (
     PublicKlineSnapshotProvider,
     trace_id,
 )
-from aegis.research.shadow_runtime import build_entry_quality_v2_observer
+from aegis.research.dual_side_shadow import build_composite_research_observer
 
 
 class PredictRequest(BaseModel):
@@ -27,8 +27,9 @@ class PredictRequest(BaseModel):
 
 def build_service() -> CurrentBrainDecisionService:
     root = Path(__file__).resolve().parents[2]
-    observer = build_entry_quality_v2_observer(
+    observer = build_composite_research_observer(
         root / "config/entry_quality_v2.yaml",
+        root / "config/entry_quality_v3_dual_shadow.yaml",
         repo_root=root,
     )
     service = CurrentBrainDecisionService(
