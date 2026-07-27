@@ -30,6 +30,15 @@ selection:
     structure: TREND
   production_authority: false
 
+evaluation:
+  report_path: data/entry_quality_v3_dual_shadow/long_evidence_report.json
+  minimum_selected_outcomes: 50
+  minimum_independent_blocks: 30
+  maximum_symbol_concentration: 0.30
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20260726
+  bootstrap_block_minutes: 120
+
 promotion:
   automatic_live_activation: false
   owner_live_switch_required: true
