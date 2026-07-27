@@ -1,0 +1,47 @@
+schema_version: aegis-entry-quality-live-feedback-v1
+
+symbols:
+  - ETHUSDT
+  - BTCUSDT
+  - SOLUSDT
+  - BNBUSDT
+  - XRPUSDT
+  - DOGEUSDT
+  - ADAUSDT
+  - AVAXUSDT
+  - LINKUSDT
+  - SUIUSDT
+  - LTCUSDT
+
+inputs:
+  signal_journal: data/entry_quality_v2_shadow/signals.jsonl
+  outcome_journal: data/entry_quality_v2_shadow/outcomes.jsonl
+  trade_logs_glob: binance-futures-bot-ts/logs/aegis/turbo_trades_*.jsonl
+
+labels:
+  schema: aegis-labels-short-v4
+  horizon_bars: 12
+
+evidence:
+  minimum_non_overlapping_episodes: 300
+  minimum_embargo_minutes: 120
+  minimum_challenger_selected_outcomes: 50
+  minimum_selected_non_overlapping_episodes: 30
+  maximum_symbol_concentration: 0.30
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20260726
+
+outputs:
+  dataset_path: data/entry_quality_v3_feedback/feedback_dataset.jsonl
+  report_path: data/entry_quality_v3_feedback/feedback_report.json
+
+automation:
+  automatic_training: false
+  automatic_promotion: false
+
+training_controls:
+  historical_replay_required: true
+  live_only_training_allowed: false
+  purged_walk_forward_required: true
+  champion_challenger_required: true
+  owner_promotion_required: true
