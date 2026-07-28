@@ -31,6 +31,7 @@ def build_service() -> CurrentBrainDecisionService:
         root / "config/entry_quality_v2.yaml",
         root / "config/entry_quality_v3_dual_shadow.yaml",
         root / "config/committee_v2_shadow.yaml",
+        root / "config/committee_v21_shadow.yaml",
         repo_root=root,
     )
     service = CurrentBrainDecisionService(
@@ -57,17 +58,23 @@ def create_app(service: CurrentBrainDecisionService | None = None) -> FastAPI:
     async def predict(request: PredictRequest) -> dict:
         symbol = request.symbol.strip().upper()
         if symbol not in CANONICAL_SYMBOLS:
-            raise HTTPException(status_code=422, detail="AEGIS_CURRENT_BRAIN_SYMBOL_UNAUTHORIZED")
+            raise HTTPException(
+                status_code=422, detail="AEGIS_CURRENT_BRAIN_SYMBOL_UNAUTHORIZED"
+            )
         try:
             return dict(runtime.predict(symbol, trace_id()))
         except CurrentBrainError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(status_code=503, detail="AEGIS_CURRENT_BRAIN_INFERENCE_FAILED") from exc
+            raise HTTPException(
+                status_code=503, detail="AEGIS_CURRENT_BRAIN_INFERENCE_FAILED"
+            ) from exc
 
     @app.post("/ml-v2/exit_signal")
     async def exit_signal(_: PredictRequest) -> dict:
-        raise HTTPException(status_code=501, detail="AEGIS_CURRENT_BRAIN_EXIT_SIGNAL_NOT_PRESENT")
+        raise HTTPException(
+            status_code=501, detail="AEGIS_CURRENT_BRAIN_EXIT_SIGNAL_NOT_PRESENT"
+        )
 
     @app.get("/diagnostics/runtime")
     async def diagnostics() -> dict:
@@ -86,7 +93,13 @@ def main() -> int:
     args = parser.parse_args()
     if args.host != "127.0.0.1" or args.port != 8001:
         raise SystemExit("AEGIS_CURRENT_BRAIN_BINDING_PROHIBITED")
-    uvicorn.run("aegis.live_api:app", host=args.host, port=args.port, workers=1, access_log=False)
+    uvicorn.run(
+        "aegis.live_api:app",
+        host=args.host,
+        port=args.port,
+        workers=1,
+        access_log=False,
+    )
     return 0
 
 

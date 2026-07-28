@@ -23,6 +23,11 @@ from .committee_v2_shadow import (
     UnavailableCommitteeV2ShadowObserver,
     build_committee_v2_shadow_observer,
 )
+from .committee_v21_shadow import (
+    CommitteeV21ShadowRuntime,
+    UnavailableCommitteeV21ShadowObserver,
+    build_committee_v21_shadow_observer,
+)
 from .regime_v2 import (
     DirectionRegime,
     FactorizedRegimeAnalyzer,
@@ -102,9 +107,7 @@ def load_dual_side_shadow_config(
                 or not bool(promotion.get("current_live_eligible"))
                 or not bool(promotion.get("require_shadow_evidence_pass"))
             ):
-                raise DualSideShadowError(
-                    "AEGIS_DUAL_SIDE_LIVE_PROMOTION_PROHIBITED"
-                )
+                raise DualSideShadowError("AEGIS_DUAL_SIDE_LIVE_PROMOTION_PROHIBITED")
         signal_journal = journal_root / str(evidence["signal_journal"])
         outcome_journal = journal_root / str(evidence["outcome_journal"])
         if (
@@ -173,16 +176,15 @@ class DualSideEntryQualityShadowRuntime:
         cycle = str(batch["decision_cycle_id"])
         timestamp = str(batch["market_timestamp"])
         with self._lock:
-            if cycle in self._processed_cycles or timestamp in self._processed_timestamps:
+            if (
+                cycle in self._processed_cycles
+                or timestamp in self._processed_timestamps
+            ):
                 return self._overlay(cycle=cycle, timestamp=timestamp)
             try:
                 rows = self._build_rows(batch)
                 ranking = sorted(
-                    (
-                        row
-                        for row in rows
-                        if float(row["long_shadow"]["score"]) > 0.0
-                    ),
+                    (row for row in rows if float(row["long_shadow"]["score"]) > 0.0),
                     key=lambda row: (
                         -float(row["long_shadow"]["score"]),
                         str(row["symbol"]),
@@ -190,9 +192,7 @@ class DualSideEntryQualityShadowRuntime:
                 )
                 selected = {
                     str(row["symbol"])
-                    for row in ranking[
-                        : self.config.maximum_candidates_per_cycle
-                    ]
+                    for row in ranking[: self.config.maximum_candidates_per_cycle]
                 }
                 regime_ranking = [
                     row
@@ -212,9 +212,7 @@ class DualSideEntryQualityShadowRuntime:
                         row["symbol"] in regime_selected
                     )
                     shadow["paper_action"] = (
-                        "LONG"
-                        if shadow["regime_confirmed_selected"]
-                        else "NO_TRADE"
+                        "LONG" if shadow["regime_confirmed_selected"] else "NO_TRADE"
                     )
                     self._signals.append(row)
                 self._processed_cycles.add(cycle)
@@ -312,9 +310,7 @@ class DualSideEntryQualityShadowRuntime:
                             if layer.get("qmae_q90") is not None
                             else None
                         ),
-                        "qmae_directional_authority": (
-                            "NOT_ESTABLISHED_FOR_LONG"
-                        ),
+                        "qmae_directional_authority": ("NOT_ESTABLISHED_FOR_LONG"),
                         "regime": to_primitive(regime),
                         "bull_trend_context": (
                             regime.evidence_ready
@@ -352,9 +348,7 @@ class DualSideEntryQualityShadowRuntime:
                 gross = (exit_price - entry) / entry
                 self._outcomes.append(
                     {
-                        "schema_id": (
-                            "aegis-entry-quality-v3-long-paper-outcome-v1"
-                        ),
+                        "schema_id": ("aegis-entry-quality-v3-long-paper-outcome-v1"),
                         "event_id": event_id,
                         "symbol": signal["symbol"],
                         "side": "LONG",
@@ -364,12 +358,8 @@ class DualSideEntryQualityShadowRuntime:
                         "net_return_fraction": (
                             gross - self.config.round_trip_cost_fraction
                         ),
-                        "mfe_fraction": max(
-                            0.0, (max(highs) - entry) / entry
-                        ),
-                        "mae_fraction": max(
-                            0.0, (entry - min(lows)) / entry
-                        ),
+                        "mfe_fraction": max(0.0, (max(highs) - entry) / entry),
+                        "mae_fraction": max(0.0, (entry - min(lows)) / entry),
                         "model_only_selected": bool(
                             signal["long_shadow"]["model_only_selected"]
                         ),
@@ -394,9 +384,7 @@ class DualSideEntryQualityShadowRuntime:
                 "mode": "SHADOW",
                 "status": row["long_shadow"]["status"],
                 "paper_action": row["long_shadow"]["paper_action"],
-                "model_only_selected": bool(
-                    row["long_shadow"]["model_only_selected"]
-                ),
+                "model_only_selected": bool(row["long_shadow"]["model_only_selected"]),
                 "regime_confirmed_selected": bool(
                     row["long_shadow"]["regime_confirmed_selected"]
                 ),
@@ -431,14 +419,16 @@ class CompositeResearchObserver:
         primary: BatchObserver,
         dual: DualSideEntryQualityShadowRuntime,
         committee: (
-            CommitteeV2ShadowRuntime
-            | UnavailableCommitteeV2ShadowObserver
-            | None
+            CommitteeV2ShadowRuntime | UnavailableCommitteeV2ShadowObserver | None
+        ) = None,
+        committee_v21: (
+            CommitteeV21ShadowRuntime | UnavailableCommitteeV21ShadowObserver | None
         ) = None,
     ):
         self.primary = primary
         self.dual = dual
         self.committee = committee
+        self.committee_v21 = committee_v21
 
     @property
     def mode(self) -> EntryQualityV2Mode:
@@ -456,11 +446,20 @@ class CompositeResearchObserver:
             if self.committee is not None
             else {}
         )
+        committee_v21 = (
+            self.committee_v21.observe_batch(
+                batch,
+                primary_overlay=primary,
+            )
+            if self.committee_v21 is not None
+            else {}
+        )
         return {
             symbol: {
                 **dict(primary.get(symbol, {})),
                 "dual_side_shadow": dict(dual.get(symbol, {})),
                 "committee_v2_shadow": dict(committee.get(symbol, {})),
+                "committee_v21_shadow": dict(committee_v21.get(symbol, {})),
             }
             for symbol in CANONICAL_SYMBOLS
         }
@@ -472,6 +471,8 @@ class CompositeResearchObserver:
         }
         if self.committee is not None:
             health["committee_v2_shadow"] = dict(self.committee.health())
+        if self.committee_v21 is not None:
+            health["committee_v21_shadow"] = dict(self.committee_v21.health())
         return health
 
 
@@ -479,17 +480,14 @@ def build_composite_research_observer(
     primary_config_path: Path,
     dual_config_path: Path,
     committee_config_path: Path | None = None,
+    committee_v21_config_path: Path | None = None,
     *,
     repo_root: Path,
 ) -> BatchObserver:
     from .shadow_runtime import build_entry_quality_v2_observer
 
-    primary = build_entry_quality_v2_observer(
-        primary_config_path, repo_root=repo_root
-    )
-    dual_config = load_dual_side_shadow_config(
-        dual_config_path, repo_root=repo_root
-    )
+    primary = build_entry_quality_v2_observer(primary_config_path, repo_root=repo_root)
+    dual_config = load_dual_side_shadow_config(dual_config_path, repo_root=repo_root)
     artifact = load_long_opportunity_artifact(dual_config.artifact_path)
     primary_config = load_entry_quality_v2_config(
         primary_config_path, repo_root=repo_root
@@ -507,4 +505,17 @@ def build_composite_research_observer(
         if committee_config_path is not None
         else None
     )
-    return CompositeResearchObserver(primary, dual, committee)
+    committee_v21 = (
+        build_committee_v21_shadow_observer(
+            committee_v21_config_path,
+            repo_root=repo_root,
+        )
+        if committee_v21_config_path is not None
+        else None
+    )
+    return CompositeResearchObserver(
+        primary,
+        dual,
+        committee,
+        committee_v21,
+    )

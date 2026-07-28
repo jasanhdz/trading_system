@@ -10,11 +10,11 @@ from aegis.research.dual_side_shadow import (
     load_dual_side_shadow_config,
 )
 
-
 ROOT = Path(__file__).parents[2]
 PRIMARY = ROOT / "config/entry_quality_v2.yaml"
 DUAL = ROOT / "config/entry_quality_v3_dual_shadow.yaml"
 COMMITTEE = ROOT / "config/committee_v2_shadow.yaml"
+COMMITTEE_V21 = ROOT / "config/committee_v21_shadow.yaml"
 
 
 def test_dual_side_repository_config_is_shadow_only_and_hash_pinned() -> None:
@@ -32,9 +32,7 @@ def test_failed_long_artifact_cannot_be_switched_to_live(tmp_path: Path) -> None
     )
     path = tmp_path / "dual.yaml"
     path.write_text(yaml.safe_dump(payload, sort_keys=False))
-    with pytest.raises(
-        DualSideShadowError, match="LIVE_PROMOTION_PROHIBITED"
-    ):
+    with pytest.raises(DualSideShadowError, match="LIVE_PROMOTION_PROHIBITED"):
         load_dual_side_shadow_config(path, repo_root=ROOT)
 
 
@@ -57,12 +55,10 @@ def test_composite_observer_preserves_primary_and_adds_non_authoritative_long(
     dual_payload = yaml.safe_load(DUAL.read_text())
     dual_payload["evidence"]["journal_root"] = "../data/dual"
     dual_payload["artifact"]["path"] = str(
-        DUAL.parent.parent
-        / dual_payload["artifact"]["path"]
+        DUAL.parent.parent / dual_payload["artifact"]["path"]
     )
     dual_payload["artifact"]["readiness_path"] = str(
-        DUAL.parent.parent
-        / dual_payload["artifact"]["readiness_path"]
+        DUAL.parent.parent / dual_payload["artifact"]["readiness_path"]
     )
     dual_path = tmp_path / "config/dual.yaml"
     dual_path.write_text(yaml.safe_dump(dual_payload, sort_keys=False))
@@ -70,14 +66,27 @@ def test_composite_observer_preserves_primary_and_adds_non_authoritative_long(
     committee_payload = yaml.safe_load(COMMITTEE.read_text())
     committee_payload["evidence"]["journal_root"] = "../data/committee"
     committee_path = tmp_path / "config/committee.yaml"
-    committee_path.write_text(
-        yaml.safe_dump(committee_payload, sort_keys=False)
+    committee_path.write_text(yaml.safe_dump(committee_payload, sort_keys=False))
+
+    committee_v21_payload = yaml.safe_load(COMMITTEE_V21.read_text())
+    committee_v21_payload["authority"]["preregistration_path"] = str(
+        ROOT / "config/experiments/aegis_committee_v21_preregistered_v1.yaml"
+    )
+    committee_v21_payload["artifact"]["path"] = str(
+        ROOT / "config/bundles/aegis-specialized-committee-v21-risk-v1.json"
+    )
+    committee_v21_payload["evidence"]["journal_root"] = "../data/committee_v21"
+    committee_v21_payload["evidence"]["evidence_start_utc"] = "2026-07-05T00:00:00Z"
+    committee_v21_path = tmp_path / "config/committee_v21.yaml"
+    committee_v21_path.write_text(
+        yaml.safe_dump(committee_v21_payload, sort_keys=False)
     )
 
     observer = build_composite_research_observer(
         primary_path,
         dual_path,
         committee_path,
+        committee_v21_path,
         repo_root=tmp_path,
     )
     batch = _batch(0)
@@ -110,5 +119,15 @@ def test_composite_observer_preserves_primary_and_adds_non_authoritative_long(
         == batch["results"][symbol]["selected"]
         for symbol in CANONICAL_SYMBOLS
     )
+    assert all(
+        overlay[symbol]["committee_v21_shadow"]["exchange_authority"] is False
+        for symbol in CANONICAL_SYMBOLS
+    )
+    assert all(
+        overlay[symbol]["committee_v21_shadow"]["control_selected"]
+        == batch["results"][symbol]["selected"]
+        for symbol in CANONICAL_SYMBOLS
+    )
     assert observer.health()["dual_side_shadow"]["exchange_mutations"] == 0
     assert observer.health()["committee_v2_shadow"]["exchange_mutations"] == 0
+    assert observer.health()["committee_v21_shadow"]["exchange_mutations"] == 0

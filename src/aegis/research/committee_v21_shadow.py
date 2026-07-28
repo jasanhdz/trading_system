@@ -625,26 +625,31 @@ class CommitteeV21ShadowRuntime:
                 or timestamp in self._processed_timestamps
             ):
                 return self._overlay(cycle=cycle, timestamp=timestamp)
-            rows = self._build_rows(
-                batch,
-                primary_overlay=primary_overlay or {},
-            )
-            if (
-                sum(
-                    row["counterfactual"]["paper_action"] == "ENTER_NOW" for row in rows
+            try:
+                rows = self._build_rows(
+                    batch,
+                    primary_overlay=primary_overlay or {},
                 )
-                > self.config.maximum_paper_entries_per_cycle
-            ):
-                raise CommitteeV21ShadowError(
-                    "AEGIS_COMMITTEE_V21_SELECTION_LIMIT_EXCEEDED"
-                )
-            for row in rows:
-                self._signals.append(row)
-            self._processed_cycles.add(cycle)
-            self._processed_timestamps.add(timestamp)
-            self._mature_outcomes()
-            self.last_observation_at = datetime.now(timezone.utc)
-            return self._overlay(cycle=cycle, timestamp=timestamp)
+                if (
+                    sum(
+                        row["counterfactual"]["paper_action"] == "ENTER_NOW"
+                        for row in rows
+                    )
+                    > self.config.maximum_paper_entries_per_cycle
+                ):
+                    raise CommitteeV21ShadowError(
+                        "AEGIS_COMMITTEE_V21_SELECTION_LIMIT_EXCEEDED"
+                    )
+                for row in rows:
+                    self._signals.append(row)
+                self._processed_cycles.add(cycle)
+                self._processed_timestamps.add(timestamp)
+                self._mature_outcomes()
+                self.last_observation_at = datetime.now(timezone.utc)
+                return self._overlay(cycle=cycle, timestamp=timestamp)
+            except Exception:
+                self.observation_errors += 1
+                return {}
 
     def _build_rows(
         self,

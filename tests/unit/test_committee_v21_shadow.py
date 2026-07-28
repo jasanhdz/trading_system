@@ -326,14 +326,43 @@ def test_v21_modules_have_no_exchange_or_process_mutation_surface() -> None:
     assert all(value not in source for value in forbidden)
 
 
-def test_v21_is_not_imported_by_live_runtime_after_failed_diagnostic() -> None:
+def test_v21_live_integration_is_observational_only() -> None:
     live_api = (ROOT / "src/aegis/live_api.py").read_text(encoding="utf-8")
     composite = (ROOT / "src/aegis/research/dual_side_shadow.py").read_text(
         encoding="utf-8"
     )
+    runtime = yaml.safe_load(
+        (ROOT / "config/committee_v21_shadow.yaml").read_text(encoding="utf-8")
+    )
 
-    assert "committee_v21" not in live_api
-    assert "committee_v21" not in composite
+    assert "committee_v21_shadow.yaml" in live_api
+    assert "committee_v21_shadow" in composite
+    assert runtime["mode"] == "SHADOW"
+    assert runtime["runtime_authority"] == "OBSERVATIONAL_ONLY"
+    assert runtime["authority"]["exchange_authority"] is False
+    assert runtime["authority"]["automatic_promotion"] is False
+
+
+def test_runtime_observation_failure_is_isolated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = CommitteeV21ShadowRuntime(_runtime_config(tmp_path))
+    batch = _batch(0)
+
+    def fail(*args, **kwargs):
+        raise CommitteeV21ShadowError("fixture failure")
+
+    monkeypatch.setattr(runtime, "_build_rows", fail)
+
+    assert (
+        runtime.observe_batch(
+            batch,
+            primary_overlay=_primary_overlay(batch),
+        )
+        == {}
+    )
+    assert runtime.health()["observation_errors"] == 1
 
 
 def test_malformed_or_nonfinite_observation_fails_closed(

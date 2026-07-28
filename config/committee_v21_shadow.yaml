@@ -1,0 +1,32 @@
+schema_version: aegis-specialized-committee-v21-shadow-runtime-v1
+experiment_id: aegis-specialized-committee-v21-shadow-01
+enabled: true
+mode: SHADOW
+runtime_authority: OBSERVATIONAL_ONLY
+
+authority:
+  preregistration_path: config/experiments/aegis_committee_v21_preregistered_v1.yaml
+  preregistration_sha256: a42c6b8627c170b746964201bb2177da20d7ced08bf44462d603fcf07613f2f3
+  exchange_authority: false
+  runtime_training: false
+  automatic_promotion: false
+
+artifact:
+  path: config/bundles/aegis-specialized-committee-v21-risk-v1.json
+  sha256: c83a691c81923a2f4ce3c1637a9f3f48dcedf4c0d57c05d5f5b4efaf1bc762d0
+  diagnostic_verdict: FAILED
+  activation_purpose: PROSPECTIVE_SHADOW_CONFIRMATION_OR_REJECTION
+
+evidence:
+  journal_root: ../data/committee_v21_shadow
+  signal_journal: signals.jsonl
+  outcome_journal: outcomes.jsonl
+  evidence_start_utc: "2026-07-28T19:00:00Z"
+
+counterfactual:
+  control_authority: CURRENT_CANONICAL_SELECTION
+  maximum_paper_entries_per_cycle: 1
+  fabricated_votes_prohibited: true
+  wait_interpretation: ABSTENTION_ONLY
+  live_effect: NONE
+
