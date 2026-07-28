@@ -58,24 +58,42 @@ class ShortOpportunityTrainingContract:
     minimum_embargo_minutes: int
     minimum_symbol_calibration_rows: int
     symbol_calibration_shrinkage_rows: int
+    probability_semantics: str = "CLEAN_ENTRY_LOW_MAE_H12"
 
     def __post_init__(self) -> None:
         if self.schema_version != "aegis-short-opportunity-training-contract-v1":
             raise ValueError("unsupported SHORT opportunity training schema")
-        if self.feature_schema_version != FEATURE_SCHEMA_VERSION or self.feature_hash != FEATURE_HASH:
-            raise ValueError("SHORT opportunity training must preserve aegis-features-v2")
+        if (
+            self.feature_schema_version != FEATURE_SCHEMA_VERSION
+            or self.feature_hash != FEATURE_HASH
+        ):
+            raise ValueError(
+                "SHORT opportunity training must preserve aegis-features-v2"
+            )
         if not 0.0 < self.maximum_acceptable_mae < 1.0:
             raise ValueError("maximum acceptable MAE is invalid")
-        if self.model_candidate_id not in {
-            "eqm_logistic_clean_baseline",
-            "eqm_random_forest_clean",
-            "eqm_hgb_clean",
-        } or not self.model_parameters:
+        if (
+            self.model_candidate_id
+            not in {
+                "eqm_logistic_clean_baseline",
+                "eqm_random_forest_clean",
+                "eqm_hgb_clean",
+            }
+            or not self.model_parameters
+        ):
             raise ValueError("SHORT opportunity model contract is invalid")
         if self.minimum_embargo_minutes <= 0:
             raise ValueError("temporal embargo must be positive")
-        if self.minimum_symbol_calibration_rows < 8 or self.symbol_calibration_shrinkage_rows <= 0:
+        if (
+            self.minimum_symbol_calibration_rows < 8
+            or self.symbol_calibration_shrinkage_rows <= 0
+        ):
             raise ValueError("symbol calibration sample contract is invalid")
+        if self.probability_semantics not in {
+            "CLEAN_ENTRY_LOW_MAE_H12",
+            "TERMINAL_NET_POSITIVE_H12_AFTER_COSTS",
+        }:
+            raise ValueError("SHORT opportunity probability semantics are invalid")
 
 
 @dataclass(frozen=True)
@@ -101,27 +119,34 @@ class ShortOpportunityArtifact:
     normalizer: FrozenNormalizer
     calibrator: HierarchicalProbabilityCalibrator
     scoring_metrics: ShortOpportunityMetrics
+    probability_semantics: str = "CLEAN_ENTRY_LOW_MAE_H12"
 
     def __post_init__(self) -> None:
         if self.schema_version != "aegis-short-opportunity-artifact-v1":
             raise ValueError("unsupported SHORT opportunity artifact")
-        if self.feature_schema_version != FEATURE_SCHEMA_VERSION or self.feature_hash != FEATURE_HASH:
+        if (
+            self.feature_schema_version != FEATURE_SCHEMA_VERSION
+            or self.feature_hash != FEATURE_HASH
+        ):
             raise ValueError("SHORT opportunity artifact feature authority mismatch")
         if self.feature_names != FEATURE_NAMES:
             raise ValueError("SHORT opportunity artifact feature ordering mismatch")
         if self.tree_ensemble is None:
-            if (
-                self.model_candidate_id != "eqm_logistic_clean_baseline"
-                or len(self.coefficients) != len(FEATURE_NAMES)
-            ):
+            if self.model_candidate_id != "eqm_logistic_clean_baseline" or len(
+                self.coefficients
+            ) != len(FEATURE_NAMES):
                 raise ValueError("SHORT opportunity linear artifact is invalid")
         elif (
-            self.model_candidate_id
-            not in {"eqm_random_forest_clean", "eqm_hgb_clean"}
+            self.model_candidate_id not in {"eqm_random_forest_clean", "eqm_hgb_clean"}
             or self.coefficients
             or self.tree_ensemble.feature_names != FEATURE_NAMES
         ):
             raise ValueError("SHORT opportunity tree artifact is invalid")
+        if self.probability_semantics not in {
+            "CLEAN_ENTRY_LOW_MAE_H12",
+            "TERMINAL_NET_POSITIVE_H12_AFTER_COSTS",
+        }:
+            raise ValueError("SHORT opportunity artifact semantics are invalid")
 
     def raw_probability(self, features: Sequence[float]) -> float:
         if len(features) != len(self.feature_names) or not all(
@@ -177,6 +202,7 @@ def short_opportunity_artifact_mapping(
         "feature_hash": artifact.feature_hash,
         "feature_names": list(artifact.feature_names),
         "model_candidate_id": artifact.model_candidate_id,
+        "probability_semantics": artifact.probability_semantics,
         "coefficients": list(artifact.coefficients),
         "intercept": artifact.intercept,
         "tree_ensemble": (
@@ -200,7 +226,9 @@ def short_opportunity_artifact_mapping(
             "global": _calibrator_to_mapping(artifact.calibrator.global_calibrator),
             "symbols": {
                 symbol: _calibrator_to_mapping(value)
-                for symbol, value in sorted(artifact.calibrator.symbol_calibrators.items())
+                for symbol, value in sorted(
+                    artifact.calibrator.symbol_calibrators.items()
+                )
             },
             "symbol_sample_counts": dict(
                 sorted(artifact.calibrator.symbol_sample_counts.items())
@@ -279,14 +307,8 @@ def short_opportunity_artifact_from_mapping(
                 else None
             ),
             normalizer=FrozenNormalizer(
-                means={
-                    str(name): float(metric)
-                    for name, metric in means.items()
-                },
-                scales={
-                    str(name): float(metric)
-                    for name, metric in scales.items()
-                },
+                means={str(name): float(metric) for name, metric in means.items()},
+                scales={str(name): float(metric) for name, metric in scales.items()},
                 clip_absolute=float(normalizer["clip_absolute"]),
             ),
             calibrator=HierarchicalProbabilityCalibrator(
@@ -310,27 +332,45 @@ def short_opportunity_artifact_from_mapping(
                 brier=float(metrics["brier"]),
                 per_symbol={
                     str(symbol): {
-                        str(name): float(metric) if isinstance(metric, float) else int(metric)
+                        str(name): (
+                            float(metric) if isinstance(metric, float) else int(metric)
+                        )
                         for name, metric in values.items()
                     }
                     for symbol, values in per_symbol.items()  # type: ignore[union-attr]
                 },
+            ),
+            probability_semantics=str(
+                value.get(
+                    "probability_semantics",
+                    "CLEAN_ENTRY_LOW_MAE_H12",
+                )
             ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("SHORT opportunity artifact is invalid") from exc
 
 
-def _label(row: ShortOpportunityTrainingRow, maximum_mae: float) -> int:
-    return int(row.clean_opportunity and row.mae_fraction <= maximum_mae)
+def _label(
+    row: ShortOpportunityTrainingRow,
+    contract: ShortOpportunityTrainingContract,
+) -> int:
+    if contract.probability_semantics == "TERMINAL_NET_POSITIVE_H12_AFTER_COSTS":
+        return int(row.clean_opportunity)
+    return int(
+        row.clean_opportunity and row.mae_fraction <= contract.maximum_acceptable_mae
+    )
 
 
 def _matrix(rows: Sequence[ShortOpportunityTrainingRow]) -> np.ndarray:
     return np.asarray([row.features for row in rows], dtype=np.float64)
 
 
-def _labels(rows: Sequence[ShortOpportunityTrainingRow], maximum_mae: float) -> np.ndarray:
-    return np.asarray([_label(row, maximum_mae) for row in rows], dtype=np.int64)
+def _labels(
+    rows: Sequence[ShortOpportunityTrainingRow],
+    contract: ShortOpportunityTrainingContract,
+) -> np.ndarray:
+    return np.asarray([_label(row, contract) for row in rows], dtype=np.int64)
 
 
 def _validate_temporal_blocks(
@@ -340,16 +380,26 @@ def _validate_temporal_blocks(
     embargo: timedelta,
 ) -> None:
     if min(len(train), len(calibration), len(scoring)) < 8:
-        raise ValueError("training, calibration, and scoring blocks require at least eight rows")
-    if not max(row.timestamp for row in train) + embargo <= min(row.timestamp for row in calibration):
+        raise ValueError(
+            "training, calibration, and scoring blocks require at least eight rows"
+        )
+    if not max(row.timestamp for row in train) + embargo <= min(
+        row.timestamp for row in calibration
+    ):
         raise ValueError("training and calibration blocks overlap or are unordered")
-    if not max(row.timestamp for row in calibration) + embargo <= min(row.timestamp for row in scoring):
+    if not max(row.timestamp for row in calibration) + embargo <= min(
+        row.timestamp for row in scoring
+    ):
         raise ValueError("calibration and scoring blocks overlap or are unordered")
     identities = [
         {(row.timestamp, row.symbol) for row in block}
         for block in (train, calibration, scoring)
     ]
-    if identities[0] & identities[1] or identities[0] & identities[2] or identities[1] & identities[2]:
+    if (
+        identities[0] & identities[1]
+        or identities[0] & identities[2]
+        or identities[1] & identities[2]
+    ):
         raise ValueError("temporal training blocks share row identities")
 
 
@@ -369,7 +419,9 @@ def _fit_symbol_calibrators(
             or len(np.unique(symbol_labels)) < 2
         ):
             continue
-        calibrators[symbol] = fit_platt_calibrator(raw_probabilities[indices], symbol_labels)
+        calibrators[symbol] = fit_platt_calibrator(
+            raw_probabilities[indices], symbol_labels
+        )
         counts[symbol] = len(indices)
     return calibrators, counts
 
@@ -385,7 +437,9 @@ def _scoring_metrics(
         indices = [index for index, row in enumerate(rows) if row.symbol == symbol]
         symbol_labels = labels[indices]
         symbol_probabilities = probabilities[indices]
-        symbol_ece, symbol_brier = calibration_metrics(symbol_probabilities, symbol_labels)
+        symbol_ece, symbol_brier = calibration_metrics(
+            symbol_probabilities, symbol_labels
+        )
         per_symbol[symbol] = {
             "row_count": len(indices),
             "positive_rate": float(np.mean(symbol_labels)),
@@ -422,10 +476,13 @@ def fit_short_opportunity_model(
         scoring,
         timedelta(minutes=contract.minimum_embargo_minutes),
     )
-    train_labels = _labels(train, contract.maximum_acceptable_mae)
-    calibration_labels = _labels(calibration, contract.maximum_acceptable_mae)
-    scoring_labels = _labels(scoring, contract.maximum_acceptable_mae)
-    if any(len(np.unique(values)) < 2 for values in (train_labels, calibration_labels, scoring_labels)):
+    train_labels = _labels(train, contract)
+    calibration_labels = _labels(calibration, contract)
+    scoring_labels = _labels(scoring, contract)
+    if any(
+        len(np.unique(values)) < 2
+        for values in (train_labels, calibration_labels, scoring_labels)
+    ):
         raise ValueError("every temporal block must contain both opportunity classes")
 
     parameters = dict(contract.model_parameters)
@@ -447,7 +504,9 @@ def fit_short_opportunity_model(
             random_state=contract.seed,
         )
     model.fit(_matrix(train), train_labels)
-    calibration_raw = np.asarray(model.predict_proba(_matrix(calibration))[:, 1], dtype=np.float64)
+    calibration_raw = np.asarray(
+        model.predict_proba(_matrix(calibration))[:, 1], dtype=np.float64
+    )
     global_calibrator = fit_platt_calibrator(calibration_raw, calibration_labels)
     symbol_calibrators, symbol_counts = _fit_symbol_calibrators(
         calibration, calibration_raw, calibration_labels, contract
@@ -459,7 +518,9 @@ def fit_short_opportunity_model(
         symbol_sample_counts=symbol_counts,
         shrinkage_sample_count=contract.symbol_calibration_shrinkage_rows,
     )
-    scoring_raw = np.asarray(model.predict_proba(_matrix(scoring))[:, 1], dtype=np.float64)
+    scoring_raw = np.asarray(
+        model.predict_proba(_matrix(scoring))[:, 1], dtype=np.float64
+    )
     scoring_probabilities = np.asarray(
         [
             calibrator.apply(row.symbol, float(probability))
@@ -502,11 +563,16 @@ def fit_short_opportunity_model(
         tree_ensemble=tree_ensemble,
         normalizer=normalizer,
         calibrator=calibrator,
-        scoring_metrics=_scoring_metrics(scoring, scoring_probabilities, scoring_labels),
+        scoring_metrics=_scoring_metrics(
+            scoring, scoring_probabilities, scoring_labels
+        ),
+        probability_semantics=contract.probability_semantics,
     )
 
 
-def rows_from_training_dataset(dataset: TrainingDataset) -> tuple[ShortOpportunityTrainingRow, ...]:
+def rows_from_training_dataset(
+    dataset: TrainingDataset,
+) -> tuple[ShortOpportunityTrainingRow, ...]:
     """Adapt the existing causal dataset without changing feature or label order."""
     if (
         dataset.feature_schema_version != FEATURE_SCHEMA_VERSION

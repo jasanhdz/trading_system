@@ -102,13 +102,13 @@ def _training_rows(
             return target.clean_quality >= 0.5
         if label_mode == "POSITIVE_NET_LOW_MAE":
             return favorable_entry(
-                net_return=(
-                    -target.expected_return - round_trip_cost_fraction
-                ),
+                net_return=(-target.expected_return - round_trip_cost_fraction),
                 mae=target.qmae,
                 bad_entry=target.bad_entry >= 0.5,
                 maximum_mae=maximum_acceptable_mae,
             )
+        if label_mode == "TERMINAL_NET_POSITIVE_H12_AFTER_COSTS":
+            return (-target.expected_return - round_trip_cost_fraction) > 0.0
         raise ValueError("unsupported meta-entry label mode")
 
     return tuple(
@@ -142,22 +142,14 @@ def _current_brain_candidate_indices(
     selected = []
     for timestamp, group in sorted(grouped.items()):
         if len(group) != len(CANONICAL_SYMBOLS):
-            raise ValueError(
-                "current-brain candidate replay requires complete cycles"
-            )
+            raise ValueError("current-brain candidate replay requires complete cycles")
         pipeline = evaluate_authoritative_feature_batch(
             bundle,
             _feature_batch(dataset, group, bundle),
             timestamp=timestamp,
-            config={
-                "protocol": {
-                    "friction_fraction": round_trip_cost_fraction
-                }
-            },
+            config={"protocol": {"friction_fraction": round_trip_cost_fraction}},
             request_id=f"meta-entry-candidate-{timestamp.isoformat()}",
-            decision_cycle_id=(
-                f"meta-entry-candidate-cycle-{timestamp.isoformat()}"
-            ),
+            decision_cycle_id=(f"meta-entry-candidate-cycle-{timestamp.isoformat()}"),
         )
         for candidate in pipeline.selection.selected:
             if candidate.side is not TradeSide.SHORT:
@@ -204,9 +196,7 @@ def _evidence_rows(
                 timestamp=source.timestamp,
                 symbol=source.symbol,
                 score=float(probability),
-                net_return=(
-                    -source.target.expected_return - round_trip_cost_fraction
-                ),
+                net_return=(-source.target.expected_return - round_trip_cost_fraction),
                 mae=source.target.qmae,
                 bad_entry=source.target.bad_entry >= 0.5,
                 regime=source.regime.value,
@@ -266,7 +256,9 @@ def _current_brain_control(
         [0.0] * len(indices),
         round_trip_cost_fraction=round_trip_cost_fraction,
     )
-    local_index = {dataset_index: offset for offset, dataset_index in enumerate(indices)}
+    local_index = {
+        dataset_index: offset for offset, dataset_index in enumerate(indices)
+    }
     selected_offsets = []
     for timestamp, group in sorted(grouped.items()):
         pipeline = evaluate_authoritative_feature_batch(
@@ -303,25 +295,15 @@ def _selection_contract(config: Mapping[str, Any]) -> DirectionalSelectionContra
         probability_quantiles=tuple(
             float(value) for value in config["probability_quantiles"]
         ),
-        minimum_calibration_selections=int(
-            config["minimum_calibration_selections"]
-        ),
+        minimum_calibration_selections=int(config["minimum_calibration_selections"]),
         minimum_scoring_selections=int(config["minimum_scoring_selections"]),
         maximum_mean_mae=float(config["maximum_mean_mae"]),
-        maximum_symbol_concentration=float(
-            config["maximum_symbol_concentration"]
-        ),
+        maximum_symbol_concentration=float(config["maximum_symbol_concentration"]),
         bootstrap_resamples=int(config["bootstrap_resamples"]),
         bootstrap_seed=int(config["bootstrap_seed"]),
-        bootstrap_block_minutes=int(
-            config.get("bootstrap_block_minutes", 720)
-        ),
-        minimum_calibration_blocks=int(
-            config.get("minimum_calibration_blocks", 10)
-        ),
-        minimum_scoring_blocks=int(
-            config.get("minimum_scoring_blocks", 10)
-        ),
+        bootstrap_block_minutes=int(config.get("bootstrap_block_minutes", 720)),
+        minimum_calibration_blocks=int(config.get("minimum_calibration_blocks", 10)),
+        minimum_scoring_blocks=int(config.get("minimum_scoring_blocks", 10)),
     )
 
 
@@ -360,10 +342,9 @@ def _live_feedback_state(
                 challenger = _mapping(row["challenger"], "challenger")
                 selected += int(bool(challenger["selected"]))
     observed = int(readiness["observed_non_overlapping_episodes"])
-    passed = (
-        observed >= int(config["minimum_non_overlapping_episodes"])
-        and selected >= int(config["minimum_challenger_selected_outcomes"])
-    )
+    passed = observed >= int(
+        config["minimum_non_overlapping_episodes"]
+    ) and selected >= int(config["minimum_challenger_selected_outcomes"])
     return {
         "state": "PASS" if passed else "COLLECTING",
         "non_overlapping_episodes": observed,
@@ -432,11 +413,9 @@ def _score_live_counterfactuals(
                 ),
             )
         )
-    percentiles, fallback_symbols = (
-        within_symbol_percentiles_with_global_fallback(
-            calibration_evidence,
-            evidence,
-        )
+    percentiles, fallback_symbols = within_symbol_percentiles_with_global_fallback(
+        calibration_evidence,
+        evidence,
     )
     selected = set(
         select_one_per_timestamp(
@@ -472,9 +451,7 @@ def _score_live_counterfactuals(
     temporary = output_path.with_suffix(".tmp")
     with temporary.open("w", encoding="utf-8", newline="\n") as output:
         for prediction in predictions:
-            output.write(
-                canonical_json(counterfactual_mapping(prediction)) + "\n"
-            )
+            output.write(canonical_json(counterfactual_mapping(prediction)) + "\n")
         output.flush()
         os.fsync(output.fileno())
     os.chmod(temporary, 0o600)
@@ -511,6 +488,7 @@ def main() -> int:
             "aegis-entry-quality-v21-short-preregistration-v1",
             "aegis-entry-quality-v22-short-preregistration-v1",
             "aegis-meta-entry-v3-short-preregistration-v1",
+            "aegis-short-profitability-semantics-v1-preregistration",
         }
         or config.get("side") != "SHORT"
         or config.get("runtime_authority") != "SHADOW_ONLY"
@@ -519,9 +497,7 @@ def main() -> int:
         raise SystemExit("AEGIS_ENTRY_QUALITY_V21_CONFIG_INVALID")
 
     source_config = _mapping(config["source"], "source")
-    preregistration_path = root / str(
-        source_config["preregistration_path"]
-    )
+    preregistration_path = root / str(source_config["preregistration_path"])
     if sha256_file(preregistration_path) != str(
         source_config["preregistration_sha256"]
     ):
@@ -532,8 +508,7 @@ def main() -> int:
     )
     lockbox = _mapping(preregistration["lockbox"], "source lockbox")
     if (
-        preregistration.get("label_schema_version")
-        != SHORT_LABEL_SCHEMA_VERSION
+        preregistration.get("label_schema_version") != SHORT_LABEL_SCHEMA_VERSION
         or not bool(lockbox.get("final_test_is_lockbox"))
         or int(lockbox.get("additional_lockbox_budget", -1)) != 0
     ):
@@ -541,9 +516,7 @@ def main() -> int:
     source = CanonicalSeriesSource(
         Path(str(source_config["canonical_series_path"])),
         DataPurpose.TRAINING,
-        expected_manifest_sha256=str(
-            source_config["canonical_manifest_sha256"]
-        ),
+        expected_manifest_sha256=str(source_config["canonical_manifest_sha256"]),
     )
     dataset = load_and_build_e2_hourly_dataset(source, preregistration).dataset
     if (
@@ -579,9 +552,7 @@ def main() -> int:
     candidates = _mapping(training["candidates"], "candidates")
     variants = tuple(str(value) for value in selection_config["variants"])
     fold_reports: dict[str, list[Mapping[str, Any]]] = {
-        f"{candidate}|{variant}": []
-        for candidate in candidates
-        for variant in variants
+        f"{candidate}|{variant}": [] for candidate in candidates for variant in variants
     }
     fold_artifacts: dict[tuple[str, int], ShortOpportunityArtifact] = {}
     fold_calibration_evidence: dict[
@@ -631,14 +602,10 @@ def main() -> int:
                 index for index in train_indices if index in candidate_population
             )
             calibration_indices = tuple(
-                index
-                for index in calibration_indices
-                if index in candidate_population
+                index for index in calibration_indices if index in candidate_population
             )
             scoring_indices = tuple(
-                index
-                for index in scoring_indices
-                if index in candidate_population
+                index for index in scoring_indices if index in candidate_population
             )
         normalizer = fit_normalizer(dataset, train_indices)
         blocks = {
@@ -648,9 +615,7 @@ def main() -> int:
                 normalizer,
                 label_mode=label_mode,
                 round_trip_cost_fraction=cost,
-                maximum_acceptable_mae=float(
-                    training["maximum_acceptable_mae"]
-                ),
+                maximum_acceptable_mae=float(training["maximum_acceptable_mae"]),
             ),
             "calibration": _training_rows(
                 dataset,
@@ -658,9 +623,7 @@ def main() -> int:
                 normalizer,
                 label_mode=label_mode,
                 round_trip_cost_fraction=cost,
-                maximum_acceptable_mae=float(
-                    training["maximum_acceptable_mae"]
-                ),
+                maximum_acceptable_mae=float(training["maximum_acceptable_mae"]),
             ),
             "scoring": _training_rows(
                 dataset,
@@ -668,9 +631,7 @@ def main() -> int:
                 normalizer,
                 label_mode=label_mode,
                 round_trip_cost_fraction=cost,
-                maximum_acceptable_mae=float(
-                    training["maximum_acceptable_mae"]
-                ),
+                maximum_acceptable_mae=float(training["maximum_acceptable_mae"]),
             ),
         }
         if candidate_population is None:
@@ -704,9 +665,7 @@ def main() -> int:
                 schema_version="aegis-short-opportunity-training-contract-v1",
                 feature_schema_version=FEATURE_SCHEMA_VERSION,
                 feature_hash=FEATURE_HASH,
-                maximum_acceptable_mae=float(
-                    training["maximum_acceptable_mae"]
-                ),
+                maximum_acceptable_mae=float(training["maximum_acceptable_mae"]),
                 model_candidate_id=str(candidate_id),
                 model_parameters=_mapping(parameters, str(candidate_id)),
                 seed=int(training["seed"]) + fold_id,
@@ -718,6 +677,11 @@ def main() -> int:
                 ),
                 symbol_calibration_shrinkage_rows=int(
                     training["symbol_calibration_shrinkage_rows"]
+                ),
+                probability_semantics=(
+                    "TERMINAL_NET_POSITIVE_H12_AFTER_COSTS"
+                    if label_mode == "TERMINAL_NET_POSITIVE_H12_AFTER_COSTS"
+                    else "CLEAN_ENTRY_LOW_MAE_H12"
                 ),
             )
             artifact = fit_short_opportunity_model(
@@ -733,8 +697,7 @@ def main() -> int:
                 for row in blocks["calibration"]
             )
             scoring_probabilities = tuple(
-                _probability_on_normalized(artifact, row)
-                for row in blocks["scoring"]
+                _probability_on_normalized(artifact, row) for row in blocks["scoring"]
             )
             calibration_evidence = _evidence_rows(
                 dataset,
@@ -790,9 +753,7 @@ def main() -> int:
                         ),
                         "allowed_regimes": list(regimes),
                         "calibration_valid": policy.calibration_valid,
-                        "calibration_selection": asdict(
-                            policy.calibration_metrics
-                        ),
+                        "calibration_selection": asdict(policy.calibration_metrics),
                         "classification": asdict(artifact.scoring_metrics),
                         "scoring_selection": asdict(metrics),
                         "scoring_policy_passed": scoring_policy_passes(
@@ -816,12 +777,8 @@ def main() -> int:
             float(report["scoring_selection"]["mean_net_expectancy"])
             for report in reports
         ]
-        signals = sum(
-            int(report["scoring_selection"]["signals"]) for report in reports
-        )
-        passing_folds = sum(
-            bool(report["scoring_policy_passed"]) for report in reports
-        )
+        signals = sum(int(report["scoring_selection"]["signals"]) for report in reports)
+        passing_folds = sum(bool(report["scoring_policy_passed"]) for report in reports)
         positive_folds = sum(value > 0.0 for value in expectancies)
         symbols = {
             symbol
@@ -842,11 +799,7 @@ def main() -> int:
             "average_precision_lift": all(
                 float(report["classification"]["average_precision"])
                 - float(report["classification"]["positive_rate"])
-                >= float(
-                    promotion[
-                        "minimum_average_precision_lift_over_prevalence"
-                    ]
-                )
+                >= float(promotion["minimum_average_precision_lift_over_prevalence"])
                 for report in reports
             ),
             "maximum_ece": all(
@@ -908,11 +861,13 @@ def main() -> int:
         fold_artifacts[(winning_candidate, 4)],
     )
     version = (
-        "meta-v3"
-        if "meta-entry-v3" in schema_version
-        else "v22"
-        if "v22" in schema_version
-        else "v21"
+        "profitability-v1"
+        if "profitability-semantics" in schema_version
+        else (
+            "meta-v3"
+            if "meta-entry-v3" in schema_version
+            else "v22" if "v22" in schema_version else "v21"
+        )
     )
     counterfactual = None
     if "counterfactual" in config:
@@ -923,9 +878,7 @@ def main() -> int:
             fold_artifacts[(winning_candidate, 4)],
             fold_calibration_evidence[(winning_candidate, 4)],
             fold_policies[(winning_candidate, winning_variant, 4)],
-            maximum_acceptable_mae=float(
-                training["maximum_acceptable_mae"]
-            ),
+            maximum_acceptable_mae=float(training["maximum_acceptable_mae"]),
         )
     report = {
         "schema_id": f"aegis-entry-quality-{version}-short-validation-v1",
