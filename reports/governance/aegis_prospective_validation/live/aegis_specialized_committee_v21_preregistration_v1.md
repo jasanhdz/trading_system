@@ -80,6 +80,21 @@ failure, but it cannot authorize promotion because its outcomes predate this
 preregistration. Prospective records cannot be reused for refitting this
 artifact.
 
+## Historical Duplicate-Candle Amendment
+
+Before model fitting, the historical database audit found 65 duplicated
+symbol/timeframe/timestamp identities in the requested source interval. Some
+duplicates contain later OHLC or volume corrections. The frozen deterministic
+policy is:
+
+`MINIMUM_ROWID_FIRST_PERSISTED_OBSERVATION`
+
+This retains the first persisted candle for each identity, which is the
+closest available approximation to the information initially observable. The
+fit report must record duplicate, conflicting-OHLC, and conflicting-volume
+counts. Choosing the last row or averaging duplicates is prohibited. This
+amendment was committed before any V2.1 model fit completed.
+
 ## Counterfactual Policy
 
 For a canonical SHORT selected by the existing control:

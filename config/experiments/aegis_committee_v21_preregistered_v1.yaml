@@ -29,6 +29,8 @@ data:
   database_sha256: fdc3f3ab88950ca4c217b3b132ba8552a256db25db7ed9cd27402f52b5716021
   table: ohlcv_data
   minimum_history_bars: 288
+  duplicate_candle_policy: MINIMUM_ROWID_FIRST_PERSISTED_OBSERVATION
+  duplicate_candle_audit_required: true
   training:
     start_utc: "2026-05-01T00:00:00Z"
     end_utc: "2026-06-20T23:55:00Z"
@@ -199,4 +201,3 @@ artifacts:
   runtime_config: config/committee_v21_shadow.yaml
   private_fit_root: data/committee_v21_fit/committee_v21_fit_01
   private_shadow_root: data/committee_v21_shadow
-
