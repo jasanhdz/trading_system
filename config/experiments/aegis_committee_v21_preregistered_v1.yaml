@@ -1,0 +1,202 @@
+schema_version: aegis-specialized-committee-v21-preregistration-v1
+experiment_id: aegis-specialized-committee-v21-shadow-01
+mode: SHADOW
+runtime_authority: OBSERVATIONAL_ONLY
+
+authority:
+  source_commit: 6f7f6abd5f5f3fc300338774e4f1a6751900322a
+  committee_v2_config: config/committee_v2_shadow.yaml
+  committee_v2_config_sha256: a56db29124e44f9b1aa7b63d7982189b9bc1750c724fffd8873b5bdb3c18ec9c
+  feature_schema: aegis-features-v2
+  feature_count: 83
+  exchange_authority: false
+  network_access: false
+  runtime_training: false
+  automatic_promotion: false
+  owner_review_required: true
+
+outcome:
+  side: SHORT
+  horizon_bars: 12
+  timeframe: 5m
+  round_trip_cost_fraction: 0.001
+  adverse_label: NET_RETURN_LESS_THAN_OR_EQUAL_TO_ZERO
+  entry_price: SIGNAL_CLOSE
+  exit_price: HORIZON_CLOSE
+
+data:
+  database: data/binance_candles.db
+  database_sha256: fdc3f3ab88950ca4c217b3b132ba8552a256db25db7ed9cd27402f52b5716021
+  table: ohlcv_data
+  minimum_history_bars: 288
+  training:
+    start_utc: "2026-05-01T00:00:00Z"
+    end_utc: "2026-06-20T23:55:00Z"
+  calibration:
+    start_utc: "2026-06-21T00:00:00Z"
+    end_utc: "2026-07-04T23:55:00Z"
+  diagnostic_only:
+    start_utc: "2026-07-05T00:00:00Z"
+    end_utc: "2026-07-11T09:20:00Z"
+    promotion_use: PROHIBITED
+  prospective:
+    start_rule: FIRST_COMPLETE_CYCLE_AFTER_EXACT_ARTIFACT_AND_RUNTIME_ACTIVATION
+    model_refit_allowed: false
+
+model:
+  family: L2_LOGISTIC_WITH_EXPLICIT_INTERACTIONS_AND_PLATT_CALIBRATION
+  solver: lbfgs
+  regularization_c: 0.25
+  maximum_iterations: 2000
+  class_weight: balanced
+  random_seed: 20260728
+  missing_value_policy: REJECT_OBSERVATION
+  nonfinite_value_policy: REJECT_OBSERVATION
+  numeric_standardization: TRAINING_MEAN_AND_POPULATION_STANDARD_DEVIATION
+  zero_variance_policy: UNIT_SCALE
+  probability_clip:
+    minimum: 0.000001
+    maximum: 0.999999
+
+numeric_terms:
+  - control_calibrated_score
+  - qmae_q90
+  - tail_risk_probability
+  - trrm_compatibility
+  - failed_breakdown_proxy
+  - fake_breakdown_risk_proxy
+  - rebound_risk_proxy
+  - squeeze_risk_proxy_causal
+  - immediate_reversal_risk_proxy
+  - overextended_down_risk_proxy
+  - low_room_to_fall_risk_proxy
+  - high_wick_reclaim_risk_proxy
+  - squeeze_plus_reclaim_risk_proxy
+  - extension_down_proxy
+  - exhaustion_down_proxy
+  - room_to_fall_proxy_24
+  - lower_wick_fraction
+  - close_position_in_range
+  - ret_3
+  - ret_6
+  - ret_12
+  - atr_12
+  - volume_zscore_24
+  - range_expansion
+  - chop_12
+  - trend_strength_12
+  - market_direction_6
+  - consecutive_red_count
+  - trend_compression
+  - high_vol_regime_proxy
+  - low_vol_regime_proxy
+
+categorical_terms:
+  symbol:
+    - ETHUSDT
+    - BTCUSDT
+    - SOLUSDT
+    - BNBUSDT
+    - XRPUSDT
+    - DOGEUSDT
+    - ADAUSDT
+    - AVAXUSDT
+    - LINKUSDT
+    - SUIUSDT
+    - LTCUSDT
+  direction_regime:
+    - UNKNOWN
+    - BULLISH
+    - NEUTRAL
+    - BEARISH
+  volatility_regime:
+    - UNKNOWN
+    - LOW
+    - NORMAL
+    - HIGH
+  structure_regime:
+    - UNKNOWN
+    - TREND
+    - RANGE
+    - TRANSITION
+
+interaction_terms:
+  - [qmae_q90, tail_risk_probability]
+  - [qmae_q90, extension_down_proxy]
+  - [tail_risk_probability, high_vol_regime_proxy]
+  - [failed_breakdown_proxy, lower_wick_fraction]
+  - [failed_breakdown_proxy, high_wick_reclaim_risk_proxy]
+  - [squeeze_risk_proxy_causal, high_wick_reclaim_risk_proxy]
+  - [low_room_to_fall_risk_proxy, ret_6]
+  - [overextended_down_risk_proxy, exhaustion_down_proxy]
+  - [trend_strength_12, market_direction_6]
+  - [chop_12, trend_strength_12]
+  - [range_expansion, volume_zscore_24]
+  - [ret_12, consecutive_red_count]
+  - [trrm_compatibility, qmae_q90]
+
+context_interactions:
+  symbol:
+    - qmae_q90
+    - tail_risk_probability
+    - extension_down_proxy
+    - market_direction_6
+  direction_regime:
+    - qmae_q90
+    - tail_risk_probability
+    - ret_12
+  volatility_regime:
+    - qmae_q90
+    - tail_risk_probability
+    - range_expansion
+  structure_regime:
+    - qmae_q90
+    - tail_risk_probability
+    - chop_12
+
+calibration:
+  method: PLATT_LOGISTIC
+  fit_source: CALIBRATION_SPLIT_ONLY
+  expected_calibration_error_bins: 10
+  retention_quantile: 0.70
+  threshold_source: CALIBRATION_RISK_DISTRIBUTION
+  threshold_tuning_after_diagnostic_review: false
+
+counterfactual:
+  control_authority: CURRENT_CANONICAL_SELECTION
+  selected_low_or_medium_risk_action: ENTER_NOW
+  selected_high_risk_action: WAIT_CONFIRMATION
+  unselected_action: DO_NOT_ENTER
+  wait_interpretation: ABSTENTION_ONLY
+  delayed_entry_policy: NOT_DEFINED
+  maximum_paper_entries_per_cycle: 1
+  fabricated_votes_prohibited: true
+  live_effect: NONE
+
+evaluation:
+  global_embargo_minutes: 60
+  symbol_embargo_minutes: 60
+  walk_forward_blocks: 4
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20260728
+  minimum_preliminary_global_episodes: 100
+  minimum_robust_global_episodes: 300
+  minimum_per_symbol_episodes: 50
+  minimum_retained_coverage: 0.55
+  maximum_retained_coverage: 0.85
+  maximum_expected_calibration_error: 0.08
+  require_brier_better_than_constant_base_rate: true
+  require_monotonic_observed_risk_bands: true
+  require_positive_paired_delta: true
+  require_positive_ci95_lower_bound_for_promotion: true
+  require_non_increasing_mae: true
+  require_non_degrading_worst_decile: true
+  require_at_least_three_positive_blocks: true
+  prospective_shadow_required: true
+
+artifacts:
+  model: config/bundles/aegis-specialized-committee-v21-risk-v1.json
+  runtime_config: config/committee_v21_shadow.yaml
+  private_fit_root: data/committee_v21_fit/committee_v21_fit_01
+  private_shadow_root: data/committee_v21_shadow
+
