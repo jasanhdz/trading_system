@@ -1,0 +1,76 @@
+schema_version: aegis-entry-condition-shadow-study-v1
+study_id: aegis-entry-condition-shadow-20260727
+mode: SHADOW
+runtime_authority: OBSERVATIONAL_ONLY
+evidence_start_utc: "2026-07-27T21:00:00Z"
+
+inputs:
+  signal_journal: data/entry_quality_v2_shadow/signals.jsonl
+  outcome_journal: data/entry_quality_v2_shadow/outcomes.jsonl
+  v2_runtime_config: config/entry_quality_v2.yaml
+  long_runtime_config: config/entry_quality_v3_dual_shadow.yaml
+
+evidence:
+  horizon_bars: 12
+  minimum_observation_days: 14
+  maximum_observation_days: 30
+  minimum_non_overlapping_selected_episodes: 300
+  minimum_per_symbol_non_overlapping_selected_episodes: 50
+  minimum_embargo_minutes: 120
+  minimum_temporal_blocks: 7
+  maximum_symbol_concentration: 0.30
+  maximum_mean_mae_fraction: 0.00275
+  minimum_profit_factor: 1.0
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20260727
+  require_expectancy_ci95_low_above_zero: true
+  require_positive_first_and_second_half: true
+
+regime_validation:
+  minimum_observations_per_symbol: 300
+  maximum_dominant_axis_fraction: 0.90
+  minimum_distinct_direction_labels: 2
+  minimum_distinct_structure_labels: 2
+  minimum_axis_transitions: 10
+
+hypotheses:
+  - id: CURRENT_CONTROL
+    description: Original current-brain selection without a new condition.
+    require_control_selected: true
+    allowed_contexts: [ANY]
+    excluded_symbols: []
+  - id: EXCLUDE_AVAX
+    description: Discovery finding that AVAX requires separate evidence.
+    require_control_selected: true
+    allowed_contexts: [ANY]
+    excluded_symbols: [AVAXUSDT]
+  - id: RANGE_OR_BEAR_TREND
+    description: Factorized RANGE or BEARISH TREND context.
+    require_control_selected: true
+    allowed_contexts: [RANGE, BEAR_TREND]
+    excluded_symbols: []
+  - id: RANGE_OR_BEAR_TREND_EXCLUDE_AVAX
+    description: Combined discovery hypothesis, prospectively evaluated only.
+    require_control_selected: true
+    allowed_contexts: [RANGE, BEAR_TREND]
+    excluded_symbols: [AVAXUSDT]
+
+ranking_recalibration:
+  enabled_for_research: true
+  training_allowed_now: false
+  historical_replay_required: true
+  purged_walk_forward_required: true
+  calibration_only_threshold_derivation: true
+  champion_challenger_required: true
+  minimum_positive_folds: 3
+  fold_count: 4
+
+promotion:
+  automatic_training: false
+  automatic_promotion: false
+  live_configuration_changes: false
+  owner_authorization_required: true
+  same_evidence_discovery_and_validation_prohibited: true
+
+outputs:
+  report_path: data/entry_condition_shadow/study_v1_report.json
