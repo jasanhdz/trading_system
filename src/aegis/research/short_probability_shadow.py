@@ -154,6 +154,9 @@ class ShortProbabilityShadowRuntime:
         self._processed_cycles = {
             str(row["decision_cycle_id"]) for row in self._signals.rows
         }
+        self._processed_timestamps = {
+            str(row["market_timestamp"]) for row in self._signals.rows
+        }
         self._lock = threading.Lock()
         self.last_observation_at: datetime | None = None
         self.observation_errors = 0
@@ -164,18 +167,23 @@ class ShortProbabilityShadowRuntime:
 
     def observe_batch(self, batch: Mapping[str, Any]) -> Mapping[str, Any]:
         cycle = str(batch["decision_cycle_id"])
+        timestamp = str(batch["market_timestamp"])
         with self._lock:
-            if cycle not in self._processed_cycles:
+            if (
+                cycle not in self._processed_cycles
+                and timestamp not in self._processed_timestamps
+            ):
                 try:
                     for row in self._build_rows(batch):
                         self._signals.append(row)
                     self._processed_cycles.add(cycle)
+                    self._processed_timestamps.add(timestamp)
                     self._mature_outcomes()
                     self.last_observation_at = datetime.now(timezone.utc)
                 except Exception:
                     self.observation_errors += 1
                     return {}
-            return self._overlay(cycle)
+            return self._overlay(timestamp)
 
     def _build_rows(self, batch: Mapping[str, Any]) -> list[dict[str, Any]]:
         cycle = str(batch["decision_cycle_id"])
@@ -310,9 +318,11 @@ class ShortProbabilityShadowRuntime:
                     }
                 )
 
-    def _overlay(self, cycle: str) -> Mapping[str, Any]:
+    def _overlay(self, market_timestamp: str) -> Mapping[str, Any]:
         rows = [
-            row for row in self._signals.rows if str(row["decision_cycle_id"]) == cycle
+            row
+            for row in self._signals.rows
+            if str(row["market_timestamp"]) == market_timestamp
         ]
         return {
             str(row["symbol"]): {

@@ -53,6 +53,7 @@ def _batch(cycle: int) -> dict:
         }
     return {
         "decision_cycle_id": f"cycle-{cycle:04d}",
+        "market_timestamp": timestamp.isoformat().replace("+00:00", "Z"),
         "feature_schema": "aegis-features-v2",
         "feature_count": len(FEATURE_NAMES),
         "results": results,
@@ -133,3 +134,28 @@ def test_outcomes_mature_without_exchange_authority(tmp_path: Path) -> None:
     assert health["matured_outcomes"] == len(CANONICAL_SYMBOLS)
     assert health["exchange_mutations"] == 0
     assert health["selection_effect"] == "NONE"
+
+
+def test_repeated_http_cycle_does_not_count_as_a_new_market_bar(
+    tmp_path: Path,
+) -> None:
+    runtime = ShortProbabilityShadowRuntime(
+        _config(tmp_path),
+        _FixedProbabilityModel(
+            0.63,
+            "TERMINAL_NET_POSITIVE_H12_AFTER_COSTS",
+        ),  # type: ignore[arg-type]
+        _FixedProbabilityModel(
+            0.17,
+            "CLEAN_ENTRY_LOW_MAE_H12",
+        ),  # type: ignore[arg-type]
+    )
+    first = _batch(0)
+    repeated = _batch(0)
+    repeated["decision_cycle_id"] = "different-http-cycle"
+
+    first_overlay = runtime.observe_batch(first)
+    repeated_overlay = runtime.observe_batch(repeated)
+
+    assert repeated_overlay == first_overlay
+    assert runtime.health()["signal_records"] == len(CANONICAL_SYMBOLS)

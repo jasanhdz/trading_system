@@ -54,6 +54,8 @@ The observer:
 - does not alter guards, capital, sizing or leverage;
 - has no Binance client or exchange authority;
 - cannot promote itself automatically.
+- deduplicates repeated HTTP evaluations by canonical market timestamp, so
+  twelve API calls cannot be mistaken for twelve completed 5-minute bars.
 
 ## Decision
 

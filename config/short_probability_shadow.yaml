@@ -17,8 +17,8 @@ artifacts:
 
 evidence:
   journal_root: ../data/short_probability_semantics_shadow
-  signal_journal: signals.jsonl
-  outcome_journal: outcomes.jsonl
+  signal_journal: signals_v2.jsonl
+  outcome_journal: outcomes_v2.jsonl
   horizon_bars: 12
   round_trip_cost_fraction: 0.001
   maximum_clean_mae_fraction: 0.01
