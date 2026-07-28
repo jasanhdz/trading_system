@@ -220,6 +220,17 @@ class CurrentBrainEngine:
         self._ready = True
 
     def evaluate(self, snapshot: MarketSnapshot) -> Mapping[str, Any]:
+        return self._evaluate(snapshot, validation_now=datetime.now(timezone.utc))
+
+    def evaluate_replay(self, snapshot: MarketSnapshot) -> Mapping[str, Any]:
+        return self._evaluate(snapshot, validation_now=snapshot.closed_at)
+
+    def _evaluate(
+        self,
+        snapshot: MarketSnapshot,
+        *,
+        validation_now: datetime,
+    ) -> Mapping[str, Any]:
         if (
             not self._ready
             or self._candidate is None
@@ -228,8 +239,7 @@ class CurrentBrainEngine:
             or self._validator is None
         ):
             raise CurrentBrainError("AEGIS_CURRENT_BRAIN_NOT_READY")
-        now = datetime.now(timezone.utc)
-        self._validator.validate(snapshot, now)
+        self._validator.validate(snapshot, validation_now)
         features = self._features.transform(snapshot)
         cycle_material = {
             "closed_at": snapshot.closed_at,

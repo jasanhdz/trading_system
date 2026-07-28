@@ -152,6 +152,43 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def committee_v2_counterfactual(
+    features: Mapping[str, Any],
+    *,
+    control_selected: bool,
+    control_side: str,
+) -> Mapping[str, Any]:
+    risk_flags = {
+        name: _finite(features[name], name) > 0.0
+        for name in REVERSAL_FLAG_FEATURES
+    }
+    observed_risk_count = sum(risk_flags.values())
+    control_enter = control_selected and control_side.endswith("SHORT")
+    paper_action = (
+        "ENTER_NOW"
+        if control_enter and observed_risk_count == 0
+        else "WAIT_CONFIRMATION"
+        if control_enter
+        else "DO_NOT_ENTER"
+    )
+    reason = (
+        "CONTROL_SELECTED_NO_OBSERVED_REVERSAL_FLAG"
+        if paper_action == "ENTER_NOW"
+        else "CONTROL_SELECTED_REVERSAL_RISK_OBSERVED"
+        if paper_action == "WAIT_CONFIRMATION"
+        else "CONTROL_NOT_SELECTED"
+    )
+    control_action = "ENTER_NOW" if control_enter else "DO_NOT_ENTER"
+    return {
+        "risk_flags": risk_flags,
+        "observed_risk_count": observed_risk_count,
+        "paper_action": paper_action,
+        "reason": reason,
+        "control_action": control_action,
+        "would_change_control": paper_action != control_action,
+    }
+
+
 class CommitteeV2ShadowRuntime:
     """Record specialist evidence while preserving the canonical control."""
 
@@ -250,26 +287,17 @@ class CommitteeV2ShadowRuntime:
 
             control_selected = bool(result["selected"])
             control_side = str(candidate["side"])
-            control_enter = control_selected and control_side == "SHORT"
-            risk_flags = {
-                name: _finite(features[name], name) > 0.0
-                for name in REVERSAL_FLAG_FEATURES
-            }
-            observed_risk_count = sum(risk_flags.values())
-            timing_action = (
-                "ENTER_NOW"
-                if control_enter and observed_risk_count == 0
-                else "WAIT_CONFIRMATION" if control_enter else "DO_NOT_ENTER"
+            counterfactual = committee_v2_counterfactual(
+                features,
+                control_selected=control_selected,
+                control_side=control_side,
             )
-            timing_reason = (
-                "CONTROL_SELECTED_NO_OBSERVED_REVERSAL_FLAG"
-                if timing_action == "ENTER_NOW"
-                else (
-                    "CONTROL_SELECTED_REVERSAL_RISK_OBSERVED"
-                    if timing_action == "WAIT_CONFIRMATION"
-                    else "CONTROL_NOT_SELECTED"
-                )
+            risk_flags = counterfactual["risk_flags"]
+            observed_risk_count = int(
+                counterfactual["observed_risk_count"]
             )
+            timing_action = str(counterfactual["paper_action"])
+            timing_reason = str(counterfactual["reason"])
             long_status = str(
                 dual.get(
                     "status",
@@ -401,11 +429,12 @@ class CommitteeV2ShadowRuntime:
                         "mode": "COUNTERFACTUAL_ONLY",
                         "paper_action": timing_action,
                         "reason": timing_reason,
-                        "control_action": (
-                            "ENTER_NOW" if control_enter else "DO_NOT_ENTER"
+                        "control_action": counterfactual[
+                            "control_action"
+                        ],
+                        "would_change_control": bool(
+                            counterfactual["would_change_control"]
                         ),
-                        "would_change_control": timing_action
-                        != ("ENTER_NOW" if control_enter else "DO_NOT_ENTER"),
                         "exchange_authority": False,
                     },
                     "exchange_authority": False,

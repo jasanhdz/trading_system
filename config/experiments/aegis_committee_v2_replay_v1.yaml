@@ -1,0 +1,52 @@
+schema_version: aegis-specialized-committee-v2-replay-contract-v1
+replay_id: aegis-specialized-committee-v2-replay-01
+mode: REPLAY_ONLY
+authority:
+  exchange_authority: false
+  network_access: false
+  automatic_training: false
+  automatic_promotion: false
+  owner_review_required: true
+
+committee:
+  config_path: config/committee_v2_shadow.yaml
+  config_sha256: a56db29124e44f9b1aa7b63d7982189b9bc1750c724fffd8873b5bdb3c18ec9c
+
+forward:
+  signal_journal: data/entry_quality_v2_shadow/signals.jsonl
+  outcome_journal: data/entry_quality_v2_shadow/outcomes.jsonl
+
+historical:
+  database: data/binance_candles.db
+  database_sha256: fdc3f3ab88950ca4c217b3b132ba8552a256db25db7ed9cd27402f52b5716021
+  table: ohlcv_data
+  timeframe: 5m
+  information_cutoff_utc: "2026-07-11T09:20:00Z"
+  replay_start_utc: "2026-07-11T09:25:00Z"
+  replay_end_utc: "2026-07-17T18:00:00Z"
+  minimum_history_bars: 96
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+
+statistics:
+  symbol_embargo_minutes: 60
+  global_embargo_minutes: 60
+  fold_count: 4
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20260728
+
+evidence_gates:
+  minimum_preliminary_global_episodes: 60
+  minimum_robust_global_episodes: 300
+  minimum_retained_coverage: 0.30
+  maximum_retained_coverage: 0.90
+  minimum_positive_folds: 3
+  require_positive_paired_delta: true
+  require_non_increasing_mae: true
+  require_non_degrading_tail: true
+
+outputs:
+  root: data/committee_v2_replay/committee_v2_replay_01
+  fast_report: forward_replay_report.json
+  historical_report: historical_replay_report.json
+  combined_report: combined_replay_report.json
