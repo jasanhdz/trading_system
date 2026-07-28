@@ -18,6 +18,11 @@ from ..training.long_opportunity import (
     load_long_opportunity_artifact,
 )
 from ..utils import Sha256HashProvider, sha256_file, to_primitive
+from .committee_v2_shadow import (
+    CommitteeV2ShadowRuntime,
+    UnavailableCommitteeV2ShadowObserver,
+    build_committee_v2_shadow_observer,
+)
 from .regime_v2 import (
     DirectionRegime,
     FactorizedRegimeAnalyzer,
@@ -421,9 +426,19 @@ class DualSideEntryQualityShadowRuntime:
 
 
 class CompositeResearchObserver:
-    def __init__(self, primary: BatchObserver, dual: DualSideEntryQualityShadowRuntime):
+    def __init__(
+        self,
+        primary: BatchObserver,
+        dual: DualSideEntryQualityShadowRuntime,
+        committee: (
+            CommitteeV2ShadowRuntime
+            | UnavailableCommitteeV2ShadowObserver
+            | None
+        ) = None,
+    ):
         self.primary = primary
         self.dual = dual
+        self.committee = committee
 
     @property
     def mode(self) -> EntryQualityV2Mode:
@@ -432,24 +447,38 @@ class CompositeResearchObserver:
     def observe_batch(self, batch: Mapping[str, Any]) -> Mapping[str, Any]:
         primary = self.primary.observe_batch(batch)
         dual = self.dual.observe_batch(batch)
+        committee = (
+            self.committee.observe_batch(
+                batch,
+                primary_overlay=primary,
+                dual_overlay=dual,
+            )
+            if self.committee is not None
+            else {}
+        )
         return {
             symbol: {
                 **dict(primary.get(symbol, {})),
                 "dual_side_shadow": dict(dual.get(symbol, {})),
+                "committee_v2_shadow": dict(committee.get(symbol, {})),
             }
             for symbol in CANONICAL_SYMBOLS
         }
 
     def health(self) -> Mapping[str, Any]:
-        return {
+        health = {
             **dict(self.primary.health()),
             "dual_side_shadow": dict(self.dual.health()),
         }
+        if self.committee is not None:
+            health["committee_v2_shadow"] = dict(self.committee.health())
+        return health
 
 
 def build_composite_research_observer(
     primary_config_path: Path,
     dual_config_path: Path,
+    committee_config_path: Path | None = None,
     *,
     repo_root: Path,
 ) -> BatchObserver:
@@ -470,4 +499,12 @@ def build_composite_research_observer(
         artifact,
         FactorizedRegimeAnalyzer(primary_config.regime_settings),
     )
-    return CompositeResearchObserver(primary, dual)
+    committee = (
+        build_committee_v2_shadow_observer(
+            committee_config_path,
+            repo_root=repo_root,
+        )
+        if committee_config_path is not None
+        else None
+    )
+    return CompositeResearchObserver(primary, dual, committee)

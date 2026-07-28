@@ -14,6 +14,7 @@ from aegis.research.dual_side_shadow import (
 ROOT = Path(__file__).parents[2]
 PRIMARY = ROOT / "config/entry_quality_v2.yaml"
 DUAL = ROOT / "config/entry_quality_v3_dual_shadow.yaml"
+COMMITTEE = ROOT / "config/committee_v2_shadow.yaml"
 
 
 def test_dual_side_repository_config_is_shadow_only_and_hash_pinned() -> None:
@@ -66,9 +67,17 @@ def test_composite_observer_preserves_primary_and_adds_non_authoritative_long(
     dual_path = tmp_path / "config/dual.yaml"
     dual_path.write_text(yaml.safe_dump(dual_payload, sort_keys=False))
 
+    committee_payload = yaml.safe_load(COMMITTEE.read_text())
+    committee_payload["evidence"]["journal_root"] = "../data/committee"
+    committee_path = tmp_path / "config/committee.yaml"
+    committee_path.write_text(
+        yaml.safe_dump(committee_payload, sort_keys=False)
+    )
+
     observer = build_composite_research_observer(
         primary_path,
         dual_path,
+        committee_path,
         repo_root=tmp_path,
     )
     batch = _batch(0)
@@ -92,4 +101,14 @@ def test_composite_observer_preserves_primary_and_adds_non_authoritative_long(
         )
         <= 1
     )
+    assert all(
+        overlay[symbol]["committee_v2_shadow"]["exchange_authority"] is False
+        for symbol in CANONICAL_SYMBOLS
+    )
+    assert all(
+        overlay[symbol]["committee_v2_shadow"]["control_selected"]
+        == batch["results"][symbol]["selected"]
+        for symbol in CANONICAL_SYMBOLS
+    )
     assert observer.health()["dual_side_shadow"]["exchange_mutations"] == 0
+    assert observer.health()["committee_v2_shadow"]["exchange_mutations"] == 0

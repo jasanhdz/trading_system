@@ -30,6 +30,7 @@ def build_service() -> CurrentBrainDecisionService:
     observer = build_composite_research_observer(
         root / "config/entry_quality_v2.yaml",
         root / "config/entry_quality_v3_dual_shadow.yaml",
+        root / "config/committee_v2_shadow.yaml",
         repo_root=root,
     )
     service = CurrentBrainDecisionService(

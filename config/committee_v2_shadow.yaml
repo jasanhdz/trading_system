@@ -1,0 +1,67 @@
+schema_version: aegis-specialized-committee-v2-shadow-runtime-v1
+committee_id: aegis-specialized-committee-v2-shadow-01
+enabled: true
+mode: SHADOW
+runtime_authority: OBSERVATIONAL_ONLY
+feature_schema: aegis-features-v2
+feature_count: 83
+
+evidence:
+  journal_root: ../data/committee_v2_shadow
+  signal_journal: signals.jsonl
+  outcome_journal: outcomes.jsonl
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+
+members:
+  short_opportunity:
+    role: DIRECTIONAL_OPPORTUNITY
+    source: CURRENT_SHORT_CHAMPION_AND_ENTRY_QUALITY_V2
+    directional_vote_eligible: true
+  short_reversal_risk:
+    role: RISK_OBSERVER
+    source: EXISTING_CAUSAL_FEATURE_PROXIES
+    directional_vote_eligible: false
+  entry_timing:
+    role: TIMING_OBSERVER
+    source: EXISTING_CAUSAL_FEATURE_PROXIES
+    directional_vote_eligible: false
+  qmae:
+    role: ADVERSE_EXCURSION_OBSERVER
+    source: CURRENT_QMAE_Q90
+    directional_vote_eligible: false
+  tail_risk:
+    role: TAIL_RISK_OBSERVER
+    source: CURRENT_RV2_TRRM
+    directional_vote_eligible: false
+  regime:
+    role: CONTEXT_OBSERVER
+    source: FACTORIZED_REGIME_V2_SHADOW
+    directional_vote_eligible: false
+  long_opportunity:
+    role: DIRECTIONAL_OPPORTUNITY_CHALLENGER
+    source: ENTRY_QUALITY_V3_LONG_SHADOW
+    directional_vote_eligible: false
+    reason: OFFLINE_VALIDATION_FAILED
+
+meta_selector:
+  mode: COUNTERFACTUAL_ONLY
+  actions:
+    - ENTER_NOW
+    - WAIT_CONFIRMATION
+    - DO_NOT_ENTER
+  control_authority: CURRENT_CANONICAL_SELECTION
+  maximum_paper_entries_per_cycle: 1
+  fabricated_votes_prohibited: true
+  majority_vote_prohibited: true
+
+promotion:
+  automatic_training: false
+  automatic_promotion: false
+  live_authority: false
+  owner_authorization_required: true
+  minimum_non_overlapping_episodes: 300
+  minimum_per_symbol_episodes: 50
+  require_incremental_value_over_control: true
+  require_purged_walk_forward: true
+  require_prospective_shadow_validation: true

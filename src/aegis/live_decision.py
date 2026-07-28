@@ -439,6 +439,19 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
             "canonical_raw_score": float(candidate["raw_score"]),
             "canonical_calibrated_score": float(candidate["calibrated_score"]),
             "directional_estimator_count": count,
+            "directional_consensus": (
+                "NOT_APPLICABLE_SINGLE_ESTIMATOR"
+                if count == 1
+                else "MULTI_ESTIMATOR_OUTPUT_PRESENT"
+            ),
+            "direction_probability_semantics": (
+                "SIDE_AUTHORITY_NOT_PROFITABILITY_CONFIDENCE"
+            ),
+            "candidate_confidence_semantics": (
+                "NOT_APPLICABLE_SINGLE_ESTIMATOR"
+                if count == 1
+                else "MODEL_DISAGREEMENT_DERIVED"
+            ),
             "leverage_recommendation": "NOT_PRESENT",
             "position_fraction": "NOT_PRESENT",
         },
