@@ -28,6 +28,11 @@ from .committee_v21_shadow import (
     UnavailableCommitteeV21ShadowObserver,
     build_committee_v21_shadow_observer,
 )
+from .short_probability_shadow import (
+    ShortProbabilityShadowRuntime,
+    UnavailableShortProbabilityShadowObserver,
+    build_short_probability_shadow_observer,
+)
 from .regime_v2 import (
     DirectionRegime,
     FactorizedRegimeAnalyzer,
@@ -424,11 +429,17 @@ class CompositeResearchObserver:
         committee_v21: (
             CommitteeV21ShadowRuntime | UnavailableCommitteeV21ShadowObserver | None
         ) = None,
+        short_probability: (
+            ShortProbabilityShadowRuntime
+            | UnavailableShortProbabilityShadowObserver
+            | None
+        ) = None,
     ):
         self.primary = primary
         self.dual = dual
         self.committee = committee
         self.committee_v21 = committee_v21
+        self.short_probability = short_probability
 
     @property
     def mode(self) -> EntryQualityV2Mode:
@@ -454,12 +465,18 @@ class CompositeResearchObserver:
             if self.committee_v21 is not None
             else {}
         )
+        short_probability = (
+            self.short_probability.observe_batch(batch)
+            if self.short_probability is not None
+            else {}
+        )
         return {
             symbol: {
                 **dict(primary.get(symbol, {})),
                 "dual_side_shadow": dict(dual.get(symbol, {})),
                 "committee_v2_shadow": dict(committee.get(symbol, {})),
                 "committee_v21_shadow": dict(committee_v21.get(symbol, {})),
+                "short_probability_shadow": dict(short_probability.get(symbol, {})),
             }
             for symbol in CANONICAL_SYMBOLS
         }
@@ -473,6 +490,8 @@ class CompositeResearchObserver:
             health["committee_v2_shadow"] = dict(self.committee.health())
         if self.committee_v21 is not None:
             health["committee_v21_shadow"] = dict(self.committee_v21.health())
+        if self.short_probability is not None:
+            health["short_probability_shadow"] = dict(self.short_probability.health())
         return health
 
 
@@ -481,6 +500,7 @@ def build_composite_research_observer(
     dual_config_path: Path,
     committee_config_path: Path | None = None,
     committee_v21_config_path: Path | None = None,
+    short_probability_config_path: Path | None = None,
     *,
     repo_root: Path,
 ) -> BatchObserver:
@@ -513,9 +533,18 @@ def build_composite_research_observer(
         if committee_v21_config_path is not None
         else None
     )
+    short_probability = (
+        build_short_probability_shadow_observer(
+            short_probability_config_path,
+            repo_root=repo_root,
+        )
+        if short_probability_config_path is not None
+        else None
+    )
     return CompositeResearchObserver(
         primary,
         dual,
         committee,
         committee_v21,
+        short_probability,
     )
