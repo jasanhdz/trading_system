@@ -57,6 +57,14 @@ The observer:
 - deduplicates repeated HTTP evaluations by canonical market timestamp, so
   twelve API calls cannot be mistaken for twelve completed 5-minute bars.
 
+## Superseded Initial Runtime Evidence
+
+The initial `signals.jsonl` and `outcomes.jsonl` journals counted distinct HTTP
+decision cycles within the same market bar. They are preserved for audit but
+are invalid for scientific evaluation and MUST NOT be used. The corrected
+authority starts with `signals_v2.jsonl` and `outcomes_v2.jsonl`, which
+deduplicate by canonical market timestamp.
+
 ## Decision
 
 Use the observer to collect calibrated prospective evidence and diagnose
