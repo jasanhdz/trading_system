@@ -301,6 +301,11 @@ class CurrentBrainEngine:
             "configuration_sha256": CONFIGURATION_SHA256,
             "feature_schema": FEATURE_SCHEMA,
             "feature_count": FEATURE_COUNT,
+            "ranking": [to_primitive(item) for item in pipeline.selection.ranking],
+            "selection_reason_codes": [
+                str(getattr(item, "value", item))
+                for item in pipeline.selection.reason_codes
+            ],
             "results": results,
         }
 
@@ -338,6 +343,11 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
     v2_by_symbol = batch.get("_entry_quality_v2", {})
     v2 = v2_by_symbol.get(normalized) if isinstance(v2_by_symbol, Mapping) else None
     v2_live = isinstance(v2, Mapping) and v2.get("mode") == "LIVE"
+    entry_intelligence = (
+        v2.get("entry_intelligence_shadow", {})
+        if isinstance(v2, Mapping)
+        else {}
+    )
     selected = bool(v2["selected"]) if v2_live else bool(result["selected"])
     side_value = candidate["side"]
     side = str(getattr(side_value, "value", side_value))
@@ -440,6 +450,22 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 "missing_features": [],
             },
             "directional_evidence": directional_evidence,
+            "candidate_uncertainty": {
+                "schema_id": "aegis-candidate-uncertainty-v1",
+                "value": None if count == 1 else float(candidate["uncertainty"]),
+                "confidence": None if count == 1 else float(candidate["confidence"]),
+                "semantics": (
+                    "NOT_APPLICABLE_SINGLE_ESTIMATOR"
+                    if count == 1
+                    else "MODEL_DISAGREEMENT_DERIVED"
+                ),
+                "selection_effect": "NONE",
+            },
+            "entry_intelligence_shadow": (
+                dict(entry_intelligence)
+                if isinstance(entry_intelligence, Mapping)
+                else {}
+            ),
             "entry_quality_v2": (
                 dict(v2)
                 if isinstance(v2, Mapping)

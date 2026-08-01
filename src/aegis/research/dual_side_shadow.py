@@ -33,6 +33,10 @@ from .short_probability_shadow import (
     UnavailableShortProbabilityShadowObserver,
     build_short_probability_shadow_observer,
 )
+from .entry_intelligence_shadow import (
+    EntryIntelligenceShadowRuntime,
+    build_entry_intelligence_shadow_observer,
+)
 from .regime_v2 import (
     DirectionRegime,
     FactorizedRegimeAnalyzer,
@@ -434,12 +438,14 @@ class CompositeResearchObserver:
             | UnavailableShortProbabilityShadowObserver
             | None
         ) = None,
+        entry_intelligence: EntryIntelligenceShadowRuntime | None = None,
     ):
         self.primary = primary
         self.dual = dual
         self.committee = committee
         self.committee_v21 = committee_v21
         self.short_probability = short_probability
+        self.entry_intelligence = entry_intelligence
 
     @property
     def mode(self) -> EntryQualityV2Mode:
@@ -470,6 +476,11 @@ class CompositeResearchObserver:
             if self.short_probability is not None
             else {}
         )
+        entry_intelligence = (
+            self.entry_intelligence.observe_batch(batch)
+            if self.entry_intelligence is not None
+            else {}
+        )
         return {
             symbol: {
                 **dict(primary.get(symbol, {})),
@@ -477,6 +488,7 @@ class CompositeResearchObserver:
                 "committee_v2_shadow": dict(committee.get(symbol, {})),
                 "committee_v21_shadow": dict(committee_v21.get(symbol, {})),
                 "short_probability_shadow": dict(short_probability.get(symbol, {})),
+                "entry_intelligence_shadow": dict(entry_intelligence.get(symbol, {})),
             }
             for symbol in CANONICAL_SYMBOLS
         }
@@ -492,6 +504,8 @@ class CompositeResearchObserver:
             health["committee_v21_shadow"] = dict(self.committee_v21.health())
         if self.short_probability is not None:
             health["short_probability_shadow"] = dict(self.short_probability.health())
+        if self.entry_intelligence is not None:
+            health["entry_intelligence_shadow"] = dict(self.entry_intelligence.health())
         return health
 
 
@@ -501,6 +515,7 @@ def build_composite_research_observer(
     committee_config_path: Path | None = None,
     committee_v21_config_path: Path | None = None,
     short_probability_config_path: Path | None = None,
+    entry_intelligence_config_path: Path | None = None,
     *,
     repo_root: Path,
 ) -> BatchObserver:
@@ -541,10 +556,20 @@ def build_composite_research_observer(
         if short_probability_config_path is not None
         else None
     )
+    entry_intelligence = (
+        build_entry_intelligence_shadow_observer(
+            entry_intelligence_config_path,
+            repo_root=repo_root,
+            regime_config_path=primary_config_path,
+        )
+        if entry_intelligence_config_path is not None
+        else None
+    )
     return CompositeResearchObserver(
         primary,
         dual,
         committee,
         committee_v21,
         short_probability,
+        entry_intelligence,
     )

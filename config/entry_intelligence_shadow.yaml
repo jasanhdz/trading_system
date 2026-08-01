@@ -1,0 +1,41 @@
+schema_version: aegis-entry-intelligence-shadow-runtime-v1
+observer_id: aegis-entry-intelligence-shadow-01
+enabled: true
+mode: SHADOW
+runtime_authority: OBSERVATIONAL_ONLY
+feature_schema: aegis-features-v2
+feature_count: 83
+
+evidence:
+  journal_root: ../data/entry_intelligence_shadow
+  signal_journal: signals.jsonl
+  outcome_journal: outcomes.jsonl
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+
+timing:
+  maximum_wait_bars: 3
+  require_global_bearish: true
+  require_local_bearish: true
+  require_trend_structure: true
+  require_short_ema_stack: true
+  require_bearish_confirmation_candle: true
+
+ranking:
+  maximum_counterfactual_candidates_per_cycle: 1
+  preserve_canonical_score: true
+  timing_state_precedes_score: true
+
+promotion:
+  automatic_training: false
+  automatic_promotion: false
+  live_authority: false
+  owner_authorization_required: true
+  minimum_non_overlapping_episodes: 300
+  minimum_per_symbol_episodes: 50
+  minimum_temporal_blocks: 7
+  require_profit_factor_above_one: true
+  require_positive_expectancy_95pct_lower_bound: true
+  require_both_temporal_halves_positive: true
+  require_mae_improvement: true
+  require_bounded_symbol_concentration: true

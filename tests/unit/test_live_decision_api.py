@@ -221,6 +221,27 @@ def test_single_estimator_is_not_inflated_into_legacy_consensus(canonical_batch)
         assert response["metadata"]["fabricated_votes"] == 0
         assert response["metadata"]["leverage_recommendation"] == "NOT_PRESENT"
         assert response["metadata"]["position_fraction"] == "NOT_PRESENT"
+        assert response["aegis"]["candidate_uncertainty"] == {
+            "schema_id": "aegis-candidate-uncertainty-v1",
+            "value": None,
+            "confidence": None,
+            "semantics": "NOT_APPLICABLE_SINGLE_ESTIMATOR",
+            "selection_effect": "NONE",
+        }
+
+
+def test_canonical_batch_exposes_complete_ranking_without_changing_selection(canonical_batch) -> None:
+    assert len(canonical_batch["ranking"]) == len(CANONICAL_SYMBOLS)
+    assert [row["rank"] for row in canonical_batch["ranking"]] == list(
+        range(1, len(CANONICAL_SYMBOLS) + 1)
+    )
+    selected = {
+        symbol for symbol, result in canonical_batch["results"].items() if result["selected"]
+    }
+    ranked_selected = {
+        row["symbol"] for row in canonical_batch["ranking"] if row["eligible"]
+    }
+    assert selected <= ranked_selected
 
 
 def test_specialized_committees_remain_non_promotable_shadow_observers() -> None:
