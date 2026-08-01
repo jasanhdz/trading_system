@@ -200,11 +200,45 @@ def test_all_configured_symbols_have_valid_current_outputs(canonical_batch, symb
 def test_single_estimator_is_not_inflated_into_legacy_consensus(canonical_batch) -> None:
     for symbol in CANONICAL_SYMBOLS:
         response = compatibility_response(canonical_batch, symbol, "trace")
-        votes = response["aegis"]["turbo"]["raw"]["votes"]
+        raw = response["aegis"]["turbo"]["raw"]
+        votes = raw["votes"]
+        evidence = response["aegis"]["directional_evidence"]
         assert sum(votes.values()) == 1
+        assert raw["vote_semantics"] == "SINGLE_DIRECTIONAL_ESTIMATOR_OUTPUT"
+        assert raw["directional_member_count"] == 1
+        assert raw["independent_directional_votes"] == "NOT_APPLICABLE"
+        assert raw["directional_consensus"] == "NOT_APPLICABLE_SINGLE_ESTIMATOR"
+        assert evidence == {
+            "schema_id": "aegis-directional-evidence-v1",
+            "semantics": "SINGLE_DIRECTIONAL_ESTIMATOR_OUTPUT",
+            "eligible_directional_members": 1,
+            "independent_directional_votes": "NOT_APPLICABLE",
+            "directional_consensus": "NOT_APPLICABLE_SINGLE_ESTIMATOR",
+            "fabricated_votes": 0,
+            "selection_authority": "CANONICAL_PYTHON_SELECTED",
+        }
         assert response["metadata"]["directional_estimator_count"] == 1
+        assert response["metadata"]["fabricated_votes"] == 0
         assert response["metadata"]["leverage_recommendation"] == "NOT_PRESENT"
         assert response["metadata"]["position_fraction"] == "NOT_PRESENT"
+
+
+def test_specialized_committees_remain_non_promotable_shadow_observers() -> None:
+    import yaml
+
+    root = Path(__file__).parents[2]
+    v2 = yaml.safe_load((root / "config/committee_v2_shadow.yaml").read_text())
+    v21 = yaml.safe_load((root / "config/committee_v21_shadow.yaml").read_text())
+
+    assert v2["mode"] == "SHADOW"
+    assert v2["meta_selector"]["fabricated_votes_prohibited"] is True
+    assert v2["meta_selector"]["majority_vote_prohibited"] is True
+    assert v2["promotion"]["automatic_promotion"] is False
+    assert v2["promotion"]["live_authority"] is False
+    assert v21["mode"] == "SHADOW"
+    assert v21["runtime_authority"] == "OBSERVATIONAL_ONLY"
+    assert v21["authority"]["automatic_promotion"] is False
+    assert v21["counterfactual"]["fabricated_votes_prohibited"] is True
 
 
 def test_would_execute_and_action_match_canonical_selection(canonical_batch) -> None:

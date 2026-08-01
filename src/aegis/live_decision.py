@@ -324,6 +324,15 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
         "short": sum(item["side"] == TradeSide.SHORT.value for item in predictions),
         "neutral": sum(item["side"] == TradeSide.NO_TRADE.value for item in predictions),
     }
+    directional_evidence = {
+        "schema_id": "aegis-directional-evidence-v1",
+        "semantics": "SINGLE_DIRECTIONAL_ESTIMATOR_OUTPUT",
+        "eligible_directional_members": count,
+        "independent_directional_votes": "NOT_APPLICABLE",
+        "directional_consensus": "NOT_APPLICABLE_SINGLE_ESTIMATOR",
+        "fabricated_votes": 0,
+        "selection_authority": "CANONICAL_PYTHON_SELECTED",
+    }
     candidate = result["candidate"]
     layer = result["layer"]
     v2_by_symbol = batch.get("_entry_quality_v2", {})
@@ -351,6 +360,10 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
         "reason": reason,
         "turbo_score": float(candidate["raw_score"]),
         "votes": votes,
+        "vote_semantics": directional_evidence["semantics"],
+        "directional_member_count": count,
+        "independent_directional_votes": "NOT_APPLICABLE",
+        "directional_consensus": "NOT_APPLICABLE_SINGLE_ESTIMATOR",
     }
     return {
         "symbol": normalized,
@@ -426,6 +439,7 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 "missing_features_count": 0,
                 "missing_features": [],
             },
+            "directional_evidence": directional_evidence,
             "entry_quality_v2": (
                 dict(v2)
                 if isinstance(v2, Mapping)
@@ -449,6 +463,9 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
             "canonical_raw_score": float(candidate["raw_score"]),
             "canonical_calibrated_score": float(candidate["calibrated_score"]),
             "directional_estimator_count": count,
+            "vote_semantics": directional_evidence["semantics"],
+            "independent_directional_votes": "NOT_APPLICABLE",
+            "fabricated_votes": 0,
             "directional_consensus": (
                 "NOT_APPLICABLE_SINGLE_ESTIMATOR"
                 if count == 1
