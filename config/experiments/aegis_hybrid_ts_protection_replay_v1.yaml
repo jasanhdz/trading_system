@@ -1,0 +1,65 @@
+schema_version: aegis-hybrid-ts-protection-replay-v1
+experiment_id: aegis-hybrid-ts-protection-replay-v1
+purpose: TEST_WHETHER_PRICE_DEPENDENT_TS_PROTECTION_REVERSES_HYBRID_H12_EXPECTANCY
+
+hybrid_experiment:
+  path: config/experiments/aegis_hybrid_directional_committee_v1.yaml
+  sha256: 4ccda0a90fd661e5bf264d2ddd97e48d20bf2baa462aa411fff39ad2f7b8479f
+
+typescript_authority:
+  repository_commit: 6543fcb033b914a98925da47278f10e1e0e44ef7
+  trading_service:
+    path: binance-futures-bot-ts/src/app/services/TradingService.ts
+    sha256: ae697fdaa72e11b027d3c471e1c5ca102c3a75cf15207a6e19ceb0e25e819c7a
+  profit_guardian:
+    path: binance-futures-bot-ts/src/domain/services/ProfitGuardian.ts
+    sha256: b362c2939238ead4d5708e3a49ceb12e6b2fa9666e07b1a88eec8dd7faea4932
+  micro_live_gate:
+    path: binance-futures-bot-ts/src/domain/services/AegisMicroLiveGate.ts
+    sha256: 35a30b4e03c048d74fccfe0d255a791b400ea93d17ba1be6b59a065c133efa80
+  technical_indicators:
+    path: binance-futures-bot-ts/src/domain/services/TechnicalIndicators.ts
+    sha256: 1970c37c25078d53db255b0a7568c8d38bb09a6bc6f04ec960a44614cc945cdb
+  runtime_configuration:
+    path: binance-futures-bot-ts/regime_config.live.yaml
+    sha256: 1306688131baf9f3ed01dcde00dd0ee6d7ef942352764cc7f005b8546964474f
+
+protection:
+  leverage: 15.0
+  hard_stop_roe: -0.40
+  take_profit_roe: 0.50
+  break_even_trigger_roe: 0.08
+  break_even_offset_fraction: 0.003
+  trailing_activation_roe: 0.15
+  trailing_callback_roe: 0.08
+  use_atr_trailing: true
+  atr_period: 14
+  atr_multiplier: 1.5
+  round_trip_cost_fraction: 0.001
+
+intrabar_paths:
+  - OPEN_HIGH_LOW_CLOSE
+  - OPEN_LOW_HIGH_CLOSE
+
+scope:
+  included:
+    - INITIAL_HARD_STOP
+    - INITIAL_TAKE_PROFIT
+    - AUTOMATIC_BREAK_EVEN
+    - ATR_TRAILING_WITH_FIXED_CALLBACK_FALLBACK
+    - H12_HORIZON_CLOSE
+  excluded:
+    EXIT_EYE: REQUIRES_FUTURE_COMMITTEE_DECISIONS_NOT_PRESENT_IN_H12_FIXTURE
+    PROFIT_PROTECTION_OVERLAY: TRIGGERED_BY_EXIT_EYE_DECISION
+    ENTRY_GUARDS: TEST_ADDRESSES_POST_ENTRY_PROFIT_PROTECTION_ONLY
+    EXCHANGE_TICK_ROUNDING: SYMBOL_FILTER_HISTORY_NOT_AVAILABLE
+    INTRABAR_TICK_SEQUENCE: BOUNDED_BY_TWO_DETERMINISTIC_OHLC_PATHS
+    PORTFOLIO_SIZING: DOES_NOT_CHANGE_PER_TRADE_RETURN_EXPECTANCY
+
+decision_gate:
+  require_positive_mean_every_fold: true
+  require_positive_worst_case_every_fold: true
+  require_both_directions: true
+
+output:
+  report: reports/experiments/aegis_hybrid_ts_protection_replay_v1.json

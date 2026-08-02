@@ -7,7 +7,7 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Mapping, MutableSequence, Sequence
 
 import numpy as np
 from sklearn.ensemble import (
@@ -89,6 +89,20 @@ class HybridDirectionalPrediction:
     selection_effect: str = "NONE"
     exchange_authority: bool = False
     exchange_mutations: int = 0
+
+
+@dataclass(frozen=True)
+class HybridDirectionalSelection:
+    timestamp_ns: int
+    symbol: str
+    side: DirectionalSide
+    shadow_rank_score: float
+    opportunity_probability: float
+    danger_probability: float
+    mae_q90: float
+    mfe_q50: float
+    net_return_mean: float
+    observed_net_return_after_costs: float
 
 
 @dataclass(frozen=True)
@@ -379,6 +393,7 @@ def fit_hybrid_directional_committee(
     round_trip_cost_fraction: float,
     classifier_parameters: Mapping[str, object],
     regressor_parameters: Mapping[str, object],
+    selection_trace: MutableSequence[HybridDirectionalSelection] | None = None,
 ) -> HybridDirectionalArtifact:
     """Fit specialists plus shared directional heads on disjoint time blocks."""
 
@@ -522,6 +537,24 @@ def fit_hybrid_directional_committee(
                 ranked.append((score, row.symbol, index))
             score, _, selected = max(ranked, key=lambda item: (item[0], item[1]))
             selected_indices.append(selected)
+            if selection_trace is not None:
+                row = scoring[selected]
+                selection_trace.append(
+                    HybridDirectionalSelection(
+                        timestamp_ns=row.timestamp_ns,
+                        symbol=row.symbol,
+                        side=row.side,
+                        shadow_rank_score=float(score),
+                        opportunity_probability=opportunity_predictions[
+                            (row.timestamp_ns, row.symbol, row.side)
+                        ],
+                        danger_probability=float(danger_probabilities[selected]),
+                        mae_q90=float(scoring_mae_q90[selected]),
+                        mfe_q50=float(scoring_mfe_q50[selected]),
+                        net_return_mean=float(scoring_net_predictions[selected]),
+                        observed_net_return_after_costs=row.net_return_after_costs,
+                    )
+                )
         selected_rows = [scoring[index] for index in selected_indices]
         symbol_counts = {
             symbol: sum(row.symbol == symbol for row in selected_rows)

@@ -157,6 +157,27 @@ def test_artifact_round_trip_preserves_predictions(tmp_path: Path) -> None:
     )
 
 
+def test_fit_can_emit_an_observational_selection_trace() -> None:
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    trace = []
+    scoring = _rows(start + timedelta(days=4), 24)
+    fit_hybrid_directional_committee(
+        _rows(start, 48),
+        _rows(start + timedelta(days=2), 24),
+        scoring,
+        seed=17,
+        embargo_minutes=120,
+        round_trip_cost_fraction=0.001,
+        classifier_parameters={"max_iter": 10, "min_samples_leaf": 2},
+        regressor_parameters={"max_iter": 10, "min_samples_leaf": 2},
+        selection_trace=trace,
+    )
+
+    assert len(trace) == len({row.timestamp_ns for row in scoring}) * 2
+    assert {item.side for item in trace} == set(DirectionalSide)
+    assert all(item.symbol in CANONICAL_SYMBOLS for item in trace)
+
+
 def test_temporal_overlap_is_rejected() -> None:
     start = datetime(2025, 1, 1, tzinfo=timezone.utc)
     rows = _rows(start, 24)
