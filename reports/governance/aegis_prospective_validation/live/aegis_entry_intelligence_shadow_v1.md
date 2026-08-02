@@ -12,6 +12,7 @@ The observer records, for every closed 5-minute candle and all eleven symbols:
 - factorized global and symbol direction;
 - volatility, structure, extension, alignment and stability;
 - causal entry-timing setup state;
+- causal directional acceleration, pressure, transition and short-chase evidence;
 - complete canonical and timing-counterfactual rankings;
 - TypeScript operational disposition under the same decision-cycle identity;
 - mature net return, MAE, MFE and time-underwater evidence.
@@ -54,6 +55,14 @@ axes. Extension uses the existing causal feature contract. Liquidity is
 reported as `NOT_PRESENT_NO_CAUSAL_FEATURE`; no liquidity value is fabricated.
 
 The output is context evidence, not entry authorization.
+
+## Directional Acceleration Semantics
+
+The observer separately records upward and downward pressure from nine causal
+closed-candle components. It never authorizes averaging a position and never
+learns online. Every observation receives a matured directional outcome after
+the frozen horizon so a later, separately validated hazard model can be tested
+without contaminating current Live behavior.
 
 ## Promotion Evidence
 

@@ -10,8 +10,19 @@ evidence:
   journal_root: ../data/entry_intelligence_shadow
   signal_journal: signals.jsonl
   outcome_journal: outcomes.jsonl
+  acceleration_outcome_journal: directional_acceleration_outcomes.jsonl
   horizon_bars: 12
   round_trip_cost_fraction: 0.001
+
+directional_acceleration:
+  minimum_pressure_components: 5
+  minimum_acceleration_components: 7
+  minimum_persistence: 0.3333333333333333
+  minimum_impulse_atr_multiple: 1.5
+  minimum_relative_atr_multiple: 0.5
+  minimum_volume_zscore: 0.5
+  minimum_volume_ratio: 1.1
+  minimum_trend_strength: 1.25
 
 timing:
   maximum_wait_bars: 3

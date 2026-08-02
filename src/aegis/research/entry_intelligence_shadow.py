@@ -16,6 +16,10 @@ from ..config import CANONICAL_SYMBOLS
 from ..features import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
 from ..utils import Sha256HashProvider, sha256_file
 from .committee_v2_shadow import REVERSAL_FLAG_FEATURES
+from .directional_acceleration_shadow import (
+    DirectionalAccelerationSettings,
+    evaluate_directional_acceleration_shadow,
+)
 from .regime_v2 import (
     DirectionRegime,
     FactorizedRegimeAnalyzer,
@@ -34,6 +38,7 @@ from .shadow_runtime import (
 SCHEMA = "aegis-entry-intelligence-shadow-runtime-v1"
 SIGNAL_SCHEMA = "aegis-entry-intelligence-shadow-signal-v1"
 OUTCOME_SCHEMA = "aegis-entry-intelligence-shadow-outcome-v1"
+ACCELERATION_OUTCOME_SCHEMA = "aegis-directional-acceleration-shadow-outcome-v1"
 HTTP_SCHEMA = "aegis-entry-intelligence-http-shadow-v1"
 
 
@@ -57,6 +62,7 @@ class EntryIntelligenceShadowConfig:
     config_sha256: str
     signal_journal: Path
     outcome_journal: Path
+    acceleration_outcome_journal: Path
     horizon_bars: int
     round_trip_cost_fraction: float
     maximum_wait_bars: int
@@ -67,6 +73,7 @@ class EntryIntelligenceShadowConfig:
     require_bearish_confirmation_candle: bool
     maximum_counterfactual_candidates_per_cycle: int
     regime_settings: RegimeV2Settings
+    acceleration_settings: DirectionalAccelerationSettings
 
 
 @dataclass
@@ -90,6 +97,7 @@ def load_entry_intelligence_shadow_config(
         )
         evidence = _mapping(payload["evidence"], "evidence")
         timing = _mapping(payload["timing"], "timing")
+        acceleration = _mapping(payload["directional_acceleration"], "acceleration")
         ranking = _mapping(payload["ranking"], "ranking")
         promotion = _mapping(payload["promotion"], "promotion")
     except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
@@ -122,7 +130,14 @@ def load_entry_intelligence_shadow_config(
         )
     signal_journal = journal_root / str(evidence["signal_journal"])
     outcome_journal = journal_root / str(evidence["outcome_journal"])
-    if signal_journal.parent != journal_root or outcome_journal.parent != journal_root:
+    acceleration_outcome_journal = journal_root / str(
+        evidence["acceleration_outcome_journal"]
+    )
+    if (
+        signal_journal.parent != journal_root
+        or outcome_journal.parent != journal_root
+        or acceleration_outcome_journal.parent != journal_root
+    ):
         raise EntryIntelligenceShadowError(
             "AEGIS_ENTRY_INTELLIGENCE_JOURNAL_PATH_PROHIBITED"
         )
@@ -142,12 +157,30 @@ def load_entry_intelligence_shadow_config(
         regime_config_path,
         repo_root=root,
     ).regime_settings
+    acceleration_settings = DirectionalAccelerationSettings(
+        minimum_pressure_components=int(acceleration["minimum_pressure_components"]),
+        minimum_acceleration_components=int(
+            acceleration["minimum_acceleration_components"]
+        ),
+        minimum_persistence=float(acceleration["minimum_persistence"]),
+        minimum_impulse_atr_multiple=float(
+            acceleration["minimum_impulse_atr_multiple"]
+        ),
+        minimum_relative_atr_multiple=float(
+            acceleration["minimum_relative_atr_multiple"]
+        ),
+        minimum_volume_zscore=float(acceleration["minimum_volume_zscore"]),
+        minimum_volume_ratio=float(acceleration["minimum_volume_ratio"]),
+        minimum_trend_strength=float(acceleration["minimum_trend_strength"]),
+    )
+    acceleration_settings.validate()
     return EntryIntelligenceShadowConfig(
         observer_id=str(payload["observer_id"]),
         config_path=resolved,
         config_sha256=sha256_file(resolved),
         signal_journal=signal_journal,
         outcome_journal=outcome_journal,
+        acceleration_outcome_journal=acceleration_outcome_journal,
         horizon_bars=horizon,
         round_trip_cost_fraction=cost,
         maximum_wait_bars=wait,
@@ -160,6 +193,7 @@ def load_entry_intelligence_shadow_config(
         ),
         maximum_counterfactual_candidates_per_cycle=maximum,
         regime_settings=regime_settings,
+        acceleration_settings=acceleration_settings,
     )
 
 
@@ -173,6 +207,9 @@ class EntryIntelligenceShadowRuntime:
         self._local_regime = FactorizedRegimeAnalyzer(config.regime_settings)
         self._signals = _AppendOnlyJournal(config.signal_journal, "event_id")
         self._outcomes = _AppendOnlyJournal(config.outcome_journal, "event_id")
+        self._acceleration_outcomes = _AppendOnlyJournal(
+            config.acceleration_outcome_journal, "event_id"
+        )
         self._processed_timestamps = {
             str(row["market_timestamp"]) for row in self._signals.rows
         }
@@ -220,6 +257,7 @@ class EntryIntelligenceShadowRuntime:
                     self._signals.append(row)
                 self._processed_timestamps.add(timestamp)
                 self._mature_outcomes()
+                self._mature_acceleration_outcomes()
                 self.last_observation_at = datetime.now(timezone.utc)
                 return self._overlay(timestamp)
             except Exception:
@@ -348,6 +386,9 @@ class EntryIntelligenceShadowRuntime:
                 features=features,
                 regime=regime,
             )
+            acceleration = evaluate_directional_acceleration_shadow(
+                features, self.config.acceleration_settings
+            )
             bar = _mapping(result["market_bar"], "market_bar")
             layer = _mapping(result["layer"], "layer")
             rows.append(
@@ -396,6 +437,7 @@ class EntryIntelligenceShadowRuntime:
                         "selection_effect": "NONE",
                     },
                     "regime_v3_shadow": regime,
+                    "directional_acceleration_shadow": acceleration,
                     "entry_timing_shadow": timing,
                     "counterfactuals": {
                         "CONTROL_IMMEDIATE": (
@@ -719,6 +761,64 @@ class EntryIntelligenceShadowRuntime:
             ),
         }
 
+    def _mature_acceleration_outcomes(self) -> None:
+        by_symbol = {symbol: [] for symbol in CANONICAL_SYMBOLS}
+        for row in self._signals.rows:
+            by_symbol[str(row["symbol"])].append(row)
+        for rows in by_symbol.values():
+            rows.sort(key=lambda row: str(row["market_timestamp"]))
+            for index, signal in enumerate(rows):
+                event_id = str(signal["event_id"])
+                acceleration = signal.get("directional_acceleration_shadow")
+                if event_id in self._acceleration_outcomes.payloads or not isinstance(
+                    acceleration, Mapping
+                ):
+                    continue
+                future = rows[index + 1 : index + 1 + self.config.horizon_bars]
+                if len(future) < self.config.horizon_bars:
+                    continue
+                entry = float(signal["market_bar"]["close"])
+                closes = [float(row["market_bar"]["close"]) for row in future]
+                highs = [float(row["market_bar"]["high"]) for row in future]
+                lows = [float(row["market_bar"]["low"]) for row in future]
+                atr = max(float(signal["regime_input"]["atr_12"]), 1e-15)
+                terminal_return = (closes[-1] - entry) / entry
+                maximum_up = max(0.0, (max(highs) - entry) / entry)
+                maximum_down = max(0.0, (entry - min(lows)) / entry)
+                closes_above = sum(close > entry for close in closes)
+                closes_below = sum(close < entry for close in closes)
+                self._acceleration_outcomes.append(
+                    {
+                        "schema_id": ACCELERATION_OUTCOME_SCHEMA,
+                        "event_id": event_id,
+                        "symbol": signal["symbol"],
+                        "signal_timestamp": signal["market_timestamp"],
+                        "state": acceleration["state"],
+                        "upward_component_count": acceleration[
+                            "upward_component_count"
+                        ],
+                        "downward_component_count": acceleration[
+                            "downward_component_count"
+                        ],
+                        "horizon_bars": self.config.horizon_bars,
+                        "terminal_return_fraction": terminal_return,
+                        "maximum_up_excursion_fraction": maximum_up,
+                        "maximum_down_excursion_fraction": maximum_down,
+                        "closes_above_entry": closes_above,
+                        "closes_below_entry": closes_below,
+                        "persistent_upward_move": (
+                            terminal_return >= atr * 2.0
+                            and closes_above >= math.ceil(len(future) * 0.75)
+                        ),
+                        "persistent_downward_move": (
+                            terminal_return <= -atr * 2.0
+                            and closes_below >= math.ceil(len(future) * 0.75)
+                        ),
+                        "selection_effect": "NONE",
+                        "exchange_mutations": 0,
+                    }
+                )
+
     def _overlay(self, timestamp: str) -> Mapping[str, Any]:
         latest = {
             str(row["symbol"]): row
@@ -749,6 +849,9 @@ class EntryIntelligenceShadowRuntime:
                 "status": "OBSERVATIONAL_ONLY",
                 "uncertainty": dict(row["uncertainty"]),
                 "regime_v3_shadow": dict(row["regime_v3_shadow"]),
+                "directional_acceleration_shadow": dict(
+                    row["directional_acceleration_shadow"]
+                ),
                 "entry_timing_shadow": dict(row["entry_timing_shadow"]),
                 "counterfactuals": dict(row["counterfactuals"]),
                 "candidate_ranking_shadow": ranking,
@@ -769,6 +872,7 @@ class EntryIntelligenceShadowRuntime:
             "observer_id": self.config.observer_id,
             "signal_records": len(self._signals.rows),
             "paper_outcomes": len(self._outcomes.rows),
+            "directional_acceleration_outcomes": len(self._acceleration_outcomes.rows),
             "pending_setups": len(self._pending),
             "observation_errors": self.observation_errors,
             "exchange_authority": False,

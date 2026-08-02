@@ -13,6 +13,9 @@ from aegis.research.entry_intelligence_shadow import (
     TimingState,
     load_entry_intelligence_shadow_config,
 )
+from aegis.research.directional_acceleration_shadow import (
+    DirectionalAccelerationSettings,
+)
 from aegis.research.regime_v2 import RegimeV2Settings
 
 
@@ -42,6 +45,7 @@ def config(tmp_path: Path) -> EntryIntelligenceShadowConfig:
         config_sha256="a" * 64,
         signal_journal=tmp_path / "signals.jsonl",
         outcome_journal=tmp_path / "outcomes.jsonl",
+        acceleration_outcome_journal=tmp_path / "acceleration-outcomes.jsonl",
         horizon_bars=2,
         round_trip_cost_fraction=0.001,
         maximum_wait_bars=3,
@@ -52,6 +56,16 @@ def config(tmp_path: Path) -> EntryIntelligenceShadowConfig:
         require_bearish_confirmation_candle=True,
         maximum_counterfactual_candidates_per_cycle=1,
         regime_settings=settings(),
+        acceleration_settings=DirectionalAccelerationSettings(
+            minimum_pressure_components=5,
+            minimum_acceleration_components=7,
+            minimum_persistence=1.0 / 3.0,
+            minimum_impulse_atr_multiple=1.5,
+            minimum_relative_atr_multiple=0.5,
+            minimum_volume_zscore=0.5,
+            minimum_volume_ratio=1.1,
+            minimum_trend_strength=1.25,
+        ),
     )
 
 
@@ -68,6 +82,18 @@ def features(*, reversal: bool = False) -> dict[str, float]:
         "overextended_down_risk_proxy": 0.0,
         "trend_stack_short": 1.0,
         "close_to_open_return": -0.002,
+        "ret_3": -0.006,
+        "ret_24": -0.02,
+        "btc_divergence_6": -0.004,
+        "persistence_6": -1.0,
+        "ema_slope_6": -0.004,
+        "ema_slope_24": -0.002,
+        "trend_stack_long": 0.0,
+        "distance_to_rolling_high_12": 0.02,
+        "close_below_rolling_low_12": 1.0,
+        "volume_zscore_24": 1.0,
+        "volume_ratio_6_24": 1.2,
+        "volume_spike_12": 0.0,
     }
     for name in (
         "failed_breakdown_proxy",
@@ -153,6 +179,19 @@ def test_clean_selected_candidate_is_observational_only(tmp_path: Path) -> None:
     assert overlay["ETHUSDT"]["counterfactuals"]["CONTROL_IMMEDIATE"] == "ENTER_NOW"
     assert overlay["ETHUSDT"]["selection_effect"] == "NONE"
     assert runtime.health()["exchange_mutations"] == 0
+
+
+def test_acceleration_outcomes_mature_for_every_symbol(tmp_path: Path) -> None:
+    runtime = EntryIntelligenceShadowRuntime(config(tmp_path))
+    first = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    runtime.observe_batch(batch(first, selected="ADAUSDT"))
+    runtime.observe_batch(batch(first + timedelta(minutes=5), selected=None))
+    runtime.observe_batch(batch(first + timedelta(minutes=10), selected=None))
+
+    health = runtime.health()
+    assert health["directional_acceleration_outcomes"] == len(CANONICAL_SYMBOLS)
+    assert runtime._acceleration_outcomes.rows[0]["selection_effect"] == "NONE"
+    assert runtime._acceleration_outcomes.rows[0]["exchange_mutations"] == 0
 
 
 def test_config_rejects_live_authority(tmp_path: Path) -> None:
