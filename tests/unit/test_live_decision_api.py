@@ -9,8 +9,24 @@ import pytest
 import httpx
 
 from aegis.config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
-from aegis.domain import Candle, FeedQuality, MarketSnapshot, PortfolioContext, SymbolSeries
+from aegis.domain import (
+    Candle,
+    FeedQuality,
+    MarketSnapshot,
+    PortfolioContext,
+    SymbolSeries,
+)
 from aegis.live_api import create_app
+from aegis.hybrid_live_experiment import (
+    AUTHORITY as HYBRID_LIVE_AUTHORITY,
+    CONFIGURATION_SHA256 as HYBRID_LIVE_CONFIGURATION_SHA256,
+    CONTRACT_VERSION as HYBRID_LIVE_CONTRACT_VERSION,
+    MODEL_IDENTIFIER as HYBRID_LIVE_MODEL_IDENTIFIER,
+    MODEL_SHA256 as HYBRID_LIVE_MODEL_SHA256,
+    HybridLiveExperimentConfig,
+    HybridLiveExperimentSelector,
+    load_hybrid_live_experiment_config,
+)
 from aegis.live_decision import (
     CANONICAL_DECISION_CONTRACT,
     CANONICAL_LIVE_AUTHORITY,
@@ -64,18 +80,20 @@ def synthetic_snapshot(variant: int = 0):
             close = open_price * (1.0 + drift + (((index + variant) % 5) - 2) * 0.00003)
             high = max(open_price, close) * 1.001
             low = min(open_price, close) * 0.999
-            candles.append(Candle(
-                open_time,
-                close_time,
-                open_price,
-                high,
-                low,
-                close,
-                1000.0 + symbol_index * 10 + index + variant,
-                True,
-                "CURRENT_BRAIN_HTTP_FIXTURE",
-                f"{variant}-{index}",
-            ))
+            candles.append(
+                Candle(
+                    open_time,
+                    close_time,
+                    open_price,
+                    high,
+                    low,
+                    close,
+                    1000.0 + symbol_index * 10 + index + variant,
+                    True,
+                    "CURRENT_BRAIN_HTTP_FIXTURE",
+                    f"{variant}-{index}",
+                )
+            )
         series.append(SymbolSeries(symbol, tuple(candles), end, FeedQuality()))
     return MarketSnapshot(
         end,
@@ -101,6 +119,45 @@ def anyio_backend():
     return "asyncio"
 
 
+def hybrid_overlay(*, selected_symbol: str, selected_side: str) -> dict:
+    overlay = {}
+    for symbol_index, symbol in enumerate(CANONICAL_SYMBOLS):
+        predictions = {}
+        for side in ("LONG", "SHORT"):
+            selected = symbol == selected_symbol and side == selected_side
+            predictions[side] = {
+                "side": side,
+                "opportunity_probability": 0.8 if selected else 0.55,
+                "danger_probability": 0.1 if selected else 0.3,
+                "mae_q50": 0.005,
+                "mae_q90": 0.01 + symbol_index * 0.0001,
+                "mfe_q50": 0.02,
+                "net_return_mean": 0.01 if selected else 0.001,
+                "shadow_rank_score": 0.9 if selected else 0.4 - symbol_index * 0.001,
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+            }
+        overlay[symbol] = {
+            "hybrid_directional_shadow": {
+                "mode": "SHADOW",
+                "status": "OFFLINE_VALIDATION_FAILED_OBSERVATION_ONLY",
+                "predictions": predictions,
+            }
+        }
+    return overlay
+
+
+def hybrid_selector(tmp_path: Path) -> HybridLiveExperimentSelector:
+    config = HybridLiveExperimentConfig(
+        path=tmp_path / "config.yaml",
+        artifact_path=tmp_path / "artifact.json",
+        readiness_path=tmp_path / "readiness.json",
+        decision_journal=tmp_path / "decisions.jsonl",
+        maximum_selected_per_cycle=1,
+    )
+    return HybridLiveExperimentSelector(config)
+
+
 def test_health_not_ready_before_initialization() -> None:
     engine = CurrentBrainEngine()
     service = CurrentBrainDecisionService(engine, StaticProvider(None))
@@ -118,8 +175,86 @@ def test_health_ready_only_after_real_model_self_check(real_engine) -> None:
     assert health["feature_count"] == FEATURE_COUNT
 
 
+def test_hybrid_live_config_freezes_failed_validation_owner_override() -> None:
+    root = Path(__file__).parents[2]
+    config = load_hybrid_live_experiment_config(
+        root / "config/hybrid_directional_live_experiment.yaml",
+        repo_root=root,
+    )
+    assert config.maximum_selected_per_cycle == 1
+
+
+@pytest.mark.parametrize(
+    ("selected_symbol", "selected_side"),
+    (("ADAUSDT", "LONG"), ("AVAXUSDT", "SHORT")),
+)
+def test_hybrid_live_selects_real_long_and_short_without_fabricated_votes(
+    tmp_path: Path,
+    canonical_batch,
+    selected_symbol: str,
+    selected_side: str,
+) -> None:
+    selector = hybrid_selector(tmp_path)
+    batch = {
+        **canonical_batch,
+        "decision_cycle_id": f"hybrid-{selected_symbol}-{selected_side}",
+        "market_timestamp": "2026-08-02T20:00:00Z",
+        "_entry_quality_v2": hybrid_overlay(
+            selected_symbol=selected_symbol,
+            selected_side=selected_side,
+        ),
+    }
+    live = selector.apply(batch)
+    assert live["candidate_count"] == 22
+    assert live["selected_symbol"] == selected_symbol
+    assert live["selected_side"] == selected_side
+    assert sum(int(value["selected"]) for value in live["by_symbol"].values()) == 1
+    selected = live["by_symbol"][selected_symbol]
+    assert selected["fabricated_votes"] == 0
+    assert selected["selected_prediction"]["opportunity_probability"] == 0.8
+
+    response = compatibility_response(
+        {**batch, "_hybrid_directional_live": live}, selected_symbol, "trace"
+    )
+    brain = response["aegis"]["decision_brain"]
+    assert brain["contract_version"] == HYBRID_LIVE_CONTRACT_VERSION
+    assert brain["authority"] == HYBRID_LIVE_AUTHORITY
+    assert brain["model_version"] == HYBRID_LIVE_MODEL_IDENTIFIER
+    assert brain["model_sha256"] == HYBRID_LIVE_MODEL_SHA256
+    assert brain["bundle_sha256"] == HYBRID_LIVE_MODEL_SHA256
+    assert brain["configuration_sha256"] == HYBRID_LIVE_CONFIGURATION_SHA256
+    assert brain["side"] == selected_side
+    assert brain["selected"] is True
+    assert response["aegis"]["directional_evidence"]["fabricated_votes"] == 0
+    assert "votes" not in response["aegis"]["turbo"]["raw"]
+    assert selector.health()["decision_records"] == 22
+    selector.apply(batch)
+    assert selector.health()["decision_records"] == 22
+
+
+def test_hybrid_live_records_all_candidates_but_does_not_select_off_anchor(
+    tmp_path: Path, canonical_batch
+) -> None:
+    selector = hybrid_selector(tmp_path)
+    batch = {
+        **canonical_batch,
+        "decision_cycle_id": "hybrid-non-anchor",
+        "market_timestamp": "2026-08-02T20:05:00Z",
+        "_entry_quality_v2": hybrid_overlay(
+            selected_symbol="ADAUSDT", selected_side="LONG"
+        ),
+    }
+    live = selector.apply(batch)
+    assert live["hourly_anchor"] is False
+    assert live["selected_symbol"] is None
+    assert all(not value["selected"] for value in live["by_symbol"].values())
+    assert selector.health()["decision_records"] == 22
+
+
 @pytest.mark.anyio
-async def test_real_pipeline_and_http_adapter_are_lossless(real_engine, current_snapshot, canonical_batch) -> None:
+async def test_real_pipeline_and_http_adapter_are_lossless(
+    real_engine, current_snapshot, canonical_batch
+) -> None:
     provider = StaticProvider(current_snapshot)
     service = CurrentBrainDecisionService(real_engine, provider, cache_seconds=60)
     transport = httpx.ASGITransport(app=create_app(service))
@@ -149,21 +284,31 @@ async def test_twenty_distinct_snapshots_preserve_http_parity_and_feature_driven
     for variant in range(20):
         snapshot = synthetic_snapshot(variant)
         canonical = real_engine.evaluate(snapshot)
-        service = CurrentBrainDecisionService(real_engine, StaticProvider(snapshot), cache_seconds=60)
+        service = CurrentBrainDecisionService(
+            real_engine, StaticProvider(snapshot), cache_seconds=60
+        )
         transport = httpx.ASGITransport(app=create_app(service))
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
             for symbol in CANONICAL_SYMBOLS:
                 response = await client.post("/ml-v2/predict", json={"symbol": symbol})
                 assert response.status_code == 200
                 payload = response.json()
-                expected = compatibility_response(canonical, symbol, payload["metadata"]["trace_id"])
+                expected = compatibility_response(
+                    canonical, symbol, payload["metadata"]["trace_id"]
+                )
                 assert payload == expected
 
                 result = canonical["results"][symbol]
                 feature_hashes[symbol].add(result["feature_vector_hash"])
                 calibrated_scores[symbol].add(result["candidate"]["calibrated_score"])
                 probability_vectors[symbol].add(
-                    (payload["long_prob"], payload["short_prob"], payload["neutral_prob"])
+                    (
+                        payload["long_prob"],
+                        payload["short_prob"],
+                        payload["neutral_prob"],
+                    )
                 )
                 decisions[symbol].add(payload["aegis"]["decision_brain"]["decision"])
 
@@ -176,9 +321,15 @@ async def test_twenty_distinct_snapshots_preserve_http_parity_and_feature_driven
 
 
 @pytest.mark.parametrize("symbol", CANONICAL_SYMBOLS)
-def test_all_configured_symbols_have_valid_current_outputs(canonical_batch, symbol) -> None:
+def test_all_configured_symbols_have_valid_current_outputs(
+    canonical_batch, symbol
+) -> None:
     response = compatibility_response(canonical_batch, symbol, "trace")
-    probabilities = (response["long_prob"], response["short_prob"], response["neutral_prob"])
+    probabilities = (
+        response["long_prob"],
+        response["short_prob"],
+        response["neutral_prob"],
+    )
     assert all(math.isfinite(value) and 0 <= value <= 1 for value in probabilities)
     assert math.isclose(sum(probabilities), 1.0, abs_tol=1e-9)
     assert response["features"]["fallback"] is False
@@ -197,7 +348,9 @@ def test_all_configured_symbols_have_valid_current_outputs(canonical_batch, symb
     assert brain["fallback"] is False
 
 
-def test_single_estimator_is_not_inflated_into_legacy_consensus(canonical_batch) -> None:
+def test_single_estimator_is_not_inflated_into_legacy_consensus(
+    canonical_batch,
+) -> None:
     for symbol in CANONICAL_SYMBOLS:
         response = compatibility_response(canonical_batch, symbol, "trace")
         raw = response["aegis"]["turbo"]["raw"]
@@ -230,13 +383,17 @@ def test_single_estimator_is_not_inflated_into_legacy_consensus(canonical_batch)
         }
 
 
-def test_canonical_batch_exposes_complete_ranking_without_changing_selection(canonical_batch) -> None:
+def test_canonical_batch_exposes_complete_ranking_without_changing_selection(
+    canonical_batch,
+) -> None:
     assert len(canonical_batch["ranking"]) == len(CANONICAL_SYMBOLS)
     assert [row["rank"] for row in canonical_batch["ranking"]] == list(
         range(1, len(CANONICAL_SYMBOLS) + 1)
     )
     selected = {
-        symbol for symbol, result in canonical_batch["results"].items() if result["selected"]
+        symbol
+        for symbol, result in canonical_batch["results"].items()
+        if result["selected"]
     }
     ranked_selected = {
         row["symbol"] for row in canonical_batch["ranking"] if row["eligible"]
@@ -269,16 +426,27 @@ def test_would_execute_and_action_match_canonical_selection(canonical_batch) -> 
         assert raw["would_execute"] is canonical["selected"]
         assert (raw["action"] in {"LONG", "SHORT"}) is canonical["selected"]
         assert raw["turbo_score"] == canonical["candidate"]["raw_score"]
-        assert response["metadata"]["canonical_calibrated_score"] == canonical["candidate"]["calibrated_score"]
+        assert (
+            response["metadata"]["canonical_calibrated_score"]
+            == canonical["candidate"]["calibrated_score"]
+        )
 
 
 @pytest.mark.anyio
-async def test_unknown_symbol_and_malformed_request_fail_safely(real_engine, current_snapshot) -> None:
+async def test_unknown_symbol_and_malformed_request_fail_safely(
+    real_engine, current_snapshot
+) -> None:
     service = CurrentBrainDecisionService(real_engine, StaticProvider(current_snapshot))
     transport = httpx.ASGITransport(app=create_app(service))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        assert (await client.post("/ml-v2/predict", json={"symbol": "UNKNOWN"})).status_code == 422
-        assert (await client.post("/ml-v2/predict", json={"symbol": "ETHUSDT", "extra": True})).status_code == 422
+        assert (
+            await client.post("/ml-v2/predict", json={"symbol": "UNKNOWN"})
+        ).status_code == 422
+        assert (
+            await client.post(
+                "/ml-v2/predict", json={"symbol": "ETHUSDT", "extra": True}
+            )
+        ).status_code == 422
         assert (await client.post("/ml-v2/predict", json={})).status_code == 422
 
 
@@ -306,14 +474,21 @@ async def test_exit_signal_fails_closed_because_current_brain_has_no_exit_contra
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/ml-v2/exit_signal", json={"symbol": "ETHUSDT"})
         assert response.status_code == 501
-        assert response.json()["detail"] == "AEGIS_CURRENT_BRAIN_EXIT_SIGNAL_NOT_PRESENT"
+        assert (
+            response.json()["detail"] == "AEGIS_CURRENT_BRAIN_EXIT_SIGNAL_NOT_PRESENT"
+        )
 
 
 def test_live_http_modules_have_no_binance_mutation_surface() -> None:
     import aegis.live_api as api_module
     import aegis.live_decision as decision_module
+    import aegis.hybrid_live_experiment as hybrid_module
 
-    source = (inspect.getsource(api_module) + inspect.getsource(decision_module)).lower()
+    source = (
+        inspect.getsource(api_module)
+        + inspect.getsource(decision_module)
+        + inspect.getsource(hybrid_module)
+    ).lower()
     forbidden = (
         "create_order",
         "cancel_order",
@@ -330,7 +505,9 @@ def test_live_http_modules_have_no_binance_mutation_surface() -> None:
 
 
 def test_pm2_definition_uses_local_module_and_no_credentials() -> None:
-    text = (Path(__file__).parents[2] / "ecosystem.config.js").read_text(encoding="utf-8")
+    text = (Path(__file__).parents[2] / "ecosystem.config.js").read_text(
+        encoding="utf-8"
+    )
     assert "-m aegis.live_api --host 127.0.0.1 --port 8001" in text
     python_block = text.split('name: "02-Aegis-API"', 1)[1]
     assert "BINANCE_API" not in python_block

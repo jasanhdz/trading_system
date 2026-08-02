@@ -17,6 +17,7 @@ from aegis.live_decision import (
     PublicKlineSnapshotProvider,
     trace_id,
 )
+from aegis.hybrid_live_experiment import build_hybrid_live_experiment_selector
 from aegis.research.dual_side_shadow import build_composite_research_observer
 
 
@@ -41,6 +42,10 @@ def build_service() -> CurrentBrainDecisionService:
         CurrentBrainEngine(),
         PublicKlineSnapshotProvider(),
         research_observer=observer,
+        hybrid_live_selector=build_hybrid_live_experiment_selector(
+            root / "config/hybrid_directional_live_experiment.yaml",
+            repo_root=root,
+        ),
     )
     service.initialize()
     return service

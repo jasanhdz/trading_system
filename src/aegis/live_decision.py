@@ -25,6 +25,13 @@ from aegis.domain import (
     TradeSide,
 )
 from aegis.features import DeterministicFeaturePipeline, MarketSnapshotValidator
+from aegis.hybrid_live_experiment import (
+    AUTHORITY as HYBRID_LIVE_AUTHORITY,
+    CONFIGURATION_SHA256 as HYBRID_LIVE_CONFIGURATION_SHA256,
+    CONTRACT_VERSION as HYBRID_LIVE_CONTRACT_VERSION,
+    MODEL_IDENTIFIER as HYBRID_LIVE_MODEL_IDENTIFIER,
+    MODEL_SHA256 as HYBRID_LIVE_MODEL_SHA256,
+)
 from aegis.prospective.model_qualification import (
     CANDIDATE_IDENTITY,
     FEATURE_SCHEMA,
@@ -35,10 +42,11 @@ from aegis.prospective.model_qualification import (
 from aegis.training.experiment import evaluate_authoritative_feature_batch
 from aegis.utils import Sha256HashProvider, sha256_file, to_primitive
 
-
 MODEL_BUNDLE_SHA256 = "23b22403b70f7d6c385d1214e6543197f4ca4e57269af19b1013987891ed550a"
 MODEL_ARTIFACT_SHA256 = SOURCE_BUNDLE_SHA256
-CONFIGURATION_SHA256 = "f944b0210b31928a519dc63459be3f1d53de811517dc1bbe9753596314579ec1"
+CONFIGURATION_SHA256 = (
+    "f944b0210b31928a519dc63459be3f1d53de811517dc1bbe9753596314579ec1"
+)
 FEATURE_COUNT = 83
 SERVICE_VERSION = "aegis-current-brain-http-v1"
 CANONICAL_DECISION_CONTRACT = "aegis-current-brain-live-decision-v1"
@@ -64,6 +72,12 @@ class ResearchBatchObserver(Protocol):
     def health(self) -> Mapping[str, Any]: ...
 
 
+class HybridLiveSelector(Protocol):
+    def apply(self, batch: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+    def health(self) -> Mapping[str, Any]: ...
+
+
 def _utc(milliseconds: int) -> datetime:
     return datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc)
 
@@ -80,7 +94,11 @@ class PublicKlineSnapshotProvider:
         attempts: int = 3,
     ) -> None:
         parsed = urlparse(PUBLIC_KLINES_URL)
-        if parsed.scheme != "https" or parsed.netloc != "fapi.binance.com" or parsed.path != "/fapi/v1/klines":
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc != "fapi.binance.com"
+            or parsed.path != "/fapi/v1/klines"
+        ):
             raise CurrentBrainError("AEGIS_CURRENT_BRAIN_PUBLIC_ENDPOINT_INVALID")
         self._session = session or requests.Session()
         self._now = now or (lambda: datetime.now(timezone.utc))
@@ -100,27 +118,45 @@ class PublicKlineSnapshotProvider:
                     allow_redirects=False,
                 )
                 if response.is_redirect or response.is_permanent_redirect:
-                    raise CurrentBrainError("AEGIS_CURRENT_BRAIN_PUBLIC_REDIRECT_PROHIBITED")
+                    raise CurrentBrainError(
+                        "AEGIS_CURRENT_BRAIN_PUBLIC_REDIRECT_PROHIBITED"
+                    )
                 response.raise_for_status()
                 rows = response.json()
                 if not isinstance(rows, list):
-                    raise CurrentBrainError("AEGIS_CURRENT_BRAIN_PUBLIC_RESPONSE_INVALID")
+                    raise CurrentBrainError(
+                        "AEGIS_CURRENT_BRAIN_PUBLIC_RESPONSE_INVALID"
+                    )
                 now_ms = int(self._now().timestamp() * 1000)
                 candles: list[Candle] = []
                 for row in rows:
                     if not isinstance(row, list) or len(row) < 6:
-                        raise CurrentBrainError("AEGIS_CURRENT_BRAIN_PUBLIC_RESPONSE_INVALID")
+                        raise CurrentBrainError(
+                            "AEGIS_CURRENT_BRAIN_PUBLIC_RESPONSE_INVALID"
+                        )
                     open_ms = int(row[0])
                     close_ms = open_ms + INTERVAL_MS
                     if close_ms > now_ms:
                         continue
                     values = tuple(float(row[index]) for index in range(1, 6))
                     if not all(math.isfinite(value) and value >= 0 for value in values):
-                        raise CurrentBrainError("AEGIS_CURRENT_BRAIN_PUBLIC_RESPONSE_INVALID")
-                    candles.append(Candle(
-                        _utc(open_ms), _utc(close_ms), values[0], values[1], values[2], values[3], values[4],
-                        True, "BINANCE_USDM_PUBLIC_KLINES", str(open_ms),
-                    ))
+                        raise CurrentBrainError(
+                            "AEGIS_CURRENT_BRAIN_PUBLIC_RESPONSE_INVALID"
+                        )
+                    candles.append(
+                        Candle(
+                            _utc(open_ms),
+                            _utc(close_ms),
+                            values[0],
+                            values[1],
+                            values[2],
+                            values[3],
+                            values[4],
+                            True,
+                            "BINANCE_USDM_PUBLIC_KLINES",
+                            str(open_ms),
+                        )
+                    )
                 if len(candles) < 60:
                     raise CurrentBrainError("AEGIS_CURRENT_BRAIN_INCOMPLETE_SERIES")
                 return tuple(candles)
@@ -128,29 +164,44 @@ class PublicKlineSnapshotProvider:
                 last_error = exc
                 if attempt + 1 < self._attempts:
                     time.sleep(0.25 * (attempt + 1))
-        raise CurrentBrainError("AEGIS_CURRENT_BRAIN_PUBLIC_CONNECTIVITY_FAILED") from last_error
+        raise CurrentBrainError(
+            "AEGIS_CURRENT_BRAIN_PUBLIC_CONNECTIVITY_FAILED"
+        ) from last_error
 
     def snapshot(self) -> MarketSnapshot:
         with ThreadPoolExecutor(max_workers=len(CANONICAL_SYMBOLS)) as pool:
-            futures = {symbol: pool.submit(self._candles, symbol) for symbol in CANONICAL_SYMBOLS}
+            futures = {
+                symbol: pool.submit(self._candles, symbol)
+                for symbol in CANONICAL_SYMBOLS
+            }
             by_symbol = {symbol: future.result() for symbol, future in futures.items()}
         closed_at = min(candles[-1].close_time for candles in by_symbol.values())
         series = []
         now = self._now()
         for symbol in CANONICAL_SYMBOLS:
-            candles = tuple(item for item in by_symbol[symbol] if item.close_time <= closed_at)[-96:]
+            candles = tuple(
+                item for item in by_symbol[symbol] if item.close_time <= closed_at
+            )[-96:]
             if len(candles) < 60 or candles[-1].close_time != closed_at:
                 raise CurrentBrainError("AEGIS_CURRENT_BRAIN_UNALIGNED_SERIES")
-            series.append(SymbolSeries(
-                symbol,
-                candles,
-                closed_at,
-                FeedQuality(source_lag_ms=max(0, int((now - closed_at).total_seconds() * 1000))),
-            ))
+            series.append(
+                SymbolSeries(
+                    symbol,
+                    candles,
+                    closed_at,
+                    FeedQuality(
+                        source_lag_ms=max(
+                            0, int((now - closed_at).total_seconds() * 1000)
+                        )
+                    ),
+                )
+            )
         return MarketSnapshot(
             closed_at,
             "5m",
-            load_brain_config(Path(__file__).resolve().parents[2] / "config").universe.symbol_set_hash,
+            load_brain_config(
+                Path(__file__).resolve().parents[2] / "config"
+            ).universe.symbol_set_hash,
             tuple(series),
             PortfolioContext(available_slots=1, operational_time=closed_at),
         )
@@ -194,7 +245,10 @@ class CurrentBrainEngine:
         if sha256_file(self.paths.candidate_path) != MODEL_BUNDLE_SHA256:
             raise CurrentBrainError("AEGIS_CURRENT_BRAIN_MODEL_BUNDLE_HASH_MISMATCH")
         candidate = load_qualified_candidate(self.paths.candidate_path)
-        if candidate.model_identity != CANDIDATE_IDENTITY or candidate.model_artifact_hash != MODEL_ARTIFACT_SHA256:
+        if (
+            candidate.model_identity != CANDIDATE_IDENTITY
+            or candidate.model_artifact_hash != MODEL_ARTIFACT_SHA256
+        ):
             raise CurrentBrainError("AEGIS_CURRENT_BRAIN_MODEL_IDENTITY_MISMATCH")
         config = load_brain_config(self.paths.config_dir)
         if config.config_hash != CONFIGURATION_SHA256:
@@ -203,7 +257,10 @@ class CurrentBrainEngine:
             candidate.source.normalizer,
             schema_version=candidate.source.feature_schema_version,
         )
-        if features.schema_version != FEATURE_SCHEMA or len(features.feature_names) != FEATURE_COUNT:
+        if (
+            features.schema_version != FEATURE_SCHEMA
+            or len(features.feature_names) != FEATURE_COUNT
+        ):
             raise CurrentBrainError("AEGIS_CURRENT_BRAIN_FEATURE_CONTRACT_MISMATCH")
         self_check = qualify_inference(candidate)
         if (
@@ -256,7 +313,10 @@ class CurrentBrainEngine:
             portfolio=snapshot.portfolio,
         )
         selected = {item.candidate_hash for item in pipeline.selection.selected}
-        predictions = {item.symbol: pipeline.predictions.for_symbol(item.symbol) for item in features.rows}
+        predictions = {
+            item.symbol: pipeline.predictions.for_symbol(item.symbol)
+            for item in features.rows
+        }
         layers = {item.symbol: item for item in pipeline.layers.results}
         candidates = {item.symbol: item for item in pipeline.candidates.candidates}
         market_series = {item.symbol: item for item in snapshot.series}
@@ -266,10 +326,14 @@ class CurrentBrainEngine:
             layer = layers[row.symbol]
             candidate = candidates[row.symbol]
             market_bar = market_series[row.symbol].candles[-1]
-            vector_hash = self._hashing.digest_value({"names": features.feature_names, "values": row.raw_values})
+            vector_hash = self._hashing.digest_value(
+                {"names": features.feature_names, "values": row.raw_values}
+            )
             results[row.symbol] = {
                 "symbol": row.symbol,
-                "market_timestamp": snapshot.closed_at.isoformat().replace("+00:00", "Z"),
+                "market_timestamp": snapshot.closed_at.isoformat().replace(
+                    "+00:00", "Z"
+                ),
                 "feature_schema": features.schema_version,
                 "feature_schema_hash": features.feature_hash,
                 "feature_vector_hash": vector_hash,
@@ -310,7 +374,9 @@ class CurrentBrainEngine:
         }
 
 
-def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str) -> Mapping[str, Any]:
+def compatibility_response(
+    batch: Mapping[str, Any], symbol: str, trace_id: str
+) -> Mapping[str, Any]:
     normalized = symbol.strip().upper()
     if normalized not in CANONICAL_SYMBOLS:
         raise CurrentBrainError("AEGIS_CURRENT_BRAIN_SYMBOL_UNAUTHORIZED")
@@ -319,15 +385,26 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
     if not predictions:
         raise CurrentBrainError("AEGIS_CURRENT_BRAIN_MODEL_OUTPUT_MISSING")
     count = len(predictions)
-    long_probability = math.fsum(float(item["long_probability"]) for item in predictions) / count
-    short_probability = math.fsum(float(item["short_probability"]) for item in predictions) / count
-    neutral_probability = math.fsum(float(item["neutral_probability"]) for item in predictions) / count
-    if not all(math.isfinite(value) for value in (long_probability, short_probability, neutral_probability)):
+    long_probability = (
+        math.fsum(float(item["long_probability"]) for item in predictions) / count
+    )
+    short_probability = (
+        math.fsum(float(item["short_probability"]) for item in predictions) / count
+    )
+    neutral_probability = (
+        math.fsum(float(item["neutral_probability"]) for item in predictions) / count
+    )
+    if not all(
+        math.isfinite(value)
+        for value in (long_probability, short_probability, neutral_probability)
+    ):
         raise CurrentBrainError("AEGIS_CURRENT_BRAIN_MODEL_OUTPUT_NONFINITE")
     votes = {
         "long": sum(item["side"] == TradeSide.LONG.value for item in predictions),
         "short": sum(item["side"] == TradeSide.SHORT.value for item in predictions),
-        "neutral": sum(item["side"] == TradeSide.NO_TRADE.value for item in predictions),
+        "neutral": sum(
+            item["side"] == TradeSide.NO_TRADE.value for item in predictions
+        ),
     }
     directional_evidence = {
         "schema_id": "aegis-directional-evidence-v1",
@@ -344,48 +421,136 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
     v2 = v2_by_symbol.get(normalized) if isinstance(v2_by_symbol, Mapping) else None
     v2_live = isinstance(v2, Mapping) and v2.get("mode") == "LIVE"
     entry_intelligence = (
-        v2.get("entry_intelligence_shadow", {})
-        if isinstance(v2, Mapping)
-        else {}
+        v2.get("entry_intelligence_shadow", {}) if isinstance(v2, Mapping) else {}
     )
     hybrid_directional = (
-        v2.get("hybrid_directional_shadow", {})
-        if isinstance(v2, Mapping)
+        v2.get("hybrid_directional_shadow", {}) if isinstance(v2, Mapping) else {}
+    )
+    hybrid_live_batch = batch.get("_hybrid_directional_live", {})
+    hybrid_live_symbols = (
+        hybrid_live_batch.get("by_symbol", {})
+        if isinstance(hybrid_live_batch, Mapping)
         else {}
     )
-    selected = bool(v2["selected"]) if v2_live else bool(result["selected"])
+    hybrid_live = (
+        hybrid_live_symbols.get(normalized, {})
+        if isinstance(hybrid_live_symbols, Mapping)
+        else {}
+    )
+    hybrid_live_enabled = (
+        isinstance(hybrid_live, Mapping) and hybrid_live.get("mode") == "LIVE"
+    )
+    selected = (
+        bool(hybrid_live.get("selected"))
+        if hybrid_live_enabled
+        else bool(v2["selected"]) if v2_live else bool(result["selected"])
+    )
     side_value = candidate["side"]
     side = str(getattr(side_value, "value", side_value))
-    if v2_live:
+    if hybrid_live_enabled:
+        side = str(hybrid_live.get("selected_side") or "HOLD")
+    elif v2_live:
         side = "SHORT"
     action = side if selected and side in {"LONG", "SHORT"} else "HOLD"
-    reasons = [str(getattr(value, "value", value)) for value in candidate["reason_codes"]]
-    if v2_live:
+    reasons = [
+        str(getattr(value, "value", value)) for value in candidate["reason_codes"]
+    ]
+    if hybrid_live_enabled:
         reason = (
-            "ENTRY_QUALITY_V2_SELECTED"
+            "HYBRID_DIRECTIONAL_GLOBAL_RANK_SELECTED"
             if selected
-            else "ENTRY_QUALITY_V2_NOT_SELECTED"
+            else "HYBRID_DIRECTIONAL_NOT_SELECTED"
+        )
+    elif v2_live:
+        reason = (
+            "ENTRY_QUALITY_V2_SELECTED" if selected else "ENTRY_QUALITY_V2_NOT_SELECTED"
         )
     else:
-        reason = "CURRENT_BRAIN_SELECTED" if selected else ",".join(reasons) or "CURRENT_BRAIN_NO_TRADE"
+        reason = (
+            "CURRENT_BRAIN_SELECTED"
+            if selected
+            else ",".join(reasons) or "CURRENT_BRAIN_NO_TRADE"
+        )
     eq_allowed = "EQM_QUALITY_LOW" not in reasons
+    hybrid_predictions = (
+        hybrid_live.get("predictions", {}) if hybrid_live_enabled else {}
+    )
+    selected_hybrid = (
+        hybrid_live.get("selected_prediction") if hybrid_live_enabled else None
+    )
+    turbo_score = (
+        float(selected_hybrid["shadow_rank_score"])
+        if isinstance(selected_hybrid, Mapping)
+        else float(candidate["raw_score"])
+    )
     raw = {
         "action": action,
         "would_execute": selected,
         "reason": reason,
-        "turbo_score": float(candidate["raw_score"]),
-        "votes": votes,
-        "vote_semantics": directional_evidence["semantics"],
-        "directional_member_count": count,
+        "turbo_score": turbo_score,
+        "vote_semantics": (
+            "HYBRID_DIRECTIONAL_RANK_SELECTION_NO_VOTING"
+            if hybrid_live_enabled
+            else directional_evidence["semantics"]
+        ),
+        "directional_member_count": 0 if hybrid_live_enabled else count,
         "independent_directional_votes": "NOT_APPLICABLE",
-        "directional_consensus": "NOT_APPLICABLE_SINGLE_ESTIMATOR",
+        "directional_consensus": (
+            "NOT_APPLICABLE_RANK_SELECTION"
+            if hybrid_live_enabled
+            else "NOT_APPLICABLE_SINGLE_ESTIMATOR"
+        ),
     }
+    if not hybrid_live_enabled:
+        raw["votes"] = votes
+    contract_version = (
+        HYBRID_LIVE_CONTRACT_VERSION
+        if hybrid_live_enabled
+        else CANONICAL_DECISION_CONTRACT
+    )
+    authority = (
+        HYBRID_LIVE_AUTHORITY if hybrid_live_enabled else CANONICAL_LIVE_AUTHORITY
+    )
+    model_identifier = (
+        HYBRID_LIVE_MODEL_IDENTIFIER
+        if hybrid_live_enabled
+        else batch["model_identifier"]
+    )
+    model_sha256 = (
+        HYBRID_LIVE_MODEL_SHA256 if hybrid_live_enabled else batch["model_sha256"]
+    )
+    bundle_sha256 = (
+        HYBRID_LIVE_MODEL_SHA256 if hybrid_live_enabled else batch["bundle_sha256"]
+    )
+    configuration_sha256 = (
+        HYBRID_LIVE_CONFIGURATION_SHA256
+        if hybrid_live_enabled
+        else batch["configuration_sha256"]
+    )
+    decision_mode = (
+        "HYBRID_DIRECTIONAL_LIVE" if hybrid_live_enabled else "CURRENT_BRAIN_LIVE"
+    )
+    directional_evidence = (
+        {
+            "schema_id": "aegis-directional-evidence-v1",
+            "semantics": "HYBRID_DIRECTIONAL_RANK_SELECTION_NO_VOTING",
+            "eligible_directional_members": 0,
+            "independent_directional_votes": "NOT_APPLICABLE",
+            "directional_consensus": "NOT_APPLICABLE_RANK_SELECTION",
+            "fabricated_votes": 0,
+            "selection_authority": "HYBRID_DIRECTIONAL_GLOBAL_RANK",
+        }
+        if hybrid_live_enabled
+        else directional_evidence
+    )
     return {
         "symbol": normalized,
         "long_prob": long_probability,
         "short_prob": short_probability,
         "neutral_prob": neutral_probability,
-        "meta_verdict": "CURRENT_BRAIN_SELECTED" if selected else "CURRENT_BRAIN_NO_TRADE",
+        "meta_verdict": (
+            "CURRENT_BRAIN_SELECTED" if selected else "CURRENT_BRAIN_NO_TRADE"
+        ),
         "features": {
             "fallback": False,
             "schema": result["feature_schema"],
@@ -396,10 +561,15 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
             "quality": result["feature_quality"],
         },
         "aegis": {
-            "candidate": batch["model_identifier"],
-            "candidate_status": "OWNER_AUTHORIZED_CURRENT_PYTHON_COMMITTEE_LIVE_INTEGRATION",
+            "candidate": model_identifier,
+            "candidate_status": authority,
             "live_enabled": True,
-            "prod": {"allowed": selected, "action": action, "execute": selected, "reason": reason},
+            "prod": {
+                "allowed": selected,
+                "action": action,
+                "execute": selected,
+                "reason": reason,
+            },
             "turbo": {
                 "enabled": True,
                 "execute": selected,
@@ -408,9 +578,14 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 "action": action,
                 "would_execute": selected,
                 "reason": reason,
-                "turbo_score": float(candidate["raw_score"]),
+                "turbo_score": turbo_score,
                 "raw": raw,
-                "gated": {"action": action, "would_execute": selected, "reason": reason, "blocked_by": None},
+                "gated": {
+                    "action": action,
+                    "would_execute": selected,
+                    "reason": reason,
+                    "blocked_by": None,
+                },
             },
             "entry_quality_model": {
                 "mode": "CURRENT_BRAIN_LIVE",
@@ -430,17 +605,17 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 "missing_features": [],
             },
             "decision_brain": {
-                "contract_version": CANONICAL_DECISION_CONTRACT,
-                "authority": CANONICAL_LIVE_AUTHORITY,
-                "mode": "CURRENT_BRAIN_LIVE",
+                "contract_version": contract_version,
+                "authority": authority,
+                "mode": decision_mode,
                 "execute": selected,
                 "selected": selected,
                 "production_allowed": True,
                 "status": "LOADED",
-                "model_version": batch["model_identifier"],
-                "model_sha256": batch["model_sha256"],
-                "bundle_sha256": batch["bundle_sha256"],
-                "configuration_sha256": batch["configuration_sha256"],
+                "model_version": model_identifier,
+                "model_sha256": model_sha256,
+                "bundle_sha256": bundle_sha256,
+                "configuration_sha256": configuration_sha256,
                 "feature_schema": result["feature_schema"],
                 "feature_count": result["feature_count"],
                 "fallback": False,
@@ -453,6 +628,16 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 "feature_parity_pct": 100.0,
                 "missing_features_count": 0,
                 "missing_features": [],
+                "hybrid_long_entry_probability": (
+                    hybrid_predictions.get("LONG", {}).get("opportunity_probability")
+                    if hybrid_live_enabled
+                    else None
+                ),
+                "hybrid_short_entry_probability": (
+                    hybrid_predictions.get("SHORT", {}).get("opportunity_probability")
+                    if hybrid_live_enabled
+                    else None
+                ),
             },
             "directional_evidence": directional_evidence,
             "candidate_uncertainty": {
@@ -476,6 +661,9 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
                 if isinstance(hybrid_directional, Mapping)
                 else {}
             ),
+            "hybrid_directional_live": (
+                dict(hybrid_live) if hybrid_live_enabled else {}
+            ),
             "entry_quality_v2": (
                 dict(v2)
                 if isinstance(v2, Mapping)
@@ -493,19 +681,23 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
             "trace_id": trace_id,
             "service_version": SERVICE_VERSION,
             "decision_cycle_id": batch["decision_cycle_id"],
-            "model_sha256": batch["model_sha256"],
-            "bundle_sha256": batch["bundle_sha256"],
-            "configuration_sha256": batch["configuration_sha256"],
+            "model_sha256": model_sha256,
+            "bundle_sha256": bundle_sha256,
+            "configuration_sha256": configuration_sha256,
             "canonical_raw_score": float(candidate["raw_score"]),
             "canonical_calibrated_score": float(candidate["calibrated_score"]),
-            "directional_estimator_count": count,
+            "directional_estimator_count": 0 if hybrid_live_enabled else count,
             "vote_semantics": directional_evidence["semantics"],
             "independent_directional_votes": "NOT_APPLICABLE",
             "fabricated_votes": 0,
             "directional_consensus": (
-                "NOT_APPLICABLE_SINGLE_ESTIMATOR"
-                if count == 1
-                else "MULTI_ESTIMATOR_OUTPUT_PRESENT"
+                "NOT_APPLICABLE_RANK_SELECTION"
+                if hybrid_live_enabled
+                else (
+                    "NOT_APPLICABLE_SINGLE_ESTIMATOR"
+                    if count == 1
+                    else "MULTI_ESTIMATOR_OUTPUT_PRESENT"
+                )
             ),
             "direction_probability_semantics": (
                 "SIDE_AUTHORITY_NOT_PROFITABILITY_CONFIDENCE"
@@ -517,6 +709,7 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
             ),
             "leverage_recommendation": "NOT_PRESENT",
             "position_fraction": "NOT_PRESENT",
+            "hybrid_live_experiment": hybrid_live_enabled,
         },
     }
 
@@ -529,11 +722,13 @@ class CurrentBrainDecisionService:
         *,
         cache_seconds: float = 30.0,
         research_observer: ResearchBatchObserver | None = None,
+        hybrid_live_selector: HybridLiveSelector | None = None,
     ) -> None:
         self.engine = engine
         self.provider = provider
         self.cache_seconds = cache_seconds
         self.research_observer = research_observer
+        self.hybrid_live_selector = hybrid_live_selector
         self.started_at = datetime.now(timezone.utc)
         self._cache: tuple[float, Mapping[str, Any]] | None = None
         self._lock = threading.Lock()
@@ -556,13 +751,24 @@ class CurrentBrainDecisionService:
                     overlay = self.research_observer.observe_batch(batch)
                 except Exception as exc:
                     self.research_error_count += 1
-                    mode = str(getattr(self.research_observer.mode, "value", self.research_observer.mode))
+                    mode = str(
+                        getattr(
+                            self.research_observer.mode,
+                            "value",
+                            self.research_observer.mode,
+                        )
+                    )
                     if mode == "LIVE":
                         raise CurrentBrainError(
                             "AEGIS_ENTRY_QUALITY_V2_LIVE_EVALUATION_FAILED"
                         ) from exc
                     overlay = {}
                 batch = {**batch, "_entry_quality_v2": overlay}
+            if self.hybrid_live_selector is not None:
+                batch = {
+                    **batch,
+                    "_hybrid_directional_live": self.hybrid_live_selector.apply(batch),
+                }
             self._cache = (now, batch)
             self.last_inference_at = datetime.now(timezone.utc)
             return batch
@@ -598,6 +804,8 @@ class CurrentBrainDecisionService:
         }
         if self.research_observer is not None:
             health["entry_quality_v2"] = dict(self.research_observer.health())
+        if self.hybrid_live_selector is not None:
+            health["hybrid_directional_live"] = dict(self.hybrid_live_selector.health())
         return health
 
 
