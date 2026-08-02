@@ -1,9 +1,9 @@
-schema_version: aegis-hybrid-directional-live-experiment-v1
+schema_version: aegis-hybrid-directional-live-experiment-v2
 experiment_id: aegis-hybrid-directional-real-money-learning-01
 enabled: true
 mode: LIVE
 runtime_authority: OWNER_AUTHORIZED_REAL_MONEY_EXPERIMENT
-owner_authorization: OWNER_AUTHORIZED_HYBRID_DIRECTIONAL_LONG_SHORT_REAL_MONEY_EXPERIMENT_V1
+owner_authorization: OWNER_AUTHORIZED_HYBRID_DIRECTIONAL_MULTI_SYMBOL_5M_QUALITY_SELECTION_V2
 owner_acknowledges_offline_validation_failed: true
 purpose: REAL_OPERATION_EVIDENCE_COLLECTION
 
@@ -22,12 +22,14 @@ artifact:
   artifact_contents_modified: false
 
 selection:
-  cadence: HOURLY_ANCHOR
-  anchor_rule: CLOSE_TIME_ON_THE_HOUR
+  cadence: EVERY_CLOSED_5M_BAR
+  anchor_rule: EVERY_NEW_COORDINATED_CLOSED_BAR
   candidate_population: ALL_11_SYMBOLS_X_LONG_SHORT
-  cross_side_arbitration: MAX_SHADOW_RANK_SCORE
-  maximum_selected_per_cycle: 1
-  minimum_score: NOT_DEFINED
+  cross_side_arbitration: QUALITY_CONFIRMED_PER_SYMBOL
+  maximum_selected_per_cycle: 11
+  maximum_selected_per_symbol: 1
+  minimum_score: REPLACED_BY_QUALITY_POLICY
+  idempotency_identity: DECISION_CYCLE_X_SYMBOL_X_SIDE
   tie_break_order:
     - shadow_rank_score_desc
     - net_return_mean_desc
@@ -37,6 +39,27 @@ selection:
     - side_asc
   fabricated_votes: 0
 
+quality:
+  semantics: CROSS_SECTIONAL_CALIBRATED_WITH_NET_TOLERANCE
+  minimum_opportunity_probability: 0.44
+  maximum_danger_probability: 0.63
+  minimum_net_return_fraction: -0.0015
+  minimum_opportunity_percentile: 0.60
+  minimum_danger_quality_percentile: 0.40
+  minimum_net_return_percentile: 0.60
+  minimum_path_efficiency_percentile: 0.40
+
+confirmation:
+  minimum_components_passed: 3
+  minimum_close_location: 0.55
+  minimum_volume_zscore: 0.0
+  components:
+    - FAST_EMA_RECLAIMED
+    - DIRECTIONAL_REVERSAL_CANDLE
+    - SHORT_HORIZON_MOMENTUM_ALIGNED
+    - VOLUME_CONFIRMS
+    - TREND_IMPROVING
+
 evidence:
   journal_root: ../data/hybrid_directional_live_experiment
   decision_journal: decisions.jsonl
@@ -44,9 +67,10 @@ evidence:
   record_non_selected_candidates: true
   record_probabilities: true
   record_path_metrics: true
+  record_confirmation_features: true
 
 execution:
-  selection_authority: HYBRID_DIRECTIONAL_GLOBAL_RANK
+  selection_authority: HYBRID_DIRECTIONAL_RELATIVE_QUALITY_AND_CONFIRMATION
   typescript_guards_unchanged: true
   typescript_sizing_unchanged: true
   typescript_leverage_unchanged: true

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import inspect
 import math
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from aegis.hybrid_live_experiment import (
     HybridLiveExperimentSelector,
     load_hybrid_live_experiment_config,
 )
+from aegis.directional_confirmation import DirectionalConfirmationPolicy
 from aegis.live_decision import (
     CANONICAL_DECISION_CONTRACT,
     CANONICAL_LIVE_AUTHORITY,
@@ -127,13 +129,13 @@ def hybrid_overlay(*, selected_symbol: str, selected_side: str) -> dict:
             selected = symbol == selected_symbol and side == selected_side
             predictions[side] = {
                 "side": side,
-                "opportunity_probability": 0.8 if selected else 0.55,
-                "danger_probability": 0.1 if selected else 0.3,
+                "opportunity_probability": 0.8 if selected else 0.3,
+                "danger_probability": 0.1 if selected else 0.7,
                 "mae_q50": 0.005,
-                "mae_q90": 0.01 + symbol_index * 0.0001,
-                "mfe_q50": 0.02,
-                "net_return_mean": 0.01 if selected else 0.001,
-                "shadow_rank_score": 0.9 if selected else 0.4 - symbol_index * 0.001,
+                "mae_q90": 0.005 + symbol_index * 0.0001,
+                "mfe_q50": 0.02 if selected else 0.004,
+                "net_return_mean": 0.01 if selected else -0.001,
+                "shadow_rank_score": 0.9 if selected else 0.01 - symbol_index * 0.0001,
                 "selection_effect": "NONE",
                 "exchange_authority": False,
             }
@@ -153,9 +155,47 @@ def hybrid_selector(tmp_path: Path) -> HybridLiveExperimentSelector:
         artifact_path=tmp_path / "artifact.json",
         readiness_path=tmp_path / "readiness.json",
         decision_journal=tmp_path / "decisions.jsonl",
-        maximum_selected_per_cycle=1,
+        maximum_selected_per_cycle=len(CANONICAL_SYMBOLS),
+        maximum_selected_per_symbol=1,
+        confirmation_policy=DirectionalConfirmationPolicy(
+            round_trip_cost_fraction=0.001,
+            minimum_opportunity_probability=0.44,
+            maximum_danger_probability=0.63,
+            minimum_net_return_fraction=-0.0015,
+            minimum_opportunity_percentile=0.60,
+            minimum_danger_quality_percentile=0.40,
+            minimum_net_return_percentile=0.60,
+            minimum_path_efficiency_percentile=0.40,
+            minimum_confirmation_components=3,
+            minimum_close_location=0.55,
+            minimum_volume_zscore=0.0,
+        ),
     )
     return HybridLiveExperimentSelector(config)
+
+
+def confirm_direction(batch: dict, symbol: str, side: str) -> None:
+    features = batch["results"][symbol]["research_features"]
+    sign = 1.0 if side == "LONG" else -1.0
+    features.update(
+        {
+            "atr_12": 0.01,
+            "close_vs_ema_6": sign * 0.01,
+            "close_vs_ema_12": sign * 0.008,
+            "close_vs_ema_24": sign * 0.006,
+            "close_to_open_return": sign * 0.004,
+            "close_position_in_range": 0.8 if side == "LONG" else 0.2,
+            "ret_1": sign * 0.004,
+            "ret_3": sign * 0.008,
+            "ret_6": sign * 0.01,
+            "ret_12": sign * 0.012,
+            "ema_slope_6": sign * 0.002,
+            "trend_stack_long": float(side == "LONG"),
+            "trend_stack_short": float(side == "SHORT"),
+            "volume_zscore_24": 1.0,
+            "volume_return_1": 0.2,
+        }
+    )
 
 
 def test_health_not_ready_before_initialization() -> None:
@@ -175,13 +215,15 @@ def test_health_ready_only_after_real_model_self_check(real_engine) -> None:
     assert health["feature_count"] == FEATURE_COUNT
 
 
-def test_hybrid_live_config_freezes_failed_validation_owner_override() -> None:
+def test_hybrid_live_config_freezes_multi_symbol_quality_selection() -> None:
     root = Path(__file__).parents[2]
     config = load_hybrid_live_experiment_config(
         root / "config/hybrid_directional_live_experiment.yaml",
         repo_root=root,
     )
-    assert config.maximum_selected_per_cycle == 1
+    assert config.maximum_selected_per_cycle == len(CANONICAL_SYMBOLS)
+    assert config.maximum_selected_per_symbol == 1
+    assert config.confirmation_policy.minimum_confirmation_components == 3
 
 
 @pytest.mark.parametrize(
@@ -196,7 +238,7 @@ def test_hybrid_live_selects_real_long_and_short_without_fabricated_votes(
 ) -> None:
     selector = hybrid_selector(tmp_path)
     batch = {
-        **canonical_batch,
+        **copy.deepcopy(canonical_batch),
         "decision_cycle_id": f"hybrid-{selected_symbol}-{selected_side}",
         "market_timestamp": "2026-08-02T20:00:00Z",
         "_entry_quality_v2": hybrid_overlay(
@@ -204,6 +246,7 @@ def test_hybrid_live_selects_real_long_and_short_without_fabricated_votes(
             selected_side=selected_side,
         ),
     }
+    confirm_direction(batch, selected_symbol, selected_side)
     live = selector.apply(batch)
     assert live["candidate_count"] == 22
     assert live["selected_symbol"] == selected_symbol
@@ -232,23 +275,92 @@ def test_hybrid_live_selects_real_long_and_short_without_fabricated_votes(
     assert selector.health()["decision_records"] == 22
 
 
-def test_hybrid_live_records_all_candidates_but_does_not_select_off_anchor(
+def test_hybrid_live_evaluates_and_selects_on_every_closed_five_minute_bar(
     tmp_path: Path, canonical_batch
 ) -> None:
     selector = hybrid_selector(tmp_path)
     batch = {
-        **canonical_batch,
+        **copy.deepcopy(canonical_batch),
         "decision_cycle_id": "hybrid-non-anchor",
         "market_timestamp": "2026-08-02T20:05:00Z",
         "_entry_quality_v2": hybrid_overlay(
             selected_symbol="ADAUSDT", selected_side="LONG"
         ),
     }
+    confirm_direction(batch, "ADAUSDT", "LONG")
     live = selector.apply(batch)
-    assert live["hourly_anchor"] is False
-    assert live["selected_symbol"] is None
-    assert all(not value["selected"] for value in live["by_symbol"].values())
+    assert live["closed_bar_evaluation"] is True
+    assert live["selected_symbols"] == ["ADAUSDT"]
+    assert live["by_symbol"]["ADAUSDT"]["selected"] is True
     assert selector.health()["decision_records"] == 22
+
+
+def test_hybrid_live_selects_multiple_quality_symbols_in_same_cycle(
+    tmp_path: Path, canonical_batch
+) -> None:
+    selector = hybrid_selector(tmp_path)
+    batch = {
+        **copy.deepcopy(canonical_batch),
+        "decision_cycle_id": "hybrid-multiple",
+        "market_timestamp": "2026-08-02T20:10:00Z",
+        "_entry_quality_v2": hybrid_overlay(
+            selected_symbol="ADAUSDT", selected_side="LONG"
+        ),
+    }
+    overlay = batch["_entry_quality_v2"]
+    second = overlay["BTCUSDT"]["hybrid_directional_shadow"]["predictions"]["SHORT"]
+    second.update(
+        {
+            "opportunity_probability": 0.75,
+            "danger_probability": 0.2,
+            "mae_q90": 0.004,
+            "mfe_q50": 0.018,
+            "net_return_mean": 0.008,
+            "shadow_rank_score": 0.8,
+        }
+    )
+    confirm_direction(batch, "ADAUSDT", "LONG")
+    confirm_direction(batch, "BTCUSDT", "SHORT")
+
+    live = selector.apply(batch)
+
+    assert live["selected_count"] == 2
+    assert set(live["selected_symbols"]) == {"ADAUSDT", "BTCUSDT"}
+    assert live["selected_sides"] == {"ADAUSDT": "LONG", "BTCUSDT": "SHORT"}
+
+
+def test_hybrid_live_abstains_when_best_rank_lacks_calibrated_quality(
+    tmp_path: Path, canonical_batch
+) -> None:
+    selector = hybrid_selector(tmp_path)
+    batch = {
+        **copy.deepcopy(canonical_batch),
+        "decision_cycle_id": "hybrid-weak-best",
+        "market_timestamp": "2026-08-02T20:15:00Z",
+        "_entry_quality_v2": hybrid_overlay(
+            selected_symbol="XRPUSDT", selected_side="LONG"
+        ),
+    }
+    weak = batch["_entry_quality_v2"]["XRPUSDT"]["hybrid_directional_shadow"]["predictions"]["LONG"]
+    weak.update(
+        {
+            "opportunity_probability": 0.4218,
+            "danger_probability": 0.5870,
+            "net_return_mean": -0.000992,
+            "shadow_rank_score": 0.9,
+        }
+    )
+    confirm_direction(batch, "XRPUSDT", "LONG")
+
+    live = selector.apply(batch)
+
+    assert live["selected_count"] == 0
+    assessment = live["by_symbol"]["XRPUSDT"]["confirmation"]["LONG"]
+    assert assessment["state"] == "ABSTAIN_WEAK_QUALITY"
+    assert (
+        "OPPORTUNITY_PROBABILITY_BELOW_CALIBRATED_MINIMUM"
+        in assessment["reason_codes"]
+    )
 
 
 @pytest.mark.anyio

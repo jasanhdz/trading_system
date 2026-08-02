@@ -457,9 +457,9 @@ def compatibility_response(
     ]
     if hybrid_live_enabled:
         reason = (
-            "HYBRID_DIRECTIONAL_GLOBAL_RANK_SELECTED"
+            "HYBRID_DIRECTIONAL_QUALITY_CONFIRMED"
             if selected
-            else "HYBRID_DIRECTIONAL_NOT_SELECTED"
+            else "HYBRID_DIRECTIONAL_ABSTAIN_OR_WAIT"
         )
     elif v2_live:
         reason = (
@@ -538,7 +538,9 @@ def compatibility_response(
             "independent_directional_votes": "NOT_APPLICABLE",
             "directional_consensus": "NOT_APPLICABLE_RANK_SELECTION",
             "fabricated_votes": 0,
-            "selection_authority": "HYBRID_DIRECTIONAL_GLOBAL_RANK",
+            "selection_authority": (
+                "HYBRID_DIRECTIONAL_RELATIVE_QUALITY_AND_CONFIRMATION"
+            ),
         }
         if hybrid_live_enabled
         else directional_evidence
