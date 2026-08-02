@@ -1,0 +1,108 @@
+schema_version: aegis-hybrid-directional-preregistration-v1
+experiment_id: aegis-hybrid-directional-committee-v1
+status: PRE_REGISTERED_SHADOW_ONLY
+runtime_authority: SHADOW_ONLY
+feature_schema_version: aegis-features-v2
+feature_count: 83
+feature_hash: 2dc278b4353585fe22503233187e12832cabfd67e2a2e58f4cd683ee6f3b9454
+timeframe: 5m
+symbols: [ETHUSDT, BTCUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, SUIUSDT, LTCUSDT]
+
+source:
+  kind: canonical_d3_series
+  path: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+  read_only: true
+  finality_gate_required: true
+
+sampling:
+  cadence: HOURLY_ANCHOR
+  stride_bars: 12
+  anchor_rule: CLOSE_TIME_ON_THE_HOUR
+  coordinated_symbols_required: 11
+  history_bars: 288
+  horizon_bars: 12
+  entry_rule: NEXT_BAR_OPEN
+  overlap_policy: NONE_BY_CONSTRUCTION
+  expected_rows:
+    first_anchor_utc: "2024-07-12T16:00:00Z"
+    last_dev_anchor_utc: "2026-04-26T23:00:00Z"
+    approximate_maximum_dev_rows: 172500
+    hard_stop_if_valid_rows_below_fraction: 0.90
+
+labels:
+  long_schema: aegis-labels-long-v1
+  short_schema: aegis-labels-short-v4
+  round_trip_cost_fraction: 0.001
+  opportunity: TERMINAL_NET_POSITIVE_H12_AFTER_COSTS
+  danger: DIRECTIONAL_BAD_ENTRY_H12
+  mae: DIRECTIONAL_MAXIMUM_ADVERSE_EXCURSION_H12
+  mfe: DIRECTIONAL_MAXIMUM_FAVORABLE_EXCURSION_H12
+  net_return: DIRECTIONAL_TERMINAL_RETURN_H12_AFTER_COSTS
+  manually_selected_clean_rises: FORBIDDEN
+  outcome_information_in_features: FORBIDDEN
+
+architecture:
+  long_opportunity_specialist: HGB_CLASSIFIER
+  short_opportunity_specialist: HGB_CLASSIFIER
+  shared_danger_with_direction_head: HGB_CLASSIFIER_WITH_DIRECTION_FEATURE
+  shared_mae_q50: HGB_QUANTILE_WITH_DIRECTION_FEATURE
+  shared_mae_q90: HGB_QUANTILE_WITH_DIRECTION_FEATURE_AND_CONFORMAL_CALIBRATION
+  shared_mfe_q50: HGB_QUANTILE_WITH_DIRECTION_FEATURE
+  shared_net_return: HGB_REGRESSOR_WITH_DIRECTION_FEATURE
+  shared_representation: ORIGINAL_83_PLUS_DIRECTIONALIZED_83_PLUS_SIDE
+  final_output: OBSERVATIONAL_RANK_ONLY
+  voting_rule: NONE
+
+fold_protocol:
+  embargo_minutes: 120
+  folds:
+    - {id: 1, train_start: "2024-07-11T15:20:00Z", train_end: "2025-02-28T23:59:59Z", calibration_start: "2025-03-01T02:00:00Z", calibration_end: "2025-04-16T00:55:00Z", scoring_start: "2025-04-16T02:55:00Z", scoring_end: "2025-05-31T23:59:59Z"}
+    - {id: 2, train_start: "2024-07-11T15:20:00Z", train_end: "2025-05-31T23:59:59Z", calibration_start: "2025-06-01T02:00:00Z", calibration_end: "2025-07-17T00:55:00Z", scoring_start: "2025-07-17T02:55:00Z", scoring_end: "2025-08-31T23:59:59Z"}
+    - {id: 3, train_start: "2024-07-11T15:20:00Z", train_end: "2025-08-31T23:59:59Z", calibration_start: "2025-09-01T02:00:00Z", calibration_end: "2025-10-16T12:55:00Z", scoring_start: "2025-10-16T14:55:00Z", scoring_end: "2025-11-30T23:59:59Z"}
+    - {id: 4, train_start: "2024-07-11T15:20:00Z", train_end: "2025-11-30T23:59:59Z", calibration_start: "2025-12-01T02:00:00Z", calibration_end: "2026-01-15T00:55:00Z", scoring_start: "2026-01-15T02:55:00Z", scoring_end: "2026-02-28T23:59:59Z"}
+
+training:
+  seed: 20260802
+  classifier:
+    max_iter: 180
+    learning_rate: 0.06
+    max_leaf_nodes: 31
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+    early_stopping: false
+  regressor:
+    max_iter: 180
+    learning_rate: 0.06
+    max_leaf_nodes: 31
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+    early_stopping: false
+
+evaluation:
+  opportunity_average_precision_must_exceed_prevalence: true
+  maximum_opportunity_ece: 0.08
+  q90_coverage_minimum: 0.87
+  q90_coverage_maximum: 0.93
+  q90_pinball_must_beat_constant_baseline: true
+  selected_mean_net_expectancy_must_be_positive: true
+  selected_worst_fold_expectancy_must_be_positive: true
+  maximum_symbol_concentration: 0.30
+  ada_leave_one_symbol_out_diagnostic_required: true
+  all_symbols_required: true
+
+lockbox:
+  start: "2026-04-27T00:00:00Z"
+  access: FORBIDDEN
+
+promotion:
+  automatic_training: false
+  automatic_live_activation: false
+  shadow_evidence_required: true
+  owner_authorization_required: true
+  current_live_eligible: false
+
+outputs:
+  validation_report: reports/experiments/aegis_hybrid_directional_committee_v1_validation.json
+  artifact: config/bundles/aegis-hybrid-directional-committee-v1.json
+  readiness: config/bundles/aegis-hybrid-directional-committee-v1-readiness.json
