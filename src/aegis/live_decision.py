@@ -348,6 +348,11 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
         if isinstance(v2, Mapping)
         else {}
     )
+    hybrid_directional = (
+        v2.get("hybrid_directional_shadow", {})
+        if isinstance(v2, Mapping)
+        else {}
+    )
     selected = bool(v2["selected"]) if v2_live else bool(result["selected"])
     side_value = candidate["side"]
     side = str(getattr(side_value, "value", side_value))
@@ -464,6 +469,11 @@ def compatibility_response(batch: Mapping[str, Any], symbol: str, trace_id: str)
             "entry_intelligence_shadow": (
                 dict(entry_intelligence)
                 if isinstance(entry_intelligence, Mapping)
+                else {}
+            ),
+            "hybrid_directional_shadow": (
+                dict(hybrid_directional)
+                if isinstance(hybrid_directional, Mapping)
                 else {}
             ),
             "entry_quality_v2": (

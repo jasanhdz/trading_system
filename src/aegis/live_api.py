@@ -34,6 +34,7 @@ def build_service() -> CurrentBrainDecisionService:
         root / "config/committee_v21_shadow.yaml",
         root / "config/short_probability_shadow.yaml",
         root / "config/entry_intelligence_shadow.yaml",
+        root / "config/hybrid_directional_shadow.yaml",
         repo_root=root,
     )
     service = CurrentBrainDecisionService(

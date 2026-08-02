@@ -37,6 +37,10 @@ from .entry_intelligence_shadow import (
     EntryIntelligenceShadowRuntime,
     build_entry_intelligence_shadow_observer,
 )
+from .hybrid_directional_shadow import (
+    HybridDirectionalShadowRuntime,
+    build_hybrid_directional_shadow_observer,
+)
 from .regime_v2 import (
     DirectionRegime,
     FactorizedRegimeAnalyzer,
@@ -439,6 +443,7 @@ class CompositeResearchObserver:
             | None
         ) = None,
         entry_intelligence: EntryIntelligenceShadowRuntime | None = None,
+        hybrid_directional: HybridDirectionalShadowRuntime | None = None,
     ):
         self.primary = primary
         self.dual = dual
@@ -446,6 +451,7 @@ class CompositeResearchObserver:
         self.committee_v21 = committee_v21
         self.short_probability = short_probability
         self.entry_intelligence = entry_intelligence
+        self.hybrid_directional = hybrid_directional
 
     @property
     def mode(self) -> EntryQualityV2Mode:
@@ -481,6 +487,11 @@ class CompositeResearchObserver:
             if self.entry_intelligence is not None
             else {}
         )
+        hybrid_directional = (
+            self.hybrid_directional.observe_batch(batch)
+            if self.hybrid_directional is not None
+            else {}
+        )
         return {
             symbol: {
                 **dict(primary.get(symbol, {})),
@@ -489,6 +500,9 @@ class CompositeResearchObserver:
                 "committee_v21_shadow": dict(committee_v21.get(symbol, {})),
                 "short_probability_shadow": dict(short_probability.get(symbol, {})),
                 "entry_intelligence_shadow": dict(entry_intelligence.get(symbol, {})),
+                "hybrid_directional_shadow": dict(
+                    hybrid_directional.get(symbol, {})
+                ),
             }
             for symbol in CANONICAL_SYMBOLS
         }
@@ -506,6 +520,10 @@ class CompositeResearchObserver:
             health["short_probability_shadow"] = dict(self.short_probability.health())
         if self.entry_intelligence is not None:
             health["entry_intelligence_shadow"] = dict(self.entry_intelligence.health())
+        if self.hybrid_directional is not None:
+            health["hybrid_directional_shadow"] = dict(
+                self.hybrid_directional.health()
+            )
         return health
 
 
@@ -516,6 +534,7 @@ def build_composite_research_observer(
     committee_v21_config_path: Path | None = None,
     short_probability_config_path: Path | None = None,
     entry_intelligence_config_path: Path | None = None,
+    hybrid_directional_config_path: Path | None = None,
     *,
     repo_root: Path,
 ) -> BatchObserver:
@@ -565,6 +584,14 @@ def build_composite_research_observer(
         if entry_intelligence_config_path is not None
         else None
     )
+    hybrid_directional = (
+        build_hybrid_directional_shadow_observer(
+            hybrid_directional_config_path,
+            repo_root=repo_root,
+        )
+        if hybrid_directional_config_path is not None
+        else None
+    )
     return CompositeResearchObserver(
         primary,
         dual,
@@ -572,4 +599,5 @@ def build_composite_research_observer(
         committee_v21,
         short_probability,
         entry_intelligence,
+        hybrid_directional,
     )
