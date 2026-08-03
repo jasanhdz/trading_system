@@ -160,7 +160,8 @@ def hybrid_selector(tmp_path: Path) -> HybridLiveExperimentSelector:
         maximum_selected_per_symbol=1,
         confirmation_policy=DirectionalConfirmationPolicy(
             round_trip_cost_fraction=0.001,
-            minimum_opportunity_probability=0.44,
+            minimum_opportunity_probability_long=0.44,
+            minimum_opportunity_probability_short=0.39,
             maximum_danger_probability=0.63,
             minimum_net_return_fraction=-0.0015,
             minimum_opportunity_percentile=0.60,
@@ -224,6 +225,8 @@ def test_hybrid_live_config_freezes_multi_symbol_quality_selection() -> None:
     )
     assert config.maximum_selected_per_cycle == len(CANONICAL_SYMBOLS)
     assert config.maximum_selected_per_symbol == 1
+    assert config.confirmation_policy.minimum_opportunity_probability_long == 0.44
+    assert config.confirmation_policy.minimum_opportunity_probability_short == 0.39
     assert config.confirmation_policy.minimum_confirmation_components == 3
 
 
@@ -442,6 +445,49 @@ def test_hybrid_live_abstains_when_best_rank_lacks_calibrated_quality(
     assert (
         "OPPORTUNITY_PROBABILITY_BELOW_CALIBRATED_MINIMUM" in assessment["reason_codes"]
     )
+
+
+def test_hybrid_live_uses_lower_opportunity_minimum_only_for_short(
+    tmp_path: Path, canonical_batch
+) -> None:
+    selector = hybrid_selector(tmp_path)
+    batch = {
+        **copy.deepcopy(canonical_batch),
+        "decision_cycle_id": "hybrid-directional-opportunity-minimum",
+        "market_timestamp": "2026-08-02T20:20:00Z",
+        "_entry_quality_v2": hybrid_overlay(
+            selected_symbol="ADAUSDT", selected_side="LONG"
+        ),
+    }
+    long_prediction = batch["_entry_quality_v2"]["ADAUSDT"][
+        "hybrid_directional_shadow"
+    ]["predictions"]["LONG"]
+    short_prediction = batch["_entry_quality_v2"]["BTCUSDT"][
+        "hybrid_directional_shadow"
+    ]["predictions"]["SHORT"]
+    for prediction in (long_prediction, short_prediction):
+        prediction.update(
+            {
+                "opportunity_probability": 0.42,
+                "danger_probability": 0.2,
+                "mae_q90": 0.004,
+                "mfe_q50": 0.018,
+                "net_return_mean": 0.008,
+                "shadow_rank_score": 0.9,
+            }
+        )
+    confirm_direction(batch, "ADAUSDT", "LONG")
+    confirm_direction(batch, "BTCUSDT", "SHORT")
+
+    live = selector.apply(batch)
+
+    assert live["selected_symbols"] == ["BTCUSDT"]
+    long_confirmation = live["by_symbol"]["ADAUSDT"]["confirmation"]["LONG"]
+    short_confirmation = live["by_symbol"]["BTCUSDT"]["confirmation"]["SHORT"]
+    assert long_confirmation["minimum_opportunity_probability"] == 0.44
+    assert short_confirmation["minimum_opportunity_probability"] == 0.39
+    assert long_confirmation["state"] == "ABSTAIN_WEAK_QUALITY"
+    assert short_confirmation["state"] == "CONFIRMED"
 
 
 @pytest.mark.anyio

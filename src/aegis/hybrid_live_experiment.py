@@ -28,7 +28,7 @@ AUTHORITY = "OWNER_AUTHORIZED_HYBRID_DIRECTIONAL_MULTI_SYMBOL_5M_QUALITY_SELECTI
 MODEL_IDENTIFIER = "aegis-hybrid-directional-committee-v1"
 MODEL_SHA256 = "f52dcaa12fe94b6cc9023c25cf95ea2d6fc16296c9b65c2c93d00e13e66ba0e8"
 CONFIGURATION_SHA256 = (
-    "e09743bceda015b12e0fe6400181f297fca7b62d4d3c4169931edbf150e6659c"
+    "26507443adf07dfc5a90d48a1c5f472f989a26cfe929740bd9e2009c39aaa3a9"
 )
 DECISION_SCHEMA = "aegis-hybrid-directional-live-evidence-v2"
 
@@ -92,14 +92,11 @@ def load_hybrid_live_experiment_config(
         or selection.get("cadence") != "EVERY_CLOSED_5M_BAR"
         or selection.get("anchor_rule") != "EVERY_NEW_COORDINATED_CLOSED_BAR"
         or selection.get("candidate_population") != "ALL_11_SYMBOLS_X_LONG_SHORT"
-        or selection.get("cross_side_arbitration")
-        != "QUALITY_CONFIRMED_PER_SYMBOL"
-        or int(selection.get("maximum_selected_per_cycle", 0))
-        != len(CANONICAL_SYMBOLS)
+        or selection.get("cross_side_arbitration") != "QUALITY_CONFIRMED_PER_SYMBOL"
+        or int(selection.get("maximum_selected_per_cycle", 0)) != len(CANONICAL_SYMBOLS)
         or int(selection.get("maximum_selected_per_symbol", 0)) != 1
         or selection.get("minimum_score") != "REPLACED_BY_QUALITY_POLICY"
-        or selection.get("idempotency_identity")
-        != "DECISION_CYCLE_X_SYMBOL_X_SIDE"
+        or selection.get("idempotency_identity") != "DECISION_CYCLE_X_SYMBOL_X_SIDE"
         or int(selection.get("fabricated_votes", -1)) != 0
         or evidence.get("record_all_candidates") is not True
         or evidence.get("record_non_selected_candidates") is not True
@@ -109,8 +106,7 @@ def load_hybrid_live_experiment_config(
         or execution.get("typescript_leverage_unchanged") is not True
         or execution.get("typescript_brackets_unchanged") is not True
         or int(execution.get("python_exchange_mutations", -1)) != 0
-        or quality.get("semantics")
-        != "CROSS_SECTIONAL_CALIBRATED_WITH_NET_TOLERANCE"
+        or quality.get("semantics") != "CROSS_SECTIONAL_CALIBRATED_WITH_NET_TOLERANCE"
         or execution.get("selection_authority")
         != "HYBRID_DIRECTIONAL_RELATIVE_QUALITY_AND_CONFIRMATION"
         or validation.get("replay_conclusion")
@@ -125,15 +121,14 @@ def load_hybrid_live_experiment_config(
     try:
         policy = DirectionalConfirmationPolicy(
             round_trip_cost_fraction=0.001,
-            minimum_opportunity_probability=float(
-                quality["minimum_opportunity_probability"]
+            minimum_opportunity_probability_long=float(
+                quality["minimum_opportunity_probability_long"]
             ),
-            maximum_danger_probability=float(
-                quality["maximum_danger_probability"]
+            minimum_opportunity_probability_short=float(
+                quality["minimum_opportunity_probability_short"]
             ),
-            minimum_net_return_fraction=float(
-                quality["minimum_net_return_fraction"]
-            ),
+            maximum_danger_probability=float(quality["maximum_danger_probability"]),
+            minimum_net_return_fraction=float(quality["minimum_net_return_fraction"]),
             minimum_opportunity_percentile=float(
                 quality["minimum_opportunity_percentile"]
             ),
@@ -265,8 +260,7 @@ class HybridLiveExperimentSelector:
         selected_by_symbol: dict[str, dict[str, Any]] = {}
         for candidate in ranking:
             if (
-                candidate["confirmation"]["state"]
-                == ConfirmationState.CONFIRMED.value
+                candidate["confirmation"]["state"] == ConfirmationState.CONFIRMED.value
                 and candidate["symbol"] not in selected_by_symbol
             ):
                 selected_by_symbol[str(candidate["symbol"])] = candidate
@@ -327,8 +321,7 @@ class HybridLiveExperimentSelector:
                 },
                 "ranks": {row["side"]: row["rank"] for row in symbol_rows},
                 "confirmation": {
-                    row["side"]: dict(row["confirmation"])
-                    for row in symbol_rows
+                    row["side"]: dict(row["confirmation"]) for row in symbol_rows
                 },
                 "fabricated_votes": 0,
                 "exchange_authority": True,
@@ -366,6 +359,12 @@ class HybridLiveExperimentSelector:
             "model_identifier": MODEL_IDENTIFIER,
             "model_sha256": MODEL_SHA256,
             "configuration_sha256": CONFIGURATION_SHA256,
+            "minimum_opportunity_probability_long": (
+                self.config.confirmation_policy.minimum_opportunity_probability_long
+            ),
+            "minimum_opportunity_probability_short": (
+                self.config.confirmation_policy.minimum_opportunity_probability_short
+            ),
             "decision_records": len(self._journal.rows),
             "fabricated_votes": 0,
             "python_exchange_mutations": 0,

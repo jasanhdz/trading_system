@@ -41,7 +41,8 @@ selection:
 
 quality:
   semantics: CROSS_SECTIONAL_CALIBRATED_WITH_NET_TOLERANCE
-  minimum_opportunity_probability: 0.44
+  minimum_opportunity_probability_long: 0.44
+  minimum_opportunity_probability_short: 0.39
   maximum_danger_probability: 0.63
   minimum_net_return_fraction: -0.0015
   minimum_opportunity_percentile: 0.60

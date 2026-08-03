@@ -41,7 +41,8 @@ class ConfirmationState(str, Enum):
 @dataclass(frozen=True)
 class DirectionalConfirmationPolicy:
     round_trip_cost_fraction: float
-    minimum_opportunity_probability: float
+    minimum_opportunity_probability_long: float
+    minimum_opportunity_probability_short: float
     maximum_danger_probability: float
     minimum_net_return_fraction: float
     minimum_opportunity_percentile: float
@@ -55,7 +56,8 @@ class DirectionalConfirmationPolicy:
     def __post_init__(self) -> None:
         numeric = (
             self.round_trip_cost_fraction,
-            self.minimum_opportunity_probability,
+            self.minimum_opportunity_probability_long,
+            self.minimum_opportunity_probability_short,
             self.maximum_danger_probability,
             self.minimum_net_return_fraction,
             self.minimum_opportunity_percentile,
@@ -68,7 +70,8 @@ class DirectionalConfirmationPolicy:
         if (
             not all(math.isfinite(value) for value in numeric)
             or not 0.0 <= self.round_trip_cost_fraction < 1.0
-            or not 0.0 <= self.minimum_opportunity_probability <= 1.0
+            or not 0.0 <= self.minimum_opportunity_probability_long <= 1.0
+            or not 0.0 <= self.minimum_opportunity_probability_short <= 1.0
             or not 0.0 <= self.maximum_danger_probability <= 1.0
             or not 0.0 <= self.minimum_close_location <= 1.0
             or not all(
@@ -84,6 +87,13 @@ class DirectionalConfirmationPolicy:
         ):
             raise ValueError("directional confirmation policy is invalid")
 
+    def minimum_opportunity_probability(self, side: str) -> float:
+        if side == "LONG":
+            return self.minimum_opportunity_probability_long
+        if side == "SHORT":
+            return self.minimum_opportunity_probability_short
+        raise ValueError("directional confirmation side is invalid")
+
 
 def directional_confirmation_features(
     features: Mapping[str, Any], side: str
@@ -93,7 +103,9 @@ def directional_confirmation_features(
     try:
         values = {name: float(features[name]) for name in FEATURE_NAMES}
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("directional confirmation feature contract is invalid") from exc
+        raise ValueError(
+            "directional confirmation feature contract is invalid"
+        ) from exc
     if not all(math.isfinite(value) for value in values.values()):
         raise ValueError("directional confirmation features are non-finite")
     sign = 1.0 if side == "LONG" else -1.0
@@ -112,9 +124,7 @@ def directional_confirmation_features(
         else values["upper_wick_fraction"]
     )
     trend_stack = (
-        values["trend_stack_long"]
-        if side == "LONG"
-        else values["trend_stack_short"]
+        values["trend_stack_long"] if side == "LONG" else values["trend_stack_short"]
     )
     pullback = (
         max(0.0, values["distance_to_rolling_high_12"])
@@ -158,6 +168,7 @@ def assess_directional_confirmation(
     policy: DirectionalConfirmationPolicy,
 ) -> Mapping[str, Any]:
     try:
+        side = str(prediction["side"])
         opportunity = float(prediction["opportunity_probability"])
         danger = float(prediction["danger_probability"])
         mae_q90 = float(prediction["mae_q90"])
@@ -171,8 +182,9 @@ def assess_directional_confirmation(
     ):
         raise ValueError("directional prediction is non-finite")
 
+    minimum_opportunity = policy.minimum_opportunity_probability(side)
     quality_reasons = []
-    if opportunity < policy.minimum_opportunity_probability:
+    if opportunity < minimum_opportunity:
         quality_reasons.append("OPPORTUNITY_PROBABILITY_BELOW_CALIBRATED_MINIMUM")
     if danger > policy.maximum_danger_probability:
         quality_reasons.append("DANGER_PROBABILITY_ABOVE_CALIBRATED_MAXIMUM")
@@ -227,6 +239,7 @@ def assess_directional_confirmation(
         "relative_quality": dict(relative_quality),
         "net_return_mean": net_return,
         "opportunity_probability": opportunity,
+        "minimum_opportunity_probability": minimum_opportunity,
         "danger_probability": danger,
         "mae_q90": mae_q90,
         "mfe_q50": mfe_q50,
@@ -242,7 +255,9 @@ def directional_relative_quality(
     if not candidates:
         raise ValueError("directional candidate population is empty")
 
-    def percentile(value: float, population: list[float], *, lower_is_better: bool = False) -> float:
+    def percentile(
+        value: float, population: list[float], *, lower_is_better: bool = False
+    ) -> float:
         if len(population) == 1:
             return 1.0
         better = (
@@ -258,11 +273,7 @@ def directional_relative_quality(
     net_return = [float(item["net_return_mean"]) for item in candidates]
     path_efficiency = [
         float(item["mfe_q50"])
-        / (
-            float(item["mfe_q50"])
-            + float(item["mae_q90"])
-            + 0.001
-        )
+        / (float(item["mfe_q50"]) + float(item["mae_q90"]) + 0.001)
         for item in candidates
     ]
     populations = (*opportunity, *danger, *net_return, *path_efficiency)
