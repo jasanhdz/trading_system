@@ -53,6 +53,7 @@ CANONICAL_DECISION_CONTRACT = "aegis-current-brain-live-decision-v1"
 CANONICAL_LIVE_AUTHORITY = "OWNER_AUTHORIZED_CURRENT_PYTHON_COMMITTEE_LIVE_INTEGRATION"
 PUBLIC_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 INTERVAL_MS = 300_000
+KLINE_FINALIZATION_DELAY_MS = 2_000
 
 
 class CurrentBrainError(RuntimeError):
@@ -92,6 +93,7 @@ class PublicKlineSnapshotProvider:
         now: Callable[[], datetime] | None = None,
         timeout_seconds: float = 10.0,
         attempts: int = 3,
+        finalization_delay_ms: int = KLINE_FINALIZATION_DELAY_MS,
     ) -> None:
         parsed = urlparse(PUBLIC_KLINES_URL)
         if (
@@ -104,6 +106,9 @@ class PublicKlineSnapshotProvider:
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._timeout_seconds = timeout_seconds
         self._attempts = attempts
+        if finalization_delay_ms < 0 or finalization_delay_ms > 30_000:
+            raise CurrentBrainError("AEGIS_CURRENT_BRAIN_FINALIZATION_DELAY_INVALID")
+        self._finalization_delay_ms = finalization_delay_ms
 
     def _candles(self, symbol: str, limit: int = 96) -> tuple[Candle, ...]:
         if symbol not in CANONICAL_SYMBOLS:
@@ -136,7 +141,7 @@ class PublicKlineSnapshotProvider:
                         )
                     open_ms = int(row[0])
                     close_ms = open_ms + INTERVAL_MS
-                    if close_ms > now_ms:
+                    if close_ms + self._finalization_delay_ms > now_ms:
                         continue
                     values = tuple(float(row[index]) for index in range(1, 6))
                     if not all(math.isfinite(value) and value >= 0 for value in values):
@@ -299,8 +304,13 @@ class CurrentBrainEngine:
         self._validator.validate(snapshot, validation_now)
         features = self._features.transform(snapshot)
         cycle_material = {
-            "closed_at": snapshot.closed_at,
-            "feature_values": tuple(row.raw_values for row in features.rows),
+            "closed_at": snapshot.closed_at.isoformat().replace("+00:00", "Z"),
+            "timeframe": snapshot.timeframe,
+            "symbol_set_hash": snapshot.symbol_set_hash,
+            "model_sha256": MODEL_ARTIFACT_SHA256,
+            "bundle_sha256": MODEL_BUNDLE_SHA256,
+            "configuration_sha256": CONFIGURATION_SHA256,
+            "feature_schema": FEATURE_SCHEMA,
         }
         cycle_hash = self._hashing.digest_value(cycle_material)
         pipeline = evaluate_authoritative_feature_batch(
@@ -747,7 +757,15 @@ class CurrentBrainDecisionService:
         with self._lock:
             if self._cache is not None and now - self._cache[0] <= self.cache_seconds:
                 return self._cache[1]
-            batch = self.engine.evaluate(self.provider.snapshot())
+            snapshot = self.provider.snapshot()
+            closed_at = snapshot.closed_at.isoformat().replace("+00:00", "Z")
+            if (
+                self._cache is not None
+                and self._cache[1].get("market_timestamp") == closed_at
+            ):
+                self._cache = (now, self._cache[1])
+                return self._cache[1]
+            batch = self.engine.evaluate(snapshot)
             if self.research_observer is not None:
                 try:
                     overlay = self.research_observer.observe_batch(batch)

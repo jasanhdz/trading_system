@@ -40,6 +40,7 @@ from aegis.live_decision import (
     CurrentBrainDecisionService,
     CurrentBrainEngine,
     CurrentBrainError,
+    PublicKlineSnapshotProvider,
     compatibility_response,
 )
 
@@ -295,6 +296,85 @@ def test_hybrid_live_evaluates_and_selects_on_every_closed_five_minute_bar(
     assert selector.health()["decision_records"] == 22
 
 
+def test_cycle_identity_is_stable_when_same_closed_bar_is_revised(real_engine) -> None:
+    first = real_engine.evaluate(synthetic_snapshot(variant=1))
+    revised = real_engine.evaluate(synthetic_snapshot(variant=2))
+
+    assert first["market_timestamp"] == revised["market_timestamp"]
+    assert first["decision_cycle_id"] == revised["decision_cycle_id"]
+    assert (
+        first["results"]["ETHUSDT"]["feature_vector_hash"]
+        != revised["results"]["ETHUSDT"]["feature_vector_hash"]
+    )
+
+
+def test_public_provider_waits_for_kline_finalization_delay() -> None:
+    final_close = datetime(2026, 8, 3, 3, 0, tzinfo=timezone.utc)
+    first_open = final_close - timedelta(minutes=5 * 96)
+    rows = []
+    for index in range(96):
+        open_time = first_open + timedelta(minutes=5 * index)
+        rows.append(
+            [
+                int(open_time.timestamp() * 1000),
+                "100",
+                "101",
+                "99",
+                "100.5",
+                "1000",
+            ]
+        )
+
+    class Response:
+        is_redirect = False
+        is_permanent_redirect = False
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return rows
+
+    class Session:
+        def get(self, *args, **kwargs):
+            return Response()
+
+    provider = PublicKlineSnapshotProvider(
+        session=Session(),
+        now=lambda: final_close + timedelta(seconds=1),
+    )
+    candles = provider._candles("ETHUSDT")
+
+    assert candles[-1].close_time == final_close - timedelta(minutes=5)
+
+
+def test_service_never_redecides_an_already_processed_closed_bar(real_engine) -> None:
+    class RevisingProvider:
+        def __init__(self) -> None:
+            self.snapshots = [
+                synthetic_snapshot(variant=3),
+                synthetic_snapshot(variant=4),
+            ]
+            self.calls = 0
+
+        def snapshot(self):
+            snapshot = self.snapshots[min(self.calls, len(self.snapshots) - 1)]
+            self.calls += 1
+            return snapshot
+
+    provider = RevisingProvider()
+    service = CurrentBrainDecisionService(real_engine, provider, cache_seconds=-1)
+    first = service.predict("ETHUSDT", "first")
+    revised = service.predict("ETHUSDT", "revised")
+
+    assert provider.calls == 2
+    assert first["features"]["vector_hash"] == revised["features"]["vector_hash"]
+    assert (
+        first["metadata"]["decision_cycle_id"]
+        == revised["metadata"]["decision_cycle_id"]
+    )
+
+
 def test_hybrid_live_selects_multiple_quality_symbols_in_same_cycle(
     tmp_path: Path, canonical_batch
 ) -> None:
@@ -341,7 +421,9 @@ def test_hybrid_live_abstains_when_best_rank_lacks_calibrated_quality(
             selected_symbol="XRPUSDT", selected_side="LONG"
         ),
     }
-    weak = batch["_entry_quality_v2"]["XRPUSDT"]["hybrid_directional_shadow"]["predictions"]["LONG"]
+    weak = batch["_entry_quality_v2"]["XRPUSDT"]["hybrid_directional_shadow"][
+        "predictions"
+    ]["LONG"]
     weak.update(
         {
             "opportunity_probability": 0.4218,
@@ -358,8 +440,7 @@ def test_hybrid_live_abstains_when_best_rank_lacks_calibrated_quality(
     assessment = live["by_symbol"]["XRPUSDT"]["confirmation"]["LONG"]
     assert assessment["state"] == "ABSTAIN_WEAK_QUALITY"
     assert (
-        "OPPORTUNITY_PROBABILITY_BELOW_CALIBRATED_MINIMUM"
-        in assessment["reason_codes"]
+        "OPPORTUNITY_PROBABILITY_BELOW_CALIBRATED_MINIMUM" in assessment["reason_codes"]
     )
 
 
