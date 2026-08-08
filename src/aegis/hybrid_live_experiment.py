@@ -20,6 +20,7 @@ from .directional_confirmation import (
 )
 from .features import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
 from .research.shadow_runtime import _AppendOnlyJournal, _mapping
+from .research.seven_point_entry_shadow import assess_seven_point_entry_shadow
 from .utils import Sha256HashProvider, sha256_file
 
 CONFIG_SCHEMA = "aegis-hybrid-directional-live-experiment-v2"
@@ -245,6 +246,33 @@ class HybridLiveExperimentSelector:
                 candidate["confirmation_features"],
                 quality_values,
                 self.config.confirmation_policy,
+            )
+        confirmed = [
+            item
+            for item in candidates
+            if item["confirmation"]["state"] == ConfirmationState.CONFIRMED.value
+        ]
+        confirmed_by_side = {
+            side: sum(item["side"] == side for item in confirmed)
+            for side in ("LONG", "SHORT")
+        }
+        for candidate in candidates:
+            symbol = str(candidate["symbol"])
+            symbol_result = _mapping(results[symbol], symbol)
+            layer = _mapping(symbol_result.get("layer", {}), "layer")
+            intelligence = _mapping(
+                overlay[symbol].get("entry_intelligence_shadow", {}),
+                "entry_intelligence_shadow",
+            )
+            candidate["seven_point_entry_shadow"] = assess_seven_point_entry_shadow(
+                side=str(candidate["side"]),
+                prediction=candidate,
+                confirmation=candidate["confirmation"],
+                confirmation_features=candidate["confirmation_features"],
+                current_layer=layer,
+                entry_intelligence=intelligence,
+                confirmed_same_side=confirmed_by_side[str(candidate["side"])],
+                confirmed_total=len(confirmed),
             )
         ranking = sorted(
             candidates,
