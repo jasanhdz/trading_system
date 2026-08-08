@@ -23,7 +23,9 @@ module.exports = {
             cwd: "/home/jasan/Develop/trading_system",
             instances: 1,
             autorestart: true,
-            max_memory_restart: "4096M",
+            // The complete observational committee peaks near 7.4 GiB at startup.
+            // Keep it loaded so the Live API and Shadow evidence remain identical.
+            max_memory_restart: "10240M",
             restart_delay: 10000,
             max_restarts: 10,
             watch: false,
