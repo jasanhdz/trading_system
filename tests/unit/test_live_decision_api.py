@@ -259,6 +259,12 @@ def test_hybrid_live_selects_real_long_and_short_without_fabricated_votes(
     selected = live["by_symbol"][selected_symbol]
     assert selected["fabricated_votes"] == 0
     assert selected["selected_prediction"]["opportunity_probability"] == 0.8
+    archetype_observation = selected["selected_prediction"][
+        "long_entry_archetype_v2_shadow"
+    ]
+    assert archetype_observation["mode"] == "SHADOW"
+    assert archetype_observation["selection_effect"] == "NONE"
+    assert archetype_observation["exchange_authority"] is False
 
     response = compatibility_response(
         {**batch, "_hybrid_directional_live": live}, selected_symbol, "trace"
@@ -275,6 +281,7 @@ def test_hybrid_live_selects_real_long_and_short_without_fabricated_votes(
     assert response["aegis"]["directional_evidence"]["fabricated_votes"] == 0
     assert "votes" not in response["aegis"]["turbo"]["raw"]
     assert selector.health()["decision_records"] == 22
+    assert selector.health()["long_entry_archetype_v2_shadow"]["records"] == 22
     selector.apply(batch)
     assert selector.health()["decision_records"] == 22
 

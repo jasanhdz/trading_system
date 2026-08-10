@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,18 @@ from .directional_confirmation import (
 )
 from .features import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
 from .research.shadow_runtime import _AppendOnlyJournal, _mapping
+from .research.entry_path_meta_model_shadow import (
+    EntryPathMetaModelShadow,
+    EntryPathMetaModelShadowError,
+)
+from .research.entry_methodology_v2_shadow import (
+    assess_entry_methodology_v2_shadow,
+)
+from .research.long_entry_specialist_model_shadow import (
+    LongEntrySpecialistModelShadow,
+    LongEntrySpecialistModelShadowError,
+)
+from .research.long_entry_specialists_shadow import classify_long_archetype_v2
 from .research.seven_point_entry_shadow import assess_seven_point_entry_shadow
 from .utils import Sha256HashProvider, sha256_file
 
@@ -171,6 +184,41 @@ class HybridLiveExperimentSelector:
         self._processed_cycles = {
             str(row["decision_cycle_id"]) for row in self._journal.rows
         }
+        self._entry_methodology_state: dict[tuple[str, str], Mapping[str, Any]] = {}
+        self._entry_path_meta_model: EntryPathMetaModelShadow | None = None
+        self._entry_path_meta_model_status = "ARTIFACT_NOT_PRESENT"
+        self._long_specialist_model: LongEntrySpecialistModelShadow | None = None
+        self._long_specialist_model_status = "ARTIFACT_NOT_PRESENT"
+        meta_model_path = (
+            config.decision_journal.parents[1]
+            / "entry_methodology_v2_shadow"
+            / "meta_model_validation.json"
+        )
+        if meta_model_path.is_file():
+            try:
+                self._entry_path_meta_model = EntryPathMetaModelShadow(meta_model_path)
+                self._entry_path_meta_model_status = "LOADED_SHADOW_ONLY"
+            except EntryPathMetaModelShadowError:
+                self._entry_path_meta_model_status = "ARTIFACT_INVALID_IGNORED"
+        long_specialist_path = (
+            config.decision_journal.parents[1]
+            / "long_entry_specialists_shadow"
+            / "validation.json"
+        )
+        if long_specialist_path.is_file():
+            try:
+                self._long_specialist_model = LongEntrySpecialistModelShadow(
+                    long_specialist_path
+                )
+                self._long_specialist_model_status = "LOADED_SHADOW_ONLY"
+            except LongEntrySpecialistModelShadowError:
+                self._long_specialist_model_status = "ARTIFACT_INVALID_IGNORED"
+        for row in self._journal.rows:
+            assessment = row.get("entry_methodology_v2_shadow")
+            if isinstance(assessment, Mapping):
+                self._entry_methodology_state[
+                    (str(row["symbol"]), str(row["side"]))
+                ] = assessment
 
     @staticmethod
     def _timestamp(value: object) -> datetime:
@@ -222,10 +270,12 @@ class HybridLiveExperimentSelector:
         if set(results) != set(CANONICAL_SYMBOLS):
             raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_SYMBOLS_INVALID")
         candidates: list[dict[str, Any]] = []
+        research_features_by_symbol: dict[str, Mapping[str, Any]] = {}
         for symbol in CANONICAL_SYMBOLS:
             research_features = _mapping(
                 results[symbol].get("research_features", {}), "research_features"
             )
+            research_features_by_symbol[symbol] = research_features
             for side in ("LONG", "SHORT"):
                 prediction = self._prediction(overlay, symbol, side)
                 confirmation_features = directional_confirmation_features(
@@ -274,6 +324,131 @@ class HybridLiveExperimentSelector:
                 confirmed_same_side=confirmed_by_side[str(candidate["side"])],
                 confirmed_total=len(confirmed),
             )
+            candidate["entry_methodology_v2_shadow"] = (
+                assess_entry_methodology_v2_shadow(
+                    market_timestamp=str(batch["market_timestamp"]),
+                    side=str(candidate["side"]),
+                    prediction=candidate,
+                    confirmation=candidate["confirmation"],
+                    confirmation_features=candidate["confirmation_features"],
+                    current_layer=layer,
+                    entry_intelligence=intelligence,
+                    confirmed_same_side=confirmed_by_side[str(candidate["side"])],
+                    confirmed_total=len(confirmed),
+                    previous=self._entry_methodology_state.get(
+                        (symbol, str(candidate["side"]))
+                    ),
+                )
+            )
+            if self._entry_path_meta_model is None:
+                candidate["entry_path_meta_model_shadow"] = {
+                    "schema_id": "aegis-entry-path-meta-model-shadow-score-v1",
+                    "mode": "SHADOW",
+                    "side": str(candidate["side"]),
+                    "status": self._entry_path_meta_model_status,
+                    "probability": None,
+                    "counterfactual_pass": False,
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            else:
+                try:
+                    candidate["entry_path_meta_model_shadow"] = (
+                        self._entry_path_meta_model.assess(
+                            side=str(candidate["side"]),
+                            prediction=candidate,
+                            confirmation=candidate["confirmation"],
+                            confirmation_features=candidate["confirmation_features"],
+                            entry_intelligence=intelligence,
+                        )
+                    )
+                except (EntryPathMetaModelShadowError, ValueError):
+                    candidate["entry_path_meta_model_shadow"] = {
+                        "schema_id": "aegis-entry-path-meta-model-shadow-score-v1",
+                        "mode": "SHADOW",
+                        "side": str(candidate["side"]),
+                        "status": "FEATURES_INCOMPLETE_IGNORED",
+                        "probability": None,
+                        "counterfactual_pass": False,
+                        "selection_effect": "NONE",
+                        "exchange_authority": False,
+                        "exchange_mutations": 0,
+                    }
+            if str(candidate["side"]) != "LONG":
+                candidate["long_entry_archetype_v2_shadow"] = {
+                    "schema_id": "aegis-long-entry-archetype-shadow-v2",
+                    "mode": "SHADOW",
+                    "archetype": None,
+                    "status": "NOT_APPLICABLE_TO_SHORT",
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            else:
+                try:
+                    candidate["long_entry_archetype_v2_shadow"] = {
+                        **classify_long_archetype_v2(
+                            research_features_by_symbol[symbol]
+                        ),
+                        "status": "OBSERVATION_ONLY",
+                    }
+                except ValueError:
+                    candidate["long_entry_archetype_v2_shadow"] = {
+                        "schema_id": "aegis-long-entry-archetype-shadow-v2",
+                        "mode": "SHADOW",
+                        "archetype": None,
+                        "status": "FEATURES_INCOMPLETE_IGNORED",
+                        "selection_effect": "NONE",
+                        "exchange_authority": False,
+                        "exchange_mutations": 0,
+                    }
+            if str(candidate["side"]) != "LONG":
+                candidate["long_entry_specialist_shadow"] = {
+                    "schema_id": "aegis-long-entry-specialist-shadow-score-v1",
+                    "mode": "SHADOW",
+                    "archetype": None,
+                    "status": "NOT_APPLICABLE_TO_SHORT",
+                    "success_probability": None,
+                    "danger_probability": None,
+                    "counterfactual_action": "NOT_APPLICABLE",
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            elif self._long_specialist_model is None:
+                candidate["long_entry_specialist_shadow"] = {
+                    "schema_id": "aegis-long-entry-specialist-shadow-score-v1",
+                    "mode": "SHADOW",
+                    "archetype": None,
+                    "status": self._long_specialist_model_status,
+                    "success_probability": None,
+                    "danger_probability": None,
+                    "counterfactual_action": "OBSERVE_ONLY",
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            else:
+                try:
+                    candidate["long_entry_specialist_shadow"] = (
+                        self._long_specialist_model.assess(
+                            research_features_by_symbol[symbol]
+                        )
+                    )
+                except (LongEntrySpecialistModelShadowError, ValueError):
+                    candidate["long_entry_specialist_shadow"] = {
+                        "schema_id": "aegis-long-entry-specialist-shadow-score-v1",
+                        "mode": "SHADOW",
+                        "archetype": None,
+                        "status": "FEATURES_INCOMPLETE_IGNORED",
+                        "success_probability": None,
+                        "danger_probability": None,
+                        "counterfactual_action": "OBSERVE_ONLY",
+                        "selection_effect": "NONE",
+                        "exchange_authority": False,
+                        "exchange_mutations": 0,
+                    }
         ranking = sorted(
             candidates,
             key=lambda item: (
@@ -320,6 +495,9 @@ class HybridLiveExperimentSelector:
         if cycle_id not in self._processed_cycles:
             for row in rows:
                 self._journal.append(row)
+                self._entry_methodology_state[
+                    (str(row["symbol"]), str(row["side"]))
+                ] = row["entry_methodology_v2_shadow"]
             self._processed_cycles.add(cycle_id)
         by_symbol: dict[str, Any] = {}
         for symbol in CANONICAL_SYMBOLS:
@@ -379,6 +557,26 @@ class HybridLiveExperimentSelector:
         }
 
     def health(self) -> Mapping[str, Any]:
+        methodology_rows = [
+            row["entry_methodology_v2_shadow"]
+            for row in self._journal.rows
+            if isinstance(row.get("entry_methodology_v2_shadow"), Mapping)
+        ]
+        meta_model_rows = [
+            row["entry_path_meta_model_shadow"]
+            for row in self._journal.rows
+            if isinstance(row.get("entry_path_meta_model_shadow"), Mapping)
+        ]
+        long_specialist_rows = [
+            row["long_entry_specialist_shadow"]
+            for row in self._journal.rows
+            if isinstance(row.get("long_entry_specialist_shadow"), Mapping)
+        ]
+        long_archetype_v2_rows = [
+            row["long_entry_archetype_v2_shadow"]
+            for row in self._journal.rows
+            if isinstance(row.get("long_entry_archetype_v2_shadow"), Mapping)
+        ]
         return {
             "status": "ACTIVE",
             "mode": "LIVE",
@@ -394,6 +592,78 @@ class HybridLiveExperimentSelector:
                 self.config.confirmation_policy.minimum_opportunity_probability_short
             ),
             "decision_records": len(self._journal.rows),
+            "entry_methodology_v2_shadow": {
+                "status": "ACTIVE",
+                "mode": "SHADOW",
+                "records": len(methodology_rows),
+                "tier_counts": {
+                    tier: sum(row.get("tier") == tier for row in methodology_rows)
+                    for tier in ("A", "B", "C")
+                },
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
+            "entry_path_meta_model_shadow": {
+                "mode": "SHADOW",
+                "status": self._entry_path_meta_model_status,
+                "artifact_content_hash": (
+                    self._entry_path_meta_model.content_hash
+                    if self._entry_path_meta_model is not None
+                    else None
+                ),
+                "side_status_counts": dict(
+                    sorted(
+                        Counter(
+                            str(row.get("status")) for row in meta_model_rows
+                        ).items()
+                    )
+                ),
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
+            "long_entry_specialist_shadow": {
+                "mode": "SHADOW",
+                "status": self._long_specialist_model_status,
+                "artifact_content_hash": (
+                    self._long_specialist_model.content_hash
+                    if self._long_specialist_model is not None
+                    else None
+                ),
+                "validation_pass": (
+                    self._long_specialist_model.validation_pass
+                    if self._long_specialist_model is not None
+                    else False
+                ),
+                "status_counts": dict(
+                    sorted(
+                        Counter(
+                            str(row.get("status")) for row in long_specialist_rows
+                        ).items()
+                    )
+                ),
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
+            "long_entry_archetype_v2_shadow": {
+                "mode": "SHADOW",
+                "status": "OBSERVATION_ONLY",
+                "records": len(long_archetype_v2_rows),
+                "archetype_counts": dict(
+                    sorted(
+                        Counter(
+                            str(row.get("archetype"))
+                            for row in long_archetype_v2_rows
+                            if row.get("archetype") is not None
+                        ).items()
+                    )
+                ),
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
             "fabricated_votes": 0,
             "python_exchange_mutations": 0,
         }
