@@ -1,0 +1,101 @@
+schema_version: aegis-long-entry-v21-shadow-preregistration-v1
+experiment_id: aegis-long-entry-v21-multitimeframe-utility-shadow-01
+mode: SHADOW
+side: LONG
+selection_effect: NONE
+automatic_live_promotion: false
+
+source:
+  base_database: data/binance_candles.db
+  public_delta: data/long_entry_v21_shadow/public_candles_delta.jsonl
+  database_open_mode: READ_ONLY
+  public_refresh_authenticated: false
+  timeframe: 5m
+  lookback_days: 540
+  symbols: [ETHUSDT, BTCUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, SUIUSDT, LTCUSDT]
+
+sampling:
+  history_bars: 576
+  horizon_bars: 24
+  stride_bars: 6
+  independent_test_stride_bars: 12
+  entry_rule: NEXT_BAR_OPEN
+  candidate_population: CAUSAL_LONG_ARCHETYPES_ONLY
+  archetypes: [TREND_PULLBACK, CONFIRMED_BREAKOUT, CONFIRMED_REVERSAL, SPECULATIVE_REBOUND]
+
+features:
+  base_schema: aegis-features-v2
+  base_feature_count: 83
+  model_base_features: 61
+  higher_timeframes: [15m, 1h]
+  higher_timeframe_history_bars: 48
+  future_fields_as_features: false
+
+atr_label:
+  atr_source: 5m_atr_12_at_signal
+  favorable_atr_multiple: 1.0
+  adverse_atr_multiple: 0.75
+  favorable_floor_fraction: 0.0025
+  adverse_floor_fraction: 0.0020
+  favorable_ceiling_fraction: 0.0150
+  adverse_ceiling_fraction: 0.0120
+  fast_success_bars: 12
+  round_trip_cost_fraction: 0.0010
+  same_bar_order: AMBIGUOUS_FAIL_CLOSED
+
+typescript_protection:
+  implementation: src/aegis/research/hybrid_ts_protection_replay.py
+  entry_rule: NEXT_BAR_OPEN
+  intrabar_paths: [OPEN_HIGH_LOW_CLOSE, OPEN_LOW_HIGH_CLOSE]
+  leverage: 15.0
+  hard_stop_roe: -0.40
+  take_profit_roe: 0.50
+  break_even_trigger_roe: 0.08
+  break_even_offset_fraction: 0.003
+  trailing_activation_roe: 0.15
+  trailing_callback_roe: 0.08
+  use_atr_trailing: true
+  atr_period: 14
+  atr_multiplier: 1.5
+  round_trip_cost_fraction: 0.0010
+  label_value: WORST_CASE_INTRABAR_PROTECTED_NET_RETURN
+
+utility:
+  target: PROTECTED_WORST_NET_MINUS_PATH_PENALTIES
+  mae_penalty_weight: 0.50
+  underwater_bar_penalty_fraction: 0.000025
+  catastrophic_mae_atr_multiple: 1.50
+  secondary_probability_target: ATR_TARGET_BEFORE_ATR_STOP
+
+regime_calibration:
+  dimensions: [direction, volatility, structure]
+  values:
+    direction: [BULLISH, NEUTRAL, BEARISH]
+    volatility: [LOW, NORMAL, HIGH]
+    structure: [TREND, RANGE, TRANSITION]
+  minimum_regime_calibration_rows: 100
+  sparse_group_fallback: ARCHETYPE_GLOBAL_CALIBRATION
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD
+  folds: 4
+  embargo_minutes: 120
+  threshold_source: CALIBRATION_ONLY
+  utility_threshold_quantiles: [0.70, 0.75, 0.80, 0.85, 0.90, 0.925, 0.95]
+  maximum_danger_quantiles: [0.40, 0.50, 0.60]
+  minimum_calibration_selections: 40
+  minimum_scoring_selections_per_fold: 20
+  minimum_positive_folds: 3
+  require_positive_worst_fold_protected_net: true
+  require_selected_mae_below_baseline: true
+  require_selected_underwater_below_baseline: true
+  maximum_p95_gap_hours: 48
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+
+deployment:
+  current_runtime: RESEARCH_ONLY
+  shadow_runtime_requires_validation_pass: true
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_mutations: 0

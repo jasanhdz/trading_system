@@ -1,0 +1,105 @@
+schema_version: aegis-long-entry-v22-shadow-preregistration-v1
+experiment_id: aegis-long-entry-v22-specialized-cross-sectional-shadow-01
+mode: SHADOW
+side: LONG
+selection_effect: NONE
+automatic_live_promotion: false
+
+source:
+  base_database: data/binance_candles.db
+  public_delta: data/long_entry_v21_shadow/public_candles_delta.jsonl
+  database_open_mode: READ_ONLY
+  timeframe: 5m
+  lookback_days: 540
+  symbols: [ETHUSDT, BTCUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, SUIUSDT, LTCUSDT]
+
+sampling:
+  history_bars: 576
+  horizon_bars: 24
+  stride_bars: 6
+  independent_test_stride_bars: 12
+  entry_rule: NEXT_BAR_OPEN
+  candidate_population: CAUSAL_LONG_ARCHETYPES_ONLY
+  archetypes: [TREND_PULLBACK, CONFIRMED_BREAKOUT, CONFIRMED_REVERSAL, SPECULATIVE_REBOUND]
+
+features:
+  inherited_schema: aegis-long-entry-v21-features-v1
+  inherited_count: 121
+  engineered_interactions:
+    - directional_volume_pressure
+    - volume_acceleration_pressure
+    - breakout_conviction
+    - pullback_reclaim_quality
+    - cross_market_long_support
+    - higher_timeframe_alignment
+    - falling_knife_risk
+    - volatility_structure_interaction
+  regime_one_hot: true
+  future_fields_as_features: false
+  availability_audit:
+    ohlcv_causal_interactions: INCLUDED
+    taker_buy_sell_history: EXCLUDED_INSUFFICIENT_540D_ALIGNED_HISTORY
+    order_book_history: EXCLUDED_INSUFFICIENT_540D_ALIGNED_HISTORY
+    open_interest_history: EXCLUDED_INSUFFICIENT_540D_ALIGNED_HISTORY
+    funding_history: EXCLUDED_INSUFFICIENT_540D_ALIGNED_HISTORY
+
+targets:
+  direction:
+    field: target_before_stop
+    meaning: ATR_FAVORABLE_BARRIER_BEFORE_ATR_ADVERSE_BARRIER
+  timing:
+    field: clean_fast_success
+    meaning: FAVORABLE_FIRST_WITHIN_12_BARS
+  path_risk:
+    field: catastrophic_path
+    meaning: MAE_AT_LEAST_1_5_SIGNAL_ATR
+  protected_evaluation:
+    field: protected_worst_net_return
+    meaning: WORST_TS_INTRABAR_REPLAY_AFTER_COSTS
+
+models:
+  architecture: THREE_SPECIALISTS_PER_ARCHETYPE
+  specialists: [DIRECTION, ENTRY_TIMING, PATH_RISK]
+  estimator: HISTOGRAM_GRADIENT_BOOSTING
+  probability_calibration: PLATT_ON_CALIBRATION_ONLY
+  committee_score: DIRECTION_PROBABILITY_TIMES_TIMING_PROBABILITY_TIMES_ONE_MINUS_PATH_RISK
+  unavailable_specialist_behavior: FAIL_CLOSED
+
+ranking:
+  method: CROSS_SECTIONAL_PER_TIMESTAMP
+  universe_size: 11
+  maximum_selected_per_timestamp_grid: [1, 2]
+  score_quantiles: [0.70, 0.75, 0.80, 0.85, 0.90, 0.925, 0.95]
+  maximum_risk_quantiles: [0.35, 0.45, 0.55, 0.65]
+  tie_breakers: [LOWER_PATH_RISK, HIGHER_TIMING_PROBABILITY, SYMBOL_ASCENDING]
+  absolute_frequency_floor: false
+
+regime_specialization:
+  model_partition: ARCHETYPE
+  calibration_partition: DIRECTION_AXIS
+  dimensions: [direction, volatility, structure]
+  minimum_partition_rows: 200
+  sparse_partition_fallback: ARCHETYPE_GLOBAL_CALIBRATION
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD
+  folds: 4
+  embargo_minutes: 120
+  threshold_source: CALIBRATION_ONLY
+  minimum_calibration_selections: 40
+  minimum_scoring_selections_per_fold: 20
+  minimum_positive_folds: 3
+  require_positive_protected_net: true
+  require_selected_mae_below_baseline: true
+  require_selected_underwater_below_baseline: true
+  maximum_p95_gap_hours: 48
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+  prohibit_post_test_threshold_relaxation: true
+
+deployment:
+  current_runtime: RESEARCH_ONLY
+  shadow_runtime_requires_validation_pass: true
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_mutations: 0

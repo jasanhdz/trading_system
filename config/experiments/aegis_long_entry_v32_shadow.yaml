@@ -1,0 +1,52 @@
+schema_version: aegis-long-entry-v32-shadow-preregistration-v1
+experiment_id: aegis-long-entry-v32-pooled-family-aware-shadow-01
+mode: SHADOW
+side: LONG
+selection_effect: NONE
+automatic_live_promotion: false
+
+base_preregistration:
+  path: config/experiments/aegis_long_entry_v31_shadow.yaml
+  sha256: 672731f7242cdde0f43d5ee50730b8840f9e769c91d70c96e43a4ec677e4fa5d
+  inherited_without_relaxation:
+    - source
+    - sampling
+    - opportunity_stage
+    - entry_timing_stage
+    - global_context_gate
+    - hard_negatives
+    - typescript_protection
+    - ranking
+    - family_retirement
+    - validation
+    - prospective_shadow
+
+structural_change:
+  reason: V31_PER_FAMILY_CALIBRATION_ROWS_INSUFFICIENT
+  opportunity_model: POOLED_FAMILY_AWARE
+  timing_model: POOLED_FAMILY_AWARE
+  falling_knife_model: POOLED_FAMILY_AWARE
+  path_risk_model: POOLED_FAMILY_AWARE
+  family_encoding: EXPLICIT_ONE_HOT
+  inherited_feature_count: 166
+  family_feature_count: 4
+  total_feature_count: 170
+  outcome_fields_as_features: false
+  thresholds_relaxed: false
+  context_relaxed: false
+  confirmation_relaxed: false
+  horizons_changed: false
+
+validation:
+  family_attribution_required: true
+  family_retirement_required: true
+  pooled_policy_may_rescue_failed_family: false
+  leave_one_symbol_out_required: true
+  post_test_threshold_relaxation: PROHIBITED
+
+deployment:
+  current_runtime: RESEARCH_ONLY
+  shadow_runtime_requires_validation_pass: true
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_mutations: 0
