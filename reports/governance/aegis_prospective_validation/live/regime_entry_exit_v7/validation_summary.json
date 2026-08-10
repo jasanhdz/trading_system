@@ -1,0 +1,1946 @@
+{
+  "current_protection_replay_mismatches": 0,
+  "dataset_manifest_sha256": "03489014d8c65f080a4ec608fc01b7722f2dcbea69b90240e24e94f97c8d12d3",
+  "dataset_sha256": "574d252de00ab428a59c9cc91052e81a72357455c1fcd40f990afa33be588e82",
+  "evidence_end": "2026-08-09T06:55:00+00:00",
+  "evidence_start": "2025-08-09T06:55:00+00:00",
+  "exchange_calls": 0,
+  "exchange_mutations": 0,
+  "experiment_id": "aegis-regime-entry-exit-v7-research-01",
+  "gate": {
+    "blockers": [
+      "HISTORICAL_VALIDATION_FAILED",
+      "LONG_VALIDATION_FAILED",
+      "LONG_POSITIVE_FOLDS_INSUFFICIENT",
+      "LONG_REGIME_ROUTER_SKILL_INSUFFICIENT",
+      "LONG_WORST_FOLD_NEGATIVE",
+      "LONG_LEAVE_ONE_SYMBOL_OUT_FAILED",
+      "SHORT_VALIDATION_FAILED",
+      "SHORT_POSITIVE_FOLDS_INSUFFICIENT",
+      "SHORT_REGIME_ROUTER_SKILL_INSUFFICIENT",
+      "SHORT_WORST_FOLD_NEGATIVE",
+      "SHORT_LEAVE_ONE_SYMBOL_OUT_FAILED"
+    ],
+    "decision": "RESEARCH_ONLY_NOT_PROMOTABLE",
+    "exchange_calls": 0,
+    "exchange_mutations": 0,
+    "passed": false,
+    "runtime_effect": "NONE"
+  },
+  "hindsight_best_profile_counts": {
+    "CURRENT_TS": 103907,
+    "LOCK_AT_10_ROE": 25601,
+    "LOCK_AT_20_ROE": 34379,
+    "LOCK_AT_5_ROE": 28855
+  },
+  "runtime_effect": "NONE",
+  "schema_id": "aegis-regime-entry-exit-v7-compact-summary-v1",
+  "sides": {
+    "LONG": {
+      "evaluated_folds": 4,
+      "folds": [
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 213,
+              "RANGE_REVERSION": 128,
+              "TRANSITION_SELECTIVE": 4174,
+              "TREND_CONTINUATION": 254
+            },
+            "clean_entry_rate": 0.25980289368840426,
+            "count": 4769,
+            "late_entry_rate": 0.4652967079052212,
+            "mae_q90": 0.016851830163473063,
+            "maximum_gap_hours": 2.0,
+            "mean_capture_efficiency": 0.18202201875974544,
+            "mean_mae": 0.007742672179435571,
+            "mean_net": -0.0015714899507612786,
+            "mean_time_underwater_bars": 12.207800377437618,
+            "p95_gap_hours": 2.0,
+            "positive_rate": 0.5776892430278885,
+            "profile_counts": {
+              "CURRENT_TS": 4769
+            }
+          },
+          "control_identity": "UNFILTERED_SIDE_FALLBACK",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 1,
+                  "RANGE_REVERSION": 14,
+                  "TRANSITION_SELECTIVE": 232
+                },
+                "clean_entry_rate": 0.27530364372469635,
+                "count": 247,
+                "late_entry_rate": 0.4493927125506073,
+                "mae_q90": 0.020095124355841466,
+                "maximum_gap_hours": 22.0,
+                "mean_capture_efficiency": 0.22207570237943397,
+                "mean_mae": 0.009132124207669158,
+                "mean_net": -0.0014371665613083957,
+                "mean_time_underwater_bars": 12.004048582995951,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.5303643724696356,
+                "profile_counts": {
+                  "CURRENT_TS": 16,
+                  "LOCK_AT_10_ROE": 26,
+                  "LOCK_AT_20_ROE": 184,
+                  "LOCK_AT_5_ROE": 21
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.19336948131466405,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 8,
+                  "RANGE_REVERSION": 39,
+                  "TRANSITION_SELECTIVE": 157,
+                  "TREND_CONTINUATION": 19
+                },
+                "clean_entry_rate": 0.273542600896861,
+                "count": 223,
+                "late_entry_rate": 0.45739910313901344,
+                "mae_q90": 0.018152542785928018,
+                "maximum_gap_hours": 24.0,
+                "mean_capture_efficiency": 0.22617029145262169,
+                "mean_mae": 0.008194449902681583,
+                "mean_net": -0.0015351475506948555,
+                "mean_time_underwater_bars": 12.251121076233185,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.4663677130044843,
+                "profile_counts": {
+                  "CURRENT_TS": 21,
+                  "LOCK_AT_10_ROE": 29,
+                  "LOCK_AT_20_ROE": 171,
+                  "LOCK_AT_5_ROE": 2
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.001478195982087179,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 3,
+                  "RANGE_REVERSION": 3,
+                  "TRANSITION_SELECTIVE": 109,
+                  "TREND_CONTINUATION": 18
+                },
+                "clean_entry_rate": 0.2781954887218045,
+                "count": 133,
+                "late_entry_rate": 0.41353383458646614,
+                "mae_q90": 0.009650103588805359,
+                "maximum_gap_hours": 58.0,
+                "mean_capture_efficiency": 0.2710156366836294,
+                "mean_mae": 0.004326309163172478,
+                "mean_net": 2.0045084200045738e-05,
+                "mean_time_underwater_bars": 10.488721804511279,
+                "p95_gap_hours": 22.899999999999977,
+                "positive_rate": 0.518796992481203,
+                "profile_counts": {
+                  "CURRENT_TS": 20,
+                  "LOCK_AT_10_ROE": 28,
+                  "LOCK_AT_20_ROE": 68,
+                  "LOCK_AT_5_ROE": 17
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.19967970556280157,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 8,
+                  "RANGE_REVERSION": 40,
+                  "TRANSITION_SELECTIVE": 152,
+                  "TREND_CONTINUATION": 22
+                },
+                "clean_entry_rate": 0.24774774774774774,
+                "count": 222,
+                "late_entry_rate": 0.46846846846846846,
+                "mae_q90": 0.01810248108229735,
+                "maximum_gap_hours": 24.0,
+                "mean_capture_efficiency": 0.22718708114777675,
+                "mean_mae": 0.008125078924370175,
+                "mean_net": -0.0015927180662054846,
+                "mean_time_underwater_bars": 12.391891891891891,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.47297297297297297,
+                "profile_counts": {
+                  "CURRENT_TS": 20,
+                  "LOCK_AT_10_ROE": 28,
+                  "LOCK_AT_20_ROE": 172,
+                  "LOCK_AT_5_ROE": 2
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.004332475475520335,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 16,
+                  "RANGE_REVERSION": 38,
+                  "TRANSITION_SELECTIVE": 152,
+                  "TREND_CONTINUATION": 25
+                },
+                "clean_entry_rate": 0.2683982683982684,
+                "count": 231,
+                "late_entry_rate": 0.46320346320346323,
+                "mae_q90": 0.018117635680781508,
+                "maximum_gap_hours": 16.0,
+                "mean_capture_efficiency": 0.23321625349047034,
+                "mean_mae": 0.008027323404838917,
+                "mean_net": -0.0014203076816748537,
+                "mean_time_underwater_bars": 12.329004329004329,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.47186147186147187,
+                "profile_counts": {
+                  "CURRENT_TS": 23,
+                  "LOCK_AT_10_ROE": 27,
+                  "LOCK_AT_20_ROE": 178,
+                  "LOCK_AT_5_ROE": 3
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0026880558968400093,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 1,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.35926773455377575,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 147,
+              "BULLISH": 135,
+              "NEUTRAL": 155
+            },
+            "log_loss": 1.1347120921000258,
+            "majority_accuracy": 0.35469107551487417,
+            "multiclass_brier": 0.6895653279592302,
+            "passed": true,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.1597374625623034
+          },
+          "selected": {
+            "archetype_counts": {
+              "RANGE_REVERSION": 3,
+              "TRANSITION_SELECTIVE": 130
+            },
+            "clean_entry_rate": 0.2857142857142857,
+            "count": 133,
+            "late_entry_rate": 0.42857142857142855,
+            "mae_q90": 0.012541255451239451,
+            "maximum_gap_hours": 54.0,
+            "mean_capture_efficiency": 0.25181087363250565,
+            "mean_mae": 0.006201803869747689,
+            "mean_net": -0.0015613447319089903,
+            "mean_time_underwater_bars": 11.789473684210526,
+            "p95_gap_hours": 22.899999999999977,
+            "positive_rate": 0.45864661654135336,
+            "profile_counts": {
+              "CURRENT_TS": 18,
+              "LOCK_AT_10_ROE": 20,
+              "LOCK_AT_20_ROE": 90,
+              "LOCK_AT_5_ROE": 5
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 38,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        },
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 172,
+              "CONFIRMED_REVERSAL": 42,
+              "RANGE_REVERSION": 131,
+              "TRANSITION_SELECTIVE": 4236,
+              "TREND_CONTINUATION": 226
+            },
+            "clean_entry_rate": 0.2583732057416268,
+            "count": 4807,
+            "late_entry_rate": 0.47888495943415854,
+            "mae_q90": 0.012490924764828784,
+            "maximum_gap_hours": 2.0,
+            "mean_capture_efficiency": 0.1914380657200673,
+            "mean_mae": 0.005875010418361273,
+            "mean_net": -0.0013273112557035851,
+            "mean_time_underwater_bars": 12.379446640316205,
+            "p95_gap_hours": 2.0,
+            "positive_rate": 0.5152902017890576,
+            "profile_counts": {
+              "CURRENT_TS": 4807
+            }
+          },
+          "control_identity": "UNFILTERED_SIDE_FALLBACK",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 4,
+                  "RANGE_REVERSION": 57,
+                  "TRANSITION_SELECTIVE": 43,
+                  "TREND_CONTINUATION": 15
+                },
+                "clean_entry_rate": 0.31932773109243695,
+                "count": 119,
+                "late_entry_rate": 0.5042016806722689,
+                "mae_q90": 0.013775712023384682,
+                "maximum_gap_hours": 44.0,
+                "mean_capture_efficiency": 0.1944138968155616,
+                "mean_mae": 0.007058045962624297,
+                "mean_net": -0.0013205637905459098,
+                "mean_time_underwater_bars": 12.268907563025211,
+                "p95_gap_hours": 20.0,
+                "positive_rate": 0.5210084033613446,
+                "profile_counts": {
+                  "CURRENT_TS": 14,
+                  "LOCK_AT_10_ROE": 20,
+                  "LOCK_AT_20_ROE": 62,
+                  "LOCK_AT_5_ROE": 23
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.1987450794571134,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 17,
+                  "CONFIRMED_REVERSAL": 12,
+                  "RANGE_REVERSION": 55,
+                  "TRANSITION_SELECTIVE": 188,
+                  "TREND_CONTINUATION": 23
+                },
+                "clean_entry_rate": 0.22372881355932203,
+                "count": 295,
+                "late_entry_rate": 0.4847457627118644,
+                "mae_q90": 0.011311458794475418,
+                "maximum_gap_hours": 12.0,
+                "mean_capture_efficiency": 0.19384272702620184,
+                "mean_mae": 0.005470262262458916,
+                "mean_net": -0.0011502897671393682,
+                "mean_time_underwater_bars": 12.36271186440678,
+                "p95_gap_hours": 6.0,
+                "positive_rate": 0.4406779661016949,
+                "profile_counts": {
+                  "CURRENT_TS": 19,
+                  "LOCK_AT_10_ROE": 45,
+                  "LOCK_AT_20_ROE": 212,
+                  "LOCK_AT_5_ROE": 19
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0012518335323893725,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 5,
+                  "CONFIRMED_REVERSAL": 4,
+                  "RANGE_REVERSION": 9,
+                  "TRANSITION_SELECTIVE": 329,
+                  "TREND_CONTINUATION": 30
+                },
+                "clean_entry_rate": 0.23076923076923078,
+                "count": 377,
+                "late_entry_rate": 0.4588859416445623,
+                "mae_q90": 0.009297137366812614,
+                "maximum_gap_hours": 10.0,
+                "mean_capture_efficiency": 0.21298181942334918,
+                "mean_mae": 0.0044652691316754214,
+                "mean_net": -0.00114096921340328,
+                "mean_time_underwater_bars": 12.3368700265252,
+                "p95_gap_hours": 4.0,
+                "positive_rate": 0.4244031830238727,
+                "profile_counts": {
+                  "CURRENT_TS": 19,
+                  "LOCK_AT_10_ROE": 54,
+                  "LOCK_AT_20_ROE": 246,
+                  "LOCK_AT_5_ROE": 58
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.16105674268991693,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 19,
+                  "CONFIRMED_REVERSAL": 11,
+                  "RANGE_REVERSION": 59,
+                  "TRANSITION_SELECTIVE": 208,
+                  "TREND_CONTINUATION": 21
+                },
+                "clean_entry_rate": 0.2138364779874214,
+                "count": 318,
+                "late_entry_rate": 0.48742138364779874,
+                "mae_q90": 0.0112757202749337,
+                "maximum_gap_hours": 12.0,
+                "mean_capture_efficiency": 0.18899614968062703,
+                "mean_mae": 0.005431370743470156,
+                "mean_net": -0.001395994616258529,
+                "mean_time_underwater_bars": 12.79245283018868,
+                "p95_gap_hours": 6.0,
+                "positive_rate": 0.41823899371069184,
+                "profile_counts": {
+                  "CURRENT_TS": 18,
+                  "LOCK_AT_10_ROE": 47,
+                  "LOCK_AT_20_ROE": 225,
+                  "LOCK_AT_5_ROE": 28
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0036687938998559502,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 22,
+                  "CONFIRMED_REVERSAL": 12,
+                  "RANGE_REVERSION": 53,
+                  "TRANSITION_SELECTIVE": 177,
+                  "TREND_CONTINUATION": 25
+                },
+                "clean_entry_rate": 0.24567474048442905,
+                "count": 289,
+                "late_entry_rate": 0.4809688581314879,
+                "mae_q90": 0.01136517392960359,
+                "maximum_gap_hours": 14.0,
+                "mean_capture_efficiency": 0.19197484024133,
+                "mean_mae": 0.005427410629418333,
+                "mean_net": -0.0010094822624089094,
+                "mean_time_underwater_bars": 12.110726643598616,
+                "p95_gap_hours": 6.0,
+                "positive_rate": 0.4532871972318339,
+                "profile_counts": {
+                  "CURRENT_TS": 17,
+                  "LOCK_AT_10_ROE": 46,
+                  "LOCK_AT_20_ROE": 204,
+                  "LOCK_AT_5_ROE": 22
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0022395430764699875,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 2,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.4439359267734554,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 120,
+              "BULLISH": 120,
+              "NEUTRAL": 197
+            },
+            "log_loss": 1.0692305651077703,
+            "majority_accuracy": 0.45080091533180777,
+            "multiclass_brier": 0.6464104278873475,
+            "passed": false,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.0808403403818378
+          },
+          "selected": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 4,
+              "CONFIRMED_REVERSAL": 7,
+              "RANGE_REVERSION": 57,
+              "TRANSITION_SELECTIVE": 253,
+              "TREND_CONTINUATION": 8
+            },
+            "clean_entry_rate": 0.24316109422492402,
+            "count": 329,
+            "late_entry_rate": 0.44984802431610943,
+            "mae_q90": 0.01049975150477662,
+            "maximum_gap_hours": 12.0,
+            "mean_capture_efficiency": 0.20055186430763555,
+            "mean_mae": 0.005085188594741834,
+            "mean_net": -0.001236605757231414,
+            "mean_time_underwater_bars": 12.303951367781155,
+            "p95_gap_hours": 6.0,
+            "positive_rate": 0.43465045592705165,
+            "profile_counts": {
+              "CURRENT_TS": 18,
+              "LOCK_AT_10_ROE": 48,
+              "LOCK_AT_20_ROE": 242,
+              "LOCK_AT_5_ROE": 21
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 0,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "CONFIRMED_REVERSAL",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        },
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 211,
+              "RANGE_REVERSION": 152,
+              "TRANSITION_SELECTIVE": 4170,
+              "TREND_CONTINUATION": 219
+            },
+            "clean_entry_rate": 0.22853535353535354,
+            "count": 4752,
+            "late_entry_rate": 0.476010101010101,
+            "mae_q90": 0.012382842471117017,
+            "maximum_gap_hours": 2.0,
+            "mean_capture_efficiency": 0.20614342331149488,
+            "mean_mae": 0.005427761117789101,
+            "mean_net": -0.0015169423943339636,
+            "mean_time_underwater_bars": 12.390993265993266,
+            "p95_gap_hours": 2.0,
+            "positive_rate": 0.4690656565656566,
+            "profile_counts": {
+              "CURRENT_TS": 4752
+            }
+          },
+          "control_identity": "UNFILTERED_SIDE_FALLBACK",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "TRANSITION_SELECTIVE": 140,
+                  "TREND_CONTINUATION": 14
+                },
+                "clean_entry_rate": 0.18831168831168832,
+                "count": 154,
+                "late_entry_rate": 0.4935064935064935,
+                "mae_q90": 0.025315240498679798,
+                "maximum_gap_hours": 56.0,
+                "mean_capture_efficiency": 0.20994069587078246,
+                "mean_mae": 0.010538433482713957,
+                "mean_net": -0.0031182444755519048,
+                "mean_time_underwater_bars": 12.967532467532468,
+                "p95_gap_hours": 19.600000000000023,
+                "positive_rate": 0.487012987012987,
+                "profile_counts": {
+                  "CURRENT_TS": 16,
+                  "LOCK_AT_10_ROE": 12,
+                  "LOCK_AT_20_ROE": 112,
+                  "LOCK_AT_5_ROE": 14
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.18639336460601527,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 10,
+                  "RANGE_REVERSION": 47,
+                  "TRANSITION_SELECTIVE": 201,
+                  "TREND_CONTINUATION": 29
+                },
+                "clean_entry_rate": 0.21951219512195122,
+                "count": 287,
+                "late_entry_rate": 0.4564459930313589,
+                "mae_q90": 0.01313829351587837,
+                "maximum_gap_hours": 16.0,
+                "mean_capture_efficiency": 0.2232849648764721,
+                "mean_mae": 0.0057833240914793,
+                "mean_net": -0.001570999993741682,
+                "mean_time_underwater_bars": 12.581881533101045,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.4355400696864111,
+                "profile_counts": {
+                  "CURRENT_TS": 38,
+                  "LOCK_AT_10_ROE": 39,
+                  "LOCK_AT_20_ROE": 193,
+                  "LOCK_AT_5_ROE": 17
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0012163695050124675,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "RANGE_REVERSION": 2,
+                  "TRANSITION_SELECTIVE": 363,
+                  "TREND_CONTINUATION": 13
+                },
+                "clean_entry_rate": 0.20105820105820105,
+                "count": 378,
+                "late_entry_rate": 0.42857142857142855,
+                "mae_q90": 0.008887640282473463,
+                "maximum_gap_hours": 10.0,
+                "mean_capture_efficiency": 0.22563921947556959,
+                "mean_mae": 0.003937916407087798,
+                "mean_net": -0.001190345260663874,
+                "mean_time_underwater_bars": 11.796296296296296,
+                "p95_gap_hours": 4.0,
+                "positive_rate": 0.42857142857142855,
+                "profile_counts": {
+                  "CURRENT_TS": 37,
+                  "LOCK_AT_10_ROE": 68,
+                  "LOCK_AT_20_ROE": 241,
+                  "LOCK_AT_5_ROE": 32
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.19673551048516305,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 11,
+                  "RANGE_REVERSION": 50,
+                  "TRANSITION_SELECTIVE": 218,
+                  "TREND_CONTINUATION": 30
+                },
+                "clean_entry_rate": 0.22006472491909385,
+                "count": 309,
+                "late_entry_rate": 0.4563106796116505,
+                "mae_q90": 0.012503662491324218,
+                "maximum_gap_hours": 16.0,
+                "mean_capture_efficiency": 0.21386585644058811,
+                "mean_mae": 0.005644424029458188,
+                "mean_net": -0.0017544466231801622,
+                "mean_time_underwater_bars": 12.618122977346278,
+                "p95_gap_hours": 6.0,
+                "positive_rate": 0.42718446601941745,
+                "profile_counts": {
+                  "CURRENT_TS": 40,
+                  "LOCK_AT_10_ROE": 43,
+                  "LOCK_AT_20_ROE": 209,
+                  "LOCK_AT_5_ROE": 17
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.003564055739373879,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 12,
+                  "RANGE_REVERSION": 54,
+                  "TRANSITION_SELECTIVE": 187,
+                  "TREND_CONTINUATION": 28
+                },
+                "clean_entry_rate": 0.22419928825622776,
+                "count": 281,
+                "late_entry_rate": 0.4804270462633452,
+                "mae_q90": 0.014398917665249367,
+                "maximum_gap_hours": 20.0,
+                "mean_capture_efficiency": 0.2226651822186035,
+                "mean_mae": 0.006050070869878303,
+                "mean_net": -0.0016506731151770958,
+                "mean_time_underwater_bars": 12.608540925266905,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.4412811387900356,
+                "profile_counts": {
+                  "CURRENT_TS": 36,
+                  "LOCK_AT_10_ROE": 40,
+                  "LOCK_AT_20_ROE": 190,
+                  "LOCK_AT_5_ROE": 15
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.002256151728147137,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 3,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.5560640732265446,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 103,
+              "BULLISH": 92,
+              "NEUTRAL": 242
+            },
+            "log_loss": 0.9858078841879947,
+            "majority_accuracy": 0.5537757437070938,
+            "multiclass_brier": 0.58579249190325,
+            "passed": true,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.0016218643927242
+          },
+          "selected": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 2,
+              "RANGE_REVERSION": 3,
+              "TRANSITION_SELECTIVE": 134,
+              "TREND_CONTINUATION": 16
+            },
+            "clean_entry_rate": 0.22580645161290322,
+            "count": 155,
+            "late_entry_rate": 0.4258064516129032,
+            "mae_q90": 0.012274917520038063,
+            "maximum_gap_hours": 42.0,
+            "mean_capture_efficiency": 0.2409095239915463,
+            "mean_mae": 0.00536092590770422,
+            "mean_net": -0.0014735039274305162,
+            "mean_time_underwater_bars": 12.064516129032258,
+            "p95_gap_hours": 16.69999999999999,
+            "positive_rate": 0.43870967741935485,
+            "profile_counts": {
+              "CURRENT_TS": 27,
+              "LOCK_AT_10_ROE": 12,
+              "LOCK_AT_20_ROE": 110,
+              "LOCK_AT_5_ROE": 6
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 55,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        },
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 174,
+              "CONFIRMED_REVERSAL": 85,
+              "RANGE_REVERSION": 171,
+              "TRANSITION_SELECTIVE": 4206,
+              "TREND_CONTINUATION": 171
+            },
+            "clean_entry_rate": 0.24152277928021634,
+            "count": 4807,
+            "late_entry_rate": 0.4674433118369045,
+            "mae_q90": 0.0180550369192928,
+            "maximum_gap_hours": 2.0,
+            "mean_capture_efficiency": 0.19824362994256292,
+            "mean_mae": 0.007921864401952094,
+            "mean_net": -0.0017998107325623287,
+            "mean_time_underwater_bars": 12.189931350114417,
+            "p95_gap_hours": 2.0,
+            "positive_rate": 0.5537757437070938,
+            "profile_counts": {
+              "CURRENT_TS": 4807
+            }
+          },
+          "control_identity": "UNFILTERED_SIDE_FALLBACK",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 2,
+                  "CONFIRMED_REVERSAL": 32,
+                  "RANGE_REVERSION": 69,
+                  "TRANSITION_SELECTIVE": 266
+                },
+                "clean_entry_rate": 0.26558265582655827,
+                "count": 369,
+                "late_entry_rate": 0.44715447154471544,
+                "mae_q90": 0.0222827443511016,
+                "maximum_gap_hours": 10.0,
+                "mean_capture_efficiency": 0.2136760423079574,
+                "mean_mae": 0.010219942274931764,
+                "mean_net": -0.0019475718794065822,
+                "mean_time_underwater_bars": 12.176151761517616,
+                "p95_gap_hours": 4.0,
+                "positive_rate": 0.5338753387533876,
+                "profile_counts": {
+                  "CURRENT_TS": 35,
+                  "LOCK_AT_10_ROE": 43,
+                  "LOCK_AT_20_ROE": 249,
+                  "LOCK_AT_5_ROE": 42
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.13674662283810793,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 11,
+                  "CONFIRMED_REVERSAL": 21,
+                  "RANGE_REVERSION": 58,
+                  "TRANSITION_SELECTIVE": 108,
+                  "TREND_CONTINUATION": 7
+                },
+                "clean_entry_rate": 0.2780487804878049,
+                "count": 205,
+                "late_entry_rate": 0.37073170731707317,
+                "mae_q90": 0.015482325811553243,
+                "maximum_gap_hours": 22.0,
+                "mean_capture_efficiency": 0.2349848105301109,
+                "mean_mae": 0.00677697395684098,
+                "mean_net": -0.0013616506926817991,
+                "mean_time_underwater_bars": 11.414634146341463,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.4975609756097561,
+                "profile_counts": {
+                  "CURRENT_TS": 16,
+                  "LOCK_AT_10_ROE": 35,
+                  "LOCK_AT_20_ROE": 147,
+                  "LOCK_AT_5_ROE": 7
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0011969909442388874,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_REVERSAL": 6,
+                  "RANGE_REVERSION": 2,
+                  "TRANSITION_SELECTIVE": 128,
+                  "TREND_CONTINUATION": 4
+                },
+                "clean_entry_rate": 0.22857142857142856,
+                "count": 140,
+                "late_entry_rate": 0.42857142857142855,
+                "mae_q90": 0.00988058073609688,
+                "maximum_gap_hours": 134.0,
+                "mean_capture_efficiency": 0.1696019987584448,
+                "mean_mae": 0.004545811560434096,
+                "mean_net": -0.002107591713639429,
+                "mean_time_underwater_bars": 12.592857142857143,
+                "p95_gap_hours": 24.19999999999999,
+                "positive_rate": 0.37857142857142856,
+                "profile_counts": {
+                  "CURRENT_TS": 13,
+                  "LOCK_AT_10_ROE": 40,
+                  "LOCK_AT_20_ROE": 70,
+                  "LOCK_AT_5_ROE": 17
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.21610195874780952,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 10,
+                  "CONFIRMED_REVERSAL": 22,
+                  "RANGE_REVERSION": 61,
+                  "TRANSITION_SELECTIVE": 97,
+                  "TREND_CONTINUATION": 7
+                },
+                "clean_entry_rate": 0.2893401015228426,
+                "count": 197,
+                "late_entry_rate": 0.39086294416243655,
+                "mae_q90": 0.015573473426025953,
+                "maximum_gap_hours": 22.0,
+                "mean_capture_efficiency": 0.2318089882211038,
+                "mean_mae": 0.006837297769719307,
+                "mean_net": -0.0014038552420339524,
+                "mean_time_underwater_bars": 11.614213197969542,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.4873096446700508,
+                "profile_counts": {
+                  "CURRENT_TS": 19,
+                  "LOCK_AT_10_ROE": 39,
+                  "LOCK_AT_20_ROE": 133,
+                  "LOCK_AT_5_ROE": 6
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.003635555859020767,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 11,
+                  "CONFIRMED_REVERSAL": 21,
+                  "RANGE_REVERSION": 67,
+                  "TRANSITION_SELECTIVE": 92,
+                  "TREND_CONTINUATION": 10
+                },
+                "clean_entry_rate": 0.26865671641791045,
+                "count": 201,
+                "late_entry_rate": 0.42786069651741293,
+                "mae_q90": 0.015472922385824761,
+                "maximum_gap_hours": 22.0,
+                "mean_capture_efficiency": 0.23020327771522903,
+                "mean_mae": 0.0070326898513369904,
+                "mean_net": -0.0016880356501749625,
+                "mean_time_underwater_bars": 11.686567164179104,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.4925373134328358,
+                "profile_counts": {
+                  "CURRENT_TS": 18,
+                  "LOCK_AT_10_ROE": 38,
+                  "LOCK_AT_20_ROE": 138,
+                  "LOCK_AT_5_ROE": 7
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.002149550914570522,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 4,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.43478260869565216,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 131,
+              "BULLISH": 116,
+              "NEUTRAL": 190
+            },
+            "log_loss": 1.0886470791968597,
+            "majority_accuracy": 0.43478260869565216,
+            "multiclass_brier": 0.6582310887934535,
+            "passed": false,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.0833807718757382
+          },
+          "selected": {
+            "archetype_counts": {
+              "CONFIRMED_REVERSAL": 6,
+              "RANGE_REVERSION": 1,
+              "TRANSITION_SELECTIVE": 73
+            },
+            "clean_entry_rate": 0.25,
+            "count": 80,
+            "late_entry_rate": 0.325,
+            "mae_q90": 0.009642527831151106,
+            "maximum_gap_hours": 252.0,
+            "mean_capture_efficiency": 0.24501720872862479,
+            "mean_mae": 0.00436178267720265,
+            "mean_net": -0.0009846005048074283,
+            "mean_time_underwater_bars": 11.7125,
+            "p95_gap_hours": 22.19999999999999,
+            "positive_rate": 0.4875,
+            "profile_counts": {
+              "CURRENT_TS": 8,
+              "LOCK_AT_10_ROE": 15,
+              "LOCK_AT_20_ROE": 53,
+              "LOCK_AT_5_ROE": 4
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 0,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "CONFIRMED_REVERSAL",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        }
+      ],
+      "leave_one_symbol_out": {
+        "passed": false,
+        "passing_symbols": 0,
+        "required_symbols": 8,
+        "status": "NOT_RUN_PRIMARY_GATE_FAILED"
+      },
+      "passing_folds": 0,
+      "router_skilled_folds": 2,
+      "rows": 96371,
+      "validation_pass": false,
+      "worst_fold_non_negative": false
+    },
+    "SHORT": {
+      "evaluated_folds": 4,
+      "folds": [
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 1,
+              "RANGE_REVERSION": 3,
+              "TRANSITION_SELECTIVE": 107,
+              "TREND_CONTINUATION": 1
+            },
+            "clean_entry_rate": 0.35714285714285715,
+            "count": 112,
+            "late_entry_rate": 0.36607142857142855,
+            "mae_q90": 0.01620826949868821,
+            "maximum_gap_hours": 44.0,
+            "mean_capture_efficiency": 0.2130305953884691,
+            "mean_mae": 0.00715977291612019,
+            "mean_net": -0.0007528100674734291,
+            "mean_time_underwater_bars": 10.491071428571429,
+            "p95_gap_hours": 21.0,
+            "positive_rate": 0.6428571428571429,
+            "profile_counts": {
+              "CURRENT_TS": 112
+            }
+          },
+          "control_identity": "CURRENT_BRAIN",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 9,
+                  "RANGE_REVERSION": 55,
+                  "TRANSITION_SELECTIVE": 218
+                },
+                "clean_entry_rate": 0.28368794326241137,
+                "count": 282,
+                "late_entry_rate": 0.46099290780141844,
+                "mae_q90": 0.02040915119967484,
+                "maximum_gap_hours": 28.0,
+                "mean_capture_efficiency": 0.23767158640636743,
+                "mean_mae": 0.009131874899613394,
+                "mean_net": -0.0012323294501963263,
+                "mean_time_underwater_bars": 11.131205673758865,
+                "p95_gap_hours": 6.0,
+                "positive_rate": 0.5673758865248227,
+                "profile_counts": {
+                  "CURRENT_TS": 44,
+                  "LOCK_AT_10_ROE": 36,
+                  "LOCK_AT_20_ROE": 180,
+                  "LOCK_AT_5_ROE": 22
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.21361706122156268,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 13,
+                  "RANGE_REVERSION": 72,
+                  "TRANSITION_SELECTIVE": 156,
+                  "TREND_CONTINUATION": 17
+                },
+                "clean_entry_rate": 0.2248062015503876,
+                "count": 258,
+                "late_entry_rate": 0.46511627906976744,
+                "mae_q90": 0.016629087813231427,
+                "maximum_gap_hours": 12.0,
+                "mean_capture_efficiency": 0.22698287281810628,
+                "mean_mae": 0.007848282329998816,
+                "mean_net": -0.001664759717839304,
+                "mean_time_underwater_bars": 12.267441860465116,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.4883720930232558,
+                "profile_counts": {
+                  "CURRENT_TS": 17,
+                  "LOCK_AT_10_ROE": 45,
+                  "LOCK_AT_20_ROE": 188,
+                  "LOCK_AT_5_ROE": 8
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0024417881383340433,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 4,
+                  "RANGE_REVERSION": 26,
+                  "TRANSITION_SELECTIVE": 169,
+                  "TREND_CONTINUATION": 8
+                },
+                "clean_entry_rate": 0.2560386473429952,
+                "count": 207,
+                "late_entry_rate": 0.4251207729468599,
+                "mae_q90": 0.010914227872194005,
+                "maximum_gap_hours": 34.0,
+                "mean_capture_efficiency": 0.19829193969413245,
+                "mean_mae": 0.00548217045993661,
+                "mean_net": -0.0016315202353107993,
+                "mean_time_underwater_bars": 12.08695652173913,
+                "p95_gap_hours": 12.0,
+                "positive_rate": 0.4492753623188406,
+                "profile_counts": {
+                  "CURRENT_TS": 9,
+                  "LOCK_AT_10_ROE": 43,
+                  "LOCK_AT_20_ROE": 139,
+                  "LOCK_AT_5_ROE": 16
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.204627407817766,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 17,
+                  "RANGE_REVERSION": 67,
+                  "TRANSITION_SELECTIVE": 154,
+                  "TREND_CONTINUATION": 18
+                },
+                "clean_entry_rate": 0.19921875,
+                "count": 256,
+                "late_entry_rate": 0.50390625,
+                "mae_q90": 0.01688359706207887,
+                "maximum_gap_hours": 14.0,
+                "mean_capture_efficiency": 0.20707492015844747,
+                "mean_mae": 0.0080825773407301,
+                "mean_net": -0.0021281815429744326,
+                "mean_time_underwater_bars": 12.8828125,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.46875,
+                "profile_counts": {
+                  "CURRENT_TS": 16,
+                  "LOCK_AT_10_ROE": 43,
+                  "LOCK_AT_20_ROE": 189,
+                  "LOCK_AT_5_ROE": 8
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.007107924294040023,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 19,
+                  "RANGE_REVERSION": 73,
+                  "TRANSITION_SELECTIVE": 147,
+                  "TREND_CONTINUATION": 23
+                },
+                "clean_entry_rate": 0.25190839694656486,
+                "count": 262,
+                "late_entry_rate": 0.48091603053435117,
+                "mae_q90": 0.016285697750855466,
+                "maximum_gap_hours": 16.0,
+                "mean_capture_efficiency": 0.23920131484980925,
+                "mean_mae": 0.00756272440315948,
+                "mean_net": -0.0013117872599192873,
+                "mean_time_underwater_bars": 11.912213740458014,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.5114503816793893,
+                "profile_counts": {
+                  "CURRENT_TS": 18,
+                  "LOCK_AT_10_ROE": 47,
+                  "LOCK_AT_20_ROE": 187,
+                  "LOCK_AT_5_ROE": 10
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.004278075274294713,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 1,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.35926773455377575,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 147,
+              "BULLISH": 135,
+              "NEUTRAL": 155
+            },
+            "log_loss": 1.1347120921000258,
+            "majority_accuracy": 0.35469107551487417,
+            "multiclass_brier": 0.6895653279592302,
+            "passed": true,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.1597374625623034
+          },
+          "selected": {
+            "archetype_counts": {
+              "RANGE_REVERSION": 14,
+              "TRANSITION_SELECTIVE": 88
+            },
+            "clean_entry_rate": 0.22549019607843138,
+            "count": 102,
+            "late_entry_rate": 0.4117647058823529,
+            "mae_q90": 0.01375690577116318,
+            "maximum_gap_hours": 42.0,
+            "mean_capture_efficiency": 0.22251937520257903,
+            "mean_mae": 0.006300271709292669,
+            "mean_net": -0.0014492389264361533,
+            "mean_time_underwater_bars": 12.156862745098039,
+            "p95_gap_hours": 26.0,
+            "positive_rate": 0.46078431372549017,
+            "profile_counts": {
+              "CURRENT_TS": 6,
+              "LOCK_AT_10_ROE": 25,
+              "LOCK_AT_20_ROE": 70,
+              "LOCK_AT_5_ROE": 1
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 47,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        },
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 1,
+              "CONFIRMED_REVERSAL": 4,
+              "RANGE_REVERSION": 5,
+              "TRANSITION_SELECTIVE": 96,
+              "TREND_CONTINUATION": 2
+            },
+            "clean_entry_rate": 0.3055555555555556,
+            "count": 108,
+            "late_entry_rate": 0.48148148148148145,
+            "mae_q90": 0.018663827528418997,
+            "maximum_gap_hours": 34.0,
+            "mean_capture_efficiency": 0.165916339159615,
+            "mean_mae": 0.007277778606017539,
+            "mean_net": -0.002225093175873211,
+            "mean_time_underwater_bars": 11.685185185185185,
+            "p95_gap_hours": 27.399999999999977,
+            "positive_rate": 0.5277777777777778,
+            "profile_counts": {
+              "CURRENT_TS": 108
+            }
+          },
+          "control_identity": "CURRENT_BRAIN",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_REVERSAL": 12,
+                  "RANGE_REVERSION": 6,
+                  "TRANSITION_SELECTIVE": 127
+                },
+                "clean_entry_rate": 0.27586206896551724,
+                "count": 145,
+                "late_entry_rate": 0.4482758620689655,
+                "mae_q90": 0.015649525520161186,
+                "maximum_gap_hours": 44.0,
+                "mean_capture_efficiency": 0.24004895376535407,
+                "mean_mae": 0.0078012723803926026,
+                "mean_net": -0.001225554203146003,
+                "mean_time_underwater_bars": 11.358620689655172,
+                "p95_gap_hours": 21.69999999999999,
+                "positive_rate": 0.5310344827586206,
+                "profile_counts": {
+                  "CURRENT_TS": 18,
+                  "LOCK_AT_10_ROE": 19,
+                  "LOCK_AT_20_ROE": 99,
+                  "LOCK_AT_5_ROE": 9
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.21718443262333795,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 3,
+                  "CONFIRMED_REVERSAL": 22,
+                  "RANGE_REVERSION": 73,
+                  "TRANSITION_SELECTIVE": 127,
+                  "TREND_CONTINUATION": 10
+                },
+                "clean_entry_rate": 0.3021276595744681,
+                "count": 235,
+                "late_entry_rate": 0.39574468085106385,
+                "mae_q90": 0.013460052341623906,
+                "maximum_gap_hours": 20.0,
+                "mean_capture_efficiency": 0.25443802764480533,
+                "mean_mae": 0.005865984547048577,
+                "mean_net": -0.0007549507445035013,
+                "mean_time_underwater_bars": 11.140425531914893,
+                "p95_gap_hours": 8.699999999999989,
+                "positive_rate": 0.5191489361702127,
+                "profile_counts": {
+                  "CURRENT_TS": 28,
+                  "LOCK_AT_10_ROE": 33,
+                  "LOCK_AT_20_ROE": 164,
+                  "LOCK_AT_5_ROE": 10
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.00241788725497653,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 9,
+                  "CONFIRMED_REVERSAL": 18,
+                  "RANGE_REVERSION": 22,
+                  "TRANSITION_SELECTIVE": 287,
+                  "TREND_CONTINUATION": 11
+                },
+                "clean_entry_rate": 0.25360230547550433,
+                "count": 347,
+                "late_entry_rate": 0.41786743515850144,
+                "mae_q90": 0.00929206605092423,
+                "maximum_gap_hours": 10.0,
+                "mean_capture_efficiency": 0.23357997654723256,
+                "mean_mae": 0.00419574275377037,
+                "mean_net": -0.0006950129158299762,
+                "mean_time_underwater_bars": 11.429394812680115,
+                "p95_gap_hours": 6.0,
+                "positive_rate": 0.4409221902017291,
+                "profile_counts": {
+                  "CURRENT_TS": 23,
+                  "LOCK_AT_10_ROE": 52,
+                  "LOCK_AT_20_ROE": 254,
+                  "LOCK_AT_5_ROE": 18
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.19301623001292195,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 3,
+                  "CONFIRMED_REVERSAL": 24,
+                  "RANGE_REVERSION": 70,
+                  "TRANSITION_SELECTIVE": 128,
+                  "TREND_CONTINUATION": 10
+                },
+                "clean_entry_rate": 0.2978723404255319,
+                "count": 235,
+                "late_entry_rate": 0.39148936170212767,
+                "mae_q90": 0.012856473069841367,
+                "maximum_gap_hours": 20.0,
+                "mean_capture_efficiency": 0.2522316451124679,
+                "mean_mae": 0.00562312089790492,
+                "mean_net": -0.0006857241717839389,
+                "mean_time_underwater_bars": 11.0,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.5234042553191489,
+                "profile_counts": {
+                  "CURRENT_TS": 24,
+                  "LOCK_AT_10_ROE": 34,
+                  "LOCK_AT_20_ROE": 168,
+                  "LOCK_AT_5_ROE": 9
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.007000340656117617,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 14,
+                  "CONFIRMED_REVERSAL": 23,
+                  "RANGE_REVERSION": 72,
+                  "TRANSITION_SELECTIVE": 117,
+                  "TREND_CONTINUATION": 16
+                },
+                "clean_entry_rate": 0.3140495867768595,
+                "count": 242,
+                "late_entry_rate": 0.40082644628099173,
+                "mae_q90": 0.013166190303824335,
+                "maximum_gap_hours": 18.0,
+                "mean_capture_efficiency": 0.2502851959726944,
+                "mean_mae": 0.0057705188463163925,
+                "mean_net": -0.00066371905192309,
+                "mean_time_underwater_bars": 11.15702479338843,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.512396694214876,
+                "profile_counts": {
+                  "CURRENT_TS": 30,
+                  "LOCK_AT_10_ROE": 35,
+                  "LOCK_AT_20_ROE": 166,
+                  "LOCK_AT_5_ROE": 11
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.004345049992993811,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 2,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.4439359267734554,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 120,
+              "BULLISH": 120,
+              "NEUTRAL": 197
+            },
+            "log_loss": 1.0692305651077703,
+            "majority_accuracy": 0.45080091533180777,
+            "multiclass_brier": 0.6464104278873475,
+            "passed": false,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.0808403403818378
+          },
+          "selected": {
+            "archetype_counts": {
+              "CONFIRMED_REVERSAL": 18,
+              "RANGE_REVERSION": 29,
+              "TRANSITION_SELECTIVE": 79,
+              "TREND_CONTINUATION": 1
+            },
+            "clean_entry_rate": 0.2992125984251969,
+            "count": 127,
+            "late_entry_rate": 0.33858267716535434,
+            "mae_q90": 0.01202638941419143,
+            "maximum_gap_hours": 32.0,
+            "mean_capture_efficiency": 0.24283368473512576,
+            "mean_mae": 0.005290531177085794,
+            "mean_net": -0.0003187400738165057,
+            "mean_time_underwater_bars": 10.779527559055119,
+            "p95_gap_hours": 18.0,
+            "positive_rate": 0.5196850393700787,
+            "profile_counts": {
+              "CURRENT_TS": 14,
+              "LOCK_AT_10_ROE": 13,
+              "LOCK_AT_20_ROE": 96,
+              "LOCK_AT_5_ROE": 4
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 0,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "CONFIRMED_REVERSAL",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        },
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 3,
+              "CONFIRMED_REVERSAL": 3,
+              "RANGE_REVERSION": 3,
+              "TRANSITION_SELECTIVE": 144,
+              "TREND_CONTINUATION": 4
+            },
+            "clean_entry_rate": 0.2802547770700637,
+            "count": 157,
+            "late_entry_rate": 0.46496815286624205,
+            "mae_q90": 0.014932826079227102,
+            "maximum_gap_hours": 50.0,
+            "mean_capture_efficiency": 0.23573162273182832,
+            "mean_mae": 0.006785429959113691,
+            "mean_net": -0.00035923859367939265,
+            "mean_time_underwater_bars": 11.261146496815286,
+            "p95_gap_hours": 14.5,
+            "positive_rate": 0.5668789808917197,
+            "profile_counts": {
+              "CURRENT_TS": 157
+            }
+          },
+          "control_identity": "CURRENT_BRAIN",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 32,
+                  "CONFIRMED_REVERSAL": 2,
+                  "RANGE_REVERSION": 37,
+                  "TRANSITION_SELECTIVE": 140,
+                  "TREND_CONTINUATION": 34
+                },
+                "clean_entry_rate": 0.2653061224489796,
+                "count": 245,
+                "late_entry_rate": 0.47346938775510206,
+                "mae_q90": 0.01723855827619771,
+                "maximum_gap_hours": 36.0,
+                "mean_capture_efficiency": 0.24863762633312478,
+                "mean_mae": 0.008305573306784598,
+                "mean_net": -0.0008167479503512451,
+                "mean_time_underwater_bars": 11.914285714285715,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.5428571428571428,
+                "profile_counts": {
+                  "CURRENT_TS": 22,
+                  "LOCK_AT_10_ROE": 38,
+                  "LOCK_AT_20_ROE": 172,
+                  "LOCK_AT_5_ROE": 13
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.19198611510141358,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 25,
+                  "CONFIRMED_REVERSAL": 8,
+                  "RANGE_REVERSION": 68,
+                  "TRANSITION_SELECTIVE": 115,
+                  "TREND_CONTINUATION": 25
+                },
+                "clean_entry_rate": 0.29045643153526973,
+                "count": 241,
+                "late_entry_rate": 0.4730290456431535,
+                "mae_q90": 0.011220390635822142,
+                "maximum_gap_hours": 16.0,
+                "mean_capture_efficiency": 0.23569059535977,
+                "mean_mae": 0.005062431947268298,
+                "mean_net": -0.0008493085470901953,
+                "mean_time_underwater_bars": 11.813278008298756,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.44398340248962653,
+                "profile_counts": {
+                  "CURRENT_TS": 14,
+                  "LOCK_AT_10_ROE": 27,
+                  "LOCK_AT_20_ROE": 195,
+                  "LOCK_AT_5_ROE": 5
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0022664926932976274,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 4,
+                  "CONFIRMED_REVERSAL": 5,
+                  "RANGE_REVERSION": 17,
+                  "TRANSITION_SELECTIVE": 303,
+                  "TREND_CONTINUATION": 13
+                },
+                "clean_entry_rate": 0.22807017543859648,
+                "count": 342,
+                "late_entry_rate": 0.4415204678362573,
+                "mae_q90": 0.007246613847141099,
+                "maximum_gap_hours": 12.0,
+                "mean_capture_efficiency": 0.19009787296784197,
+                "mean_mae": 0.0034565542241006423,
+                "mean_net": -0.001108798720177595,
+                "mean_time_underwater_bars": 12.587719298245615,
+                "p95_gap_hours": 6.0,
+                "positive_rate": 0.36257309941520466,
+                "profile_counts": {
+                  "CURRENT_TS": 14,
+                  "LOCK_AT_10_ROE": 51,
+                  "LOCK_AT_20_ROE": 267,
+                  "LOCK_AT_5_ROE": 10
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.21663401579856084,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 27,
+                  "CONFIRMED_REVERSAL": 11,
+                  "RANGE_REVERSION": 70,
+                  "TRANSITION_SELECTIVE": 120,
+                  "TREND_CONTINUATION": 29
+                },
+                "clean_entry_rate": 0.27626459143968873,
+                "count": 257,
+                "late_entry_rate": 0.4708171206225681,
+                "mae_q90": 0.010156931387378077,
+                "maximum_gap_hours": 20.0,
+                "mean_capture_efficiency": 0.2250513841432505,
+                "mean_mae": 0.004712937335237802,
+                "mean_net": -0.0008556055417375024,
+                "mean_time_underwater_bars": 11.817120622568094,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.43190661478599224,
+                "profile_counts": {
+                  "CURRENT_TS": 15,
+                  "LOCK_AT_10_ROE": 28,
+                  "LOCK_AT_20_ROE": 207,
+                  "LOCK_AT_5_ROE": 7
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.006656322684468557,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 31,
+                  "CONFIRMED_REVERSAL": 8,
+                  "RANGE_REVERSION": 72,
+                  "TRANSITION_SELECTIVE": 105,
+                  "TREND_CONTINUATION": 26
+                },
+                "clean_entry_rate": 0.2809917355371901,
+                "count": 242,
+                "late_entry_rate": 0.5,
+                "mae_q90": 0.010964030598187846,
+                "maximum_gap_hours": 16.0,
+                "mean_capture_efficiency": 0.22930196718863607,
+                "mean_mae": 0.0051196559302956295,
+                "mean_net": -0.0010060947079107612,
+                "mean_time_underwater_bars": 11.946280991735538,
+                "p95_gap_hours": 10.0,
+                "positive_rate": 0.43388429752066116,
+                "profile_counts": {
+                  "CURRENT_TS": 14,
+                  "LOCK_AT_10_ROE": 28,
+                  "LOCK_AT_20_ROE": 192,
+                  "LOCK_AT_5_ROE": 8
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.003961284640799839,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 3,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.5560640732265446,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 103,
+              "BULLISH": 92,
+              "NEUTRAL": 242
+            },
+            "log_loss": 0.9858078841879947,
+            "majority_accuracy": 0.5537757437070938,
+            "multiclass_brier": 0.58579249190325,
+            "passed": true,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.0016218643927242
+          },
+          "selected": {
+            "archetype_counts": {
+              "CONFIRMED_REVERSAL": 5,
+              "RANGE_REVERSION": 14,
+              "TRANSITION_SELECTIVE": 51,
+              "TREND_CONTINUATION": 9
+            },
+            "clean_entry_rate": 0.27848101265822783,
+            "count": 79,
+            "late_entry_rate": 0.43037974683544306,
+            "mae_q90": 0.009698152409246808,
+            "maximum_gap_hours": 74.0,
+            "mean_capture_efficiency": 0.22184889792190646,
+            "mean_mae": 0.004584439307117963,
+            "mean_net": -0.0011868707741481525,
+            "mean_time_underwater_bars": 12.49367088607595,
+            "p95_gap_hours": 30.0,
+            "positive_rate": 0.4050632911392405,
+            "profile_counts": {
+              "CURRENT_TS": 6,
+              "LOCK_AT_10_ROE": 8,
+              "LOCK_AT_20_ROE": 62,
+              "LOCK_AT_5_ROE": 3
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 0,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "CONFIRMED_REVERSAL",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        },
+        {
+          "control": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 3,
+              "CONFIRMED_REVERSAL": 3,
+              "RANGE_REVERSION": 2,
+              "TRANSITION_SELECTIVE": 165,
+              "TREND_CONTINUATION": 6
+            },
+            "clean_entry_rate": 0.35195530726256985,
+            "count": 179,
+            "late_entry_rate": 0.4134078212290503,
+            "mae_q90": 0.01638579679146952,
+            "maximum_gap_hours": 30.0,
+            "mean_capture_efficiency": 0.21977446539860246,
+            "mean_mae": 0.006464503974301583,
+            "mean_net": -0.000999336991611062,
+            "mean_time_underwater_bars": 10.541899441340782,
+            "p95_gap_hours": 16.0,
+            "positive_rate": 0.6312849162011173,
+            "profile_counts": {
+              "CURRENT_TS": 179
+            }
+          },
+          "control_identity": "CURRENT_BRAIN",
+          "diagnostic_ablations": {
+            "ENTRY_ONLY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 1,
+                  "CONFIRMED_REVERSAL": 5,
+                  "RANGE_REVERSION": 2,
+                  "TRANSITION_SELECTIVE": 347,
+                  "TREND_CONTINUATION": 11
+                },
+                "clean_entry_rate": 0.2568306010928962,
+                "count": 366,
+                "late_entry_rate": 0.46174863387978143,
+                "mae_q90": 0.02226111195487257,
+                "maximum_gap_hours": 22.0,
+                "mean_capture_efficiency": 0.23346880814959314,
+                "mean_mae": 0.010183679309271476,
+                "mean_net": -0.0014828204947717012,
+                "mean_time_underwater_bars": 11.948087431693988,
+                "p95_gap_hours": 4.0,
+                "positive_rate": 0.5327868852459017,
+                "profile_counts": {
+                  "CURRENT_TS": 18,
+                  "LOCK_AT_10_ROE": 31,
+                  "LOCK_AT_20_ROE": 297,
+                  "LOCK_AT_5_ROE": 20
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.18921803147732047,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "FULL": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 14,
+                  "CONFIRMED_REVERSAL": 13,
+                  "RANGE_REVERSION": 58,
+                  "TRANSITION_SELECTIVE": 155,
+                  "TREND_CONTINUATION": 24
+                },
+                "clean_entry_rate": 0.2689393939393939,
+                "count": 264,
+                "late_entry_rate": 0.45454545454545453,
+                "mae_q90": 0.0177875095201828,
+                "maximum_gap_hours": 14.0,
+                "mean_capture_efficiency": 0.22582624708788507,
+                "mean_mae": 0.007727323041134592,
+                "mean_net": -0.0015752229351606575,
+                "mean_time_underwater_bars": 11.946969696969697,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.44696969696969696,
+                "profile_counts": {
+                  "CURRENT_TS": 9,
+                  "LOCK_AT_10_ROE": 26,
+                  "LOCK_AT_20_ROE": 223,
+                  "LOCK_AT_5_ROE": 6
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0023032858764500705,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "MAE_AND_SPEED": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 1,
+                  "CONFIRMED_REVERSAL": 8,
+                  "RANGE_REVERSION": 21,
+                  "TRANSITION_SELECTIVE": 133,
+                  "TREND_CONTINUATION": 6
+                },
+                "clean_entry_rate": 0.2603550295857988,
+                "count": 169,
+                "late_entry_rate": 0.4319526627218935,
+                "mae_q90": 0.008742880580698748,
+                "maximum_gap_hours": 62.0,
+                "mean_capture_efficiency": 0.275703112331185,
+                "mean_mae": 0.003836828036497427,
+                "mean_net": -8.215076190760745e-06,
+                "mean_time_underwater_bars": 11.21301775147929,
+                "p95_gap_hours": 14.0,
+                "positive_rate": 0.4911242603550296,
+                "profile_counts": {
+                  "CURRENT_TS": 5,
+                  "LOCK_AT_10_ROE": 22,
+                  "LOCK_AT_20_ROE": 134,
+                  "LOCK_AT_5_ROE": 8
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.23111701389561282,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_CAPTURE_WEIGHT": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 13,
+                  "CONFIRMED_REVERSAL": 14,
+                  "RANGE_REVERSION": 59,
+                  "TRANSITION_SELECTIVE": 145,
+                  "TREND_CONTINUATION": 22
+                },
+                "clean_entry_rate": 0.2727272727272727,
+                "count": 253,
+                "late_entry_rate": 0.4624505928853755,
+                "mae_q90": 0.01639380172688494,
+                "maximum_gap_hours": 14.0,
+                "mean_capture_efficiency": 0.2368304823188955,
+                "mean_mae": 0.007217934228142353,
+                "mean_net": -0.0011636008299692258,
+                "mean_time_underwater_bars": 11.628458498023715,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.4782608695652174,
+                "profile_counts": {
+                  "CURRENT_TS": 14,
+                  "LOCK_AT_10_ROE": 21,
+                  "LOCK_AT_20_ROE": 211,
+                  "LOCK_AT_5_ROE": 7
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.006879109683951399,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            },
+            "NO_LATE_PENALTY": {
+              "metrics": {
+                "archetype_counts": {
+                  "CONFIRMED_BREAKOUT": 16,
+                  "CONFIRMED_REVERSAL": 14,
+                  "RANGE_REVERSION": 72,
+                  "TRANSITION_SELECTIVE": 150,
+                  "TREND_CONTINUATION": 26
+                },
+                "clean_entry_rate": 0.26258992805755393,
+                "count": 278,
+                "late_entry_rate": 0.4784172661870504,
+                "mae_q90": 0.01726712015941699,
+                "maximum_gap_hours": 14.0,
+                "mean_capture_efficiency": 0.23625454079311226,
+                "mean_mae": 0.007573120987240756,
+                "mean_net": -0.0012235094105224528,
+                "mean_time_underwater_bars": 11.776978417266188,
+                "p95_gap_hours": 8.0,
+                "positive_rate": 0.46402877697841727,
+                "profile_counts": {
+                  "CURRENT_TS": 17,
+                  "LOCK_AT_10_ROE": 25,
+                  "LOCK_AT_20_ROE": 228,
+                  "LOCK_AT_5_ROE": 8
+                }
+              },
+              "promotion_eligible": false,
+              "threshold": 0.0038846691748476193,
+              "threshold_source": "CALIBRATION_ONLY_FIXED_QUANTILE"
+            }
+          },
+          "fold": 4,
+          "passed": false,
+          "regime_router": {
+            "accuracy": 0.43478260869565216,
+            "classes": [
+              "BULLISH",
+              "NEUTRAL",
+              "BEARISH"
+            ],
+            "label_counts": {
+              "BEARISH": 131,
+              "BULLISH": 116,
+              "NEUTRAL": 190
+            },
+            "log_loss": 1.0886470791968597,
+            "majority_accuracy": 0.43478260869565216,
+            "multiclass_brier": 0.6582310887934535,
+            "passed": false,
+            "timestamps": 437,
+            "training_prior_log_loss": 1.0833807718757382
+          },
+          "selected": {
+            "archetype_counts": {
+              "CONFIRMED_BREAKOUT": 1,
+              "TRANSITION_SELECTIVE": 72
+            },
+            "clean_entry_rate": 0.2602739726027397,
+            "count": 73,
+            "late_entry_rate": 0.3972602739726027,
+            "mae_q90": 0.01574525793303851,
+            "maximum_gap_hours": 88.0,
+            "mean_capture_efficiency": 0.27772366756959443,
+            "mean_mae": 0.005691703226013859,
+            "mean_net": -0.0014530893961720386,
+            "mean_time_underwater_bars": 12.123287671232877,
+            "p95_gap_hours": 38.70000000000002,
+            "positive_rate": 0.4657534246575342,
+            "profile_counts": {
+              "LOCK_AT_10_ROE": 4,
+              "LOCK_AT_20_ROE": 69
+            }
+          },
+          "status": "EVALUATED",
+          "test_abstained": 0,
+          "trained_archetypes": [
+            "CONFIRMED_BREAKOUT",
+            "CONFIRMED_REVERSAL",
+            "RANGE_REVERSION",
+            "TRANSITION_SELECTIVE",
+            "TREND_CONTINUATION"
+          ]
+        }
+      ],
+      "leave_one_symbol_out": {
+        "passed": false,
+        "passing_symbols": 0,
+        "required_symbols": 8,
+        "status": "NOT_RUN_PRIMARY_GATE_FAILED"
+      },
+      "passing_folds": 0,
+      "router_skilled_folds": 2,
+      "rows": 96371,
+      "validation_pass": false,
+      "worst_fold_non_negative": false
+    }
+  },
+  "trajectory_responsibility_counts": {
+    "AMBIGUOUS_PATH": 935,
+    "CLEAN_REALIZED_WIN": 48194,
+    "GOOD_ENTRY_POOR_CAPTURE": 22807,
+    "LATE_OR_ADVERSE_ENTRY": 89710,
+    "NO_DIRECTIONAL_EDGE": 31096
+  },
+  "validation_sha256": "a10143f312c4a7952123a38cabd095fa85cf8fa3233967c16ca9e95205bee081",
+  "verdict": "RESEARCH_ONLY_NOT_PROMOTABLE"
+}
