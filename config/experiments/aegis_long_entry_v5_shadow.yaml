@@ -1,0 +1,122 @@
+schema_version: aegis-long-entry-v5-shadow-preregistration-v1
+experiment_id: aegis-long-v5-multiobjective-uncertainty-shadow-01
+mode: SHADOW
+side: LONG
+selection_effect: NONE
+automatic_live_promotion: false
+
+frozen_v4_contract:
+  path: config/experiments/aegis_long_entry_v4_shadow.yaml
+  sha256: fb5e9ec6c365271e5597827b225ba0bb0560aa0c95bca0446fbc929cab42a364
+  thresholds_relaxed: false
+  setup_generator_changed: false
+  protection_changed: false
+
+frozen_v4_evidence:
+  path: data/long_entry_v4_shadow/validation.json
+  sha256: 52268b6a403d4f7219b6a5dc92d109bcd3d0cf54f134f613ade3286f5edccae5
+  entry_verdict: RESEARCH_ONLY_NOT_PROMOTABLE
+  exit_passing_folds: 3
+
+entry_population:
+  source: LONG_V4_TECHNICAL_SETUPS
+  families: [TREND_CONTINUATION, BREAKOUT_RETEST, CAPITULATION_REVERSAL]
+  excluded_family: BREAKOUT_EXPANSION
+  candidate_generation_requires_ml: false
+
+multiobjective_model:
+  architecture: POOLED_SHARED_FEATURES_FAMILY_AWARE_OUTPUT_HEADS
+  estimator: HISTOGRAM_GRADIENT_BOOSTING
+  bootstrap_members: 3
+  hard_negative_weight: 2.0
+  outputs:
+    success_probability:
+      target: TARGET_BEFORE_STOP
+      calibration: PLATT_ON_CALIBRATION_ONLY
+    expected_protected_net:
+      target: PROTECTED_WORST_NET_RETURN
+      loss: SQUARED_ERROR
+      calibration: MEDIAN_RESIDUAL_ON_CALIBRATION_ONLY
+    mae_q90:
+      target: MAE_FRACTION
+      loss: QUANTILE_0_90
+      calibration: NON_NEGATIVE_Q90_RESIDUAL_ON_CALIBRATION_ONLY
+    time_to_profit_fraction:
+      target: FIRST_FAVORABLE_BAR_OVER_HORIZON_OR_ONE
+      loss: SQUARED_ERROR
+      calibration: MEDIAN_RESIDUAL_ON_CALIBRATION_ONLY
+  score: LOWER_SUCCESS_TIMES_NET_QUALITY_TIMES_MAE_QUALITY_TIMES_SPEED_QUALITY_TIMES_CERTAINTY
+  family_encoding: EXPLICIT_ONE_HOT_SHARED_ACROSS_OUTPUTS
+  train_only_winners: false
+  hard_negatives_required: true
+
+uncertainty_and_abstention:
+  method: BOOTSTRAP_ENSEMBLE_DISPERSION
+  lower_confidence_standard_deviations: 1.645
+  uncertainty_quantiles: [0.50, 0.70, 0.85]
+  score_quantiles: [0.70, 0.80, 0.90]
+  require_expected_net_lower_bound_positive: true
+  require_mae_q90_within_adverse_barrier: true
+  maximum_time_to_profit_fraction: 0.50
+  no_forced_trade_quota: true
+
+regime_truth_audit:
+  regime_is_not_a_hard_gate_in_v5: true
+  minimum_independent_candidates: 30
+  commercially_supported_requires:
+    positive_protected_net: true
+    target_rate_above_unconditional: true
+    mae_below_unconditional: true
+  unsupported_regime_blocks_regime_specific_promotion: true
+
+prospective_microstructure:
+  database: data/long_entry_v3_shadow/public_microstructure.db
+  required_sources:
+    - kline_microstructure
+    - funding_history
+    - open_interest_recent
+    - taker_ratio_recent
+    - depth_snapshots
+  minimum_continuous_days: 30
+  desired_continuous_days: 60
+  minimum_symbol_coverage: 11
+  historical_backfill_claim: PROHIBITED_WHEN_ENDPOINT_DOES_NOT_SUPPORT_IT
+  insufficient_data_behavior: REPORT_PENDING_DO_NOT_FABRICATE
+
+exit_model:
+  source: FROZEN_V4_CAUSAL_EXIT_MODEL
+  entry_policy_dependency: REQUIRED
+  independent_live_promotion: PROHIBITED
+  minimum_passing_folds: 3
+
+ranking:
+  maximum_selected_per_timestamp_grid: [1, 2]
+  maximum_p95_gap_hours: 72
+  force_minimum_frequency: false
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD
+  folds: 4
+  embargo_minutes: 240
+  threshold_source: CALIBRATION_ONLY
+  minimum_calibration_selections: 30
+  minimum_scoring_selections_per_fold: 15
+  minimum_positive_folds: 3
+  require_worst_fold_non_negative: true
+  require_mae_below_v4_hybrid: true
+  require_underwater_below_v4_hybrid: true
+  require_net_above_v4_hybrid: true
+  require_at_least_one_commercially_supported_regime: true
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+  minimum_prospective_independent_episodes: 300
+  prohibit_post_test_threshold_relaxation: true
+
+deployment:
+  current_runtime: RESEARCH_ONLY
+  shadow_runtime_enabled: false
+  live_runtime: PROHIBITED
+  model_export: PROHIBITED_UNTIL_ALL_GATES_PASS
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0

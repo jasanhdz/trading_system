@@ -1,0 +1,128 @@
+schema_version: aegis-long-entry-v4-shadow-preregistration-v1
+experiment_id: aegis-long-v4-technical-meta-exit-tournament-shadow-01
+mode: SHADOW
+side: LONG
+selection_effect: NONE
+automatic_live_promotion: false
+
+inherited_entry_contract:
+  path: config/experiments/aegis_long_entry_v31_shadow.yaml
+  sha256: 672731f7242cdde0f43d5ee50730b8840f9e769c91d70c96e43a4ec677e4fa5d
+  thresholds_relaxed: false
+  context_relaxed: false
+  confirmation_relaxed: false
+  protection_changed: false
+
+frozen_ml_first_control:
+  path: data/long_entry_v32_shadow/validation.json
+  sha256: f724e39bed82dda29982a2a5fc19fd8c677f54f6ca542cba2ab64aafaab3e1b6
+  verdict: RESEARCH_ONLY_NOT_PROMOTABLE
+
+technical_setup_generator:
+  source: LONG_V31_CONFIRMED_EXECUTION_CANDIDATES
+  families:
+    TREND_CONTINUATION:
+      inherited_candidate_family: TREND_PULLBACK_RECLAIM
+      economic_hypothesis: HIGHER_TIMEFRAME_UPTREND_PULLBACK_AND_RECLAIM
+    BREAKOUT_RETEST:
+      inherited_candidate_family: BREAKOUT_RETEST
+      economic_hypothesis: BROKEN_RESISTANCE_RETESTED_AND_HELD
+    CAPITULATION_REVERSAL:
+      inherited_candidate_family: CONFIRMED_REVERSAL
+      economic_hypothesis: SELLING_EXHAUSTION_WITH_BUYER_CONFIRMATION
+  excluded_family:
+    BREAKOUT_EXPANSION: NEGATIVE_V3_EVIDENCE_NO_RETEST
+  model_required_to_generate_setup: false
+
+entry_quality_label:
+  direction_required: TARGET_BEFORE_STOP
+  maximum_mae: PREREGISTERED_ADVERSE_BARRIER
+  maximum_underwater_fraction_of_horizon: 0.50
+  require_fast_success: true
+  target: CLEAN_ENTRY
+  secondary_target: PROTECTED_WORST_NET_RETURN
+
+hybrid_meta_model:
+  population: TECHNICAL_SETUPS_ONLY
+  architecture: POOLED_FAMILY_AWARE
+  specialists: [OPPORTUNITY, CLEAN_ENTRY_TIMING, FALLING_KNIFE, PATH_RISK]
+  estimator: HISTOGRAM_GRADIENT_BOOSTING
+  calibration: PLATT_ON_CALIBRATION_ONLY
+  score: OPPORTUNITY_TIMES_CLEAN_ENTRY_TIMING_TIMES_ONE_MINUS_FALLING_KNIFE_TIMES_ONE_MINUS_PATH_RISK
+  hard_negative_weight: 2.0
+  family_encoding: EXPLICIT_ONE_HOT
+
+exit_shadow_model:
+  authority: OBSERVATION_ONLY
+  checkpoints_bars: [1, 3, 6, 12]
+  include_only_if_position_alive_in_both_intrabar_replays: true
+  state_features:
+    - elapsed_fraction
+    - current_net_return
+    - mfe_to_checkpoint
+    - mae_to_checkpoint
+    - drawdown_from_peak
+    - underwater_fraction
+    - return_last_1
+    - return_last_3
+    - favorable_distance_atr
+    - adverse_distance_atr
+  label: EXIT_NOW_NET_GREATER_THAN_CONTINUE_WORST_PROTECTED_NET
+  model: CALIBRATED_HISTOGRAM_GRADIENT_BOOSTING
+  probability_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  minimum_calibration_selections: 30
+  minimum_test_selections: 15
+  minimum_test_rows: 100
+  minimum_average_precision_lift_over_prevalence: 0.02
+  runtime_authority: NONE
+
+tournament:
+  arms:
+    - TECHNICAL_ONLY_ALL_SETUPS
+    - HYBRID_META_FILTERED
+    - FROZEN_ML_FIRST_V32_CONTROL
+  same_source_window: true
+  same_costs: true
+  same_typescript_protection_replay: true
+  no_trade_quota: true
+  winner_requires_incremental_value_over_technical: true
+
+ranking:
+  maximum_selected_per_timestamp_grid: [1, 2]
+  score_quantiles: [0.70, 0.75, 0.80, 0.85, 0.90]
+  maximum_falling_knife_quantiles: [0.25, 0.35, 0.45, 0.55]
+  maximum_path_risk_quantiles: [0.35, 0.45, 0.55, 0.65]
+  force_minimum_frequency: false
+  maximum_p95_gap_hours: 72
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD
+  folds: 4
+  embargo_minutes: 240
+  threshold_source: CALIBRATION_ONLY
+  minimum_calibration_selections: 30
+  minimum_scoring_selections_per_fold: 15
+  minimum_positive_folds: 3
+  require_worst_fold_non_negative: true
+  require_selected_mae_below_technical: true
+  require_selected_underwater_below_technical: true
+  require_hybrid_net_above_technical: true
+  family_retirement_required: true
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+  prohibit_post_test_threshold_relaxation: true
+
+prospective_microstructure:
+  required_before_future_retraining: true
+  minimum_collection_days: 30
+  desired_collection_days: 60
+  sources: [DEPTH_IMBALANCE, OPEN_INTEREST_CHANGE, TAKER_FLOW, FUNDING, SPREAD]
+  historical_backfill_claim: PROHIBITED_WHEN_ENDPOINT_DOES_NOT_PROVIDE_IT
+
+deployment:
+  current_runtime: RESEARCH_ONLY
+  shadow_runtime_requires_validation_pass: true
+  live_runtime: PROHIBITED
+  exit_runtime_authority: NONE
+  exchange_authority: false
+  exchange_mutations: 0
