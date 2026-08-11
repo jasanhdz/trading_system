@@ -1,0 +1,156 @@
+schema_version: aegis-calibrated-horizon-v11-preregistration-v1
+experiment_id: aegis-calibrated-horizon-v11-research-01
+mode: RESEARCH_ONLY
+selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_experiment: aegis-competing-barrier-v10-research-01
+  source_dataset: data/competing_barrier_v10/canonical_dataset.jsonl.gz
+  source_manifest: data/competing_barrier_v10/dataset_manifest.json
+  source_validation: data/competing_barrier_v10/validation.json
+  source_config: config/experiments/aegis_competing_barrier_v10_research.yaml
+  source_dataset_sha256: 4d5557be5fdd5fa3aec2828b8734d468107d2f004808dd3ff6274fb2bcc223b5
+  source_manifest_sha256: dd61d2966266d9f4b2b5577c6b450fa939077d37e442c04b03c7ce996a77b369
+  source_validation_sha256: 5f495a04a5f2432775e1153aba9515eb9f58c1b06c0a47dc48a757966d1329fb
+  source_config_sha256: 45f04ebd8028b15519e7df1058c60dcaac3c191ab36bd9f034d3626fd9e1d20f
+  candle_database: data/binance_candles.db
+  public_candle_delta: data/long_entry_v21_shadow/public_candles_delta.jsonl
+  candle_database_open_mode: READ_ONLY
+  lookback_days: 365
+  history_bars: 576
+  horizon_bars: 24
+  entry_rule: NEXT_BAR_OPEN
+
+labels:
+  reuse_v10_barrier_outcomes_unchanged: true
+  labels_use_only_future_ohlc: true
+  clean_entry:
+    source_contract: ROE_10_H12
+    requires_favorable_first: true
+    maximum_pre_event_mae_fraction_of_adverse_barrier: 0.50
+    maximum_favorable_event_bar: 6
+  path_diagnostics:
+    pre_event_mae: true
+    first_positive_after_severe_cost_bar: true
+    maximum_favorable_excursion: true
+    terminal_side_return: true
+  prohibit_causal_conditions_in_labels: true
+
+causal_regime:
+  inputs:
+    - rolling_4h_return
+    - rolling_12h_return
+    - rolling_4h_volatility
+    - rolling_4h_volume_ratio
+    - rolling_12h_close_location
+  range_absolute_4h_return: 0.003
+  range_absolute_12h_return: 0.006
+  high_volatility_threshold: 0.003
+  identities:
+    - RANGE_LOW_VOL
+    - RANGE_HIGH_VOL
+    - TREND_UP_LOW_VOL
+    - TREND_UP_HIGH_VOL
+    - TREND_DOWN_LOW_VOL
+    - TREND_DOWN_HIGH_VOL
+    - TRANSITION_LOW_VOL
+    - TRANSITION_HIGH_VOL
+  outcome_independent: true
+
+models:
+  direction:
+    classes: [LONG, SHORT, ABSTAIN]
+    estimator: HISTOGRAM_GRADIENT_BOOSTING
+    features: V9_DIRECTION_FEATURES
+  horizon_specialists:
+    horizons_bars: [6, 12, 24]
+    barrier_roe: [0.05, 0.10, 0.20]
+    classes: [FAVORABLE_FIRST, ADVERSE_FIRST, SAME_BAR_AMBIGUOUS, NEITHER_REACHED]
+    estimator: HISTOGRAM_GRADIENT_BOOSTING
+    features: V9_SIDE_FEATURES_PLUS_BARRIER_MAGNITUDE
+    stacked_barriers_within_horizon: true
+  clean_entry:
+    classes: [CLEAN, NOT_CLEAN]
+    estimator: HISTOGRAM_GRADIENT_BOOSTING
+    features: V9_SIDE_FEATURES
+  per_contract_v10_ablation:
+    enabled: true
+    role: TEST_ONLY_COMPONENT_CONTROL
+    selection_authority: false
+  no_continuous_return_regression: true
+  no_symbol_specific_estimators: true
+
+calibration:
+  split: NESTED_CHRONOLOGICAL
+  global: ONE_VS_REST_PLATT_THEN_NORMALIZE
+  hierarchical_groups: [SYMBOL, CAUSAL_REGIME]
+  minimum_group_rows: 200
+  minimum_positive_class_rows: 20
+  shrinkage_rows: 500
+  combination: GLOBAL_PLUS_SUPPORTED_GROUP_SHRINKAGE
+  expected_calibration_error_bins: 10
+  maximum_multiclass_ece: 0.10
+  prohibit_test_calibration: true
+
+utility:
+  severe_round_trip_fraction: 0.0020
+  unknown_penalty_fraction_of_adverse: 0.25
+  clean_probability_bonus_fraction_of_favorable: 0.10
+  require_positive_conservative_utility: true
+  attribution_components:
+    - FAVORABLE_VALUE
+    - ADVERSE_VALUE
+    - COST
+    - AMBIGUOUS_PENALTY
+    - UNRESOLVED_PENALTY
+    - CLEAN_ENTRY_BONUS
+  actual_same_bar_value: WORST_CASE_LOSS
+  actual_neither_value: TERMINAL_RETURN_AFTER_SEVERE_COST
+
+selection:
+  utility_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  direction_probability_quantiles: [0.40, 0.50, 0.60]
+  clean_probability_quantiles: [0.40, 0.50, 0.60]
+  maximum_unknown_probability_quantiles: [0.30, 0.40, 0.50]
+  maximum_selected_per_timestamp: 1
+  minimum_policy_selections: 30
+  prohibit_forced_trade_quota: true
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD_WITH_NESTED_CALIBRATION
+  folds: 4
+  embargo_minutes: 120
+  calibration_fraction_for_probability_fit: 0.50
+  policy_fraction_after_calibration: 0.50
+  minimum_test_selections_per_fold: 15
+  minimum_positive_folds: 3
+  require_worst_fold_non_negative: true
+  minimum_direction_skilled_folds: 3
+  minimum_horizon_specialist_skilled_per_fold: 2
+  minimum_horizon_specialist_skilled_folds: 3
+  minimum_clean_entry_skilled_folds: 3
+  require_horizon_log_loss_not_worse_than_v10_control: true
+  require_realized_utility_above_unfiltered_control: true
+  require_cvar_above_control: true
+  require_payoff_ratio_at_least: 1.0
+  maximum_p95_opportunity_gap_hours: 96
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+  prohibit_test_threshold_tuning: true
+
+protection_diagnostics:
+  current_ts_protected_return: REPORT_ONLY
+  mae: REPORT_ONLY
+  time_to_positive: REPORT_ONLY
+  alternative_exit_optimization: PROHIBITED
+  entry_gate_influence: NONE
+
+deployment:
+  model_export: PROHIBITED_UNTIL_ALL_GATES_PASS
+  shadow_runtime: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0
