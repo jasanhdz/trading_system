@@ -342,7 +342,7 @@ def _candidate_policies(
 
 def _derive_policy(
     calibration: Sequence[Mapping[str, Any]], config: Mapping[str, Any]
-) -> Mapping[str, Any] | None:
+) -> Mapping[str, Any]:
     minimum = int(config["validation"]["minimum_calibration_selections"])
     choices = []
     for policy in _candidate_policies(calibration, config):
@@ -351,7 +351,15 @@ def _derive_policy(
         if len(selected) >= minimum:
             choices.append((policy, utility_metrics(selected)))
     if not choices:
-        return None
+        utilities = [float(row["predicted_utility"]) for row in calibration]
+        return {
+            "eligible": False,
+            "reason": "NO_POLICY_WITH_MINIMUM_CALIBRATION_SELECTIONS",
+            "maximum_predicted_utility": max(utilities),
+            "positive_predicted_utility_count": sum(value >= 0.0 for value in utilities),
+            "minimum_required_selections": minimum,
+            "policies_evaluated": 0,
+        }
     policy, metrics = max(
         choices,
         key=lambda item: (
@@ -360,7 +368,12 @@ def _derive_policy(
             item[1]["count"],
         ),
     )
-    return {**policy, "calibration_metrics": metrics, "policies_evaluated": len(choices)}
+    return {
+        **policy,
+        "eligible": True,
+        "calibration_metrics": metrics,
+        "policies_evaluated": len(choices),
+    }
 
 
 def _control(rows: Sequence[Mapping[str, Any]], primary: str) -> list[dict[str, Any]]:
@@ -402,22 +415,30 @@ def _evaluate_fold(
         }
     predicted_calibration = _predict(calibration, bundle, config)
     policy = _derive_policy(predicted_calibration, config)
-    if policy is None:
+    components = _component_metrics(test, bundle, config)
+    primary = str(config["models"]["direction"]["source_contract"])
+    control = utility_metrics(_control(test, primary))
+    if not bool(policy["eligible"]):
         return {
             "fold": fold,
-            "status": "NO_CALIBRATION_POLICY",
+            "status": "NO_POSITIVE_CALIBRATION_POLICY",
             "train": len(train),
             "calibration": len(calibration),
             "test": len(test),
+            "policy": policy,
+            "selected": utility_metrics([]),
+            "control_identity": "UNFILTERED_PRIMARY_CONTRACT",
+            "control": control,
+            "components": components,
+            "economic_gate": False,
             "passed": False,
+            "exchange_calls": 0,
+            "exchange_mutations": 0,
         }
     predicted = _predict(test, bundle, config)
     mask = select_cross_section(predicted, policy)
     selected_rows = [row for row, keep in zip(predicted, mask) if keep]
     selected = utility_metrics(selected_rows)
-    primary = str(config["models"]["direction"]["source_contract"])
-    control = utility_metrics(_control(test, primary))
-    components = _component_metrics(test, bundle, config)
     economic = fold_passes(
         selected,
         control,
@@ -454,7 +475,11 @@ def evaluate_side(rows: Sequence[Mapping[str, Any]], config: Mapping[str, Any]) 
         _evaluate_fold(rows, boundary, index + 1, config)
         for index, boundary in enumerate(boundaries)
     ]
-    evaluated = [fold for fold in folds if fold["status"] == "EVALUATED"]
+    evaluated = [
+        fold
+        for fold in folds
+        if fold["status"] in {"EVALUATED", "NO_POSITIVE_CALIBRATION_POLICY"}
+    ]
     passing = sum(bool(fold["passed"]) for fold in evaluated)
     direction_skilled = sum(bool(fold["components"]["direction"]["passed"]) for fold in evaluated)
     risk_skilled = sum(bool(fold["components"]["competing_risk"]["passed"]) for fold in evaluated)
