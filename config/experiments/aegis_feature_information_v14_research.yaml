@@ -1,0 +1,122 @@
+schema_version: aegis-feature-information-v14-preregistration-v1
+experiment_id: aegis-feature-information-v14-research-01
+mode: RESEARCH_ONLY
+selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_experiment: aegis-temporal-stability-v13-research-01
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_manifest: data/calibrated_horizon_v11/dataset_manifest.json
+  source_v13_validation: data/temporal_stability_v13/validation.json
+  source_v13_config: config/experiments/aegis_temporal_stability_v13_research.yaml
+  candle_database: data/binance_candles.db
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  source_manifest_sha256: 8648567317d7d7690c917afcb36049e1f4af01168c2f9f8b871718cbc41934f4
+  source_v13_validation_sha256: 748b3826acb6bf81f128060089e03c2f05a68e83b50edbe5308c9401eab666ca
+  source_v13_config_sha256: 2130c2bedeee647ac61954cab51d4839bab82366ac55157e96de411b7f2ca2be
+  candle_database_sha256: fdc3f3ab88950ca4c217b3b132ba8552a256db25db7ed9cd27402f52b5716021
+  candle_database_open_mode: READ_ONLY
+  entry_rule: NEXT_BAR_OPEN
+
+inventory:
+  base_feature_schema: aegis-features-v2
+  base_feature_count: 83
+  research_feature_schema: V9_SIDE_FEATURES
+  research_feature_count: 176
+  require_unique_names: true
+  require_finite_values: true
+  near_constant_standard_deviation: 0.000000000001
+  duplicate_correlation_absolute: 0.999999
+  drift_robust_shift_warning: 1.0
+  frozen_run_warning_rows: 200
+
+families:
+  - MARKET_CROSS_SECTION
+  - LOCAL_MOMENTUM_TREND
+  - VOLATILITY_RANGE
+  - VOLUME_ACTIVITY
+  - CANDLE_STRUCTURE_REVERSAL
+  - MULTI_TIMEFRAME
+  - REGIME_SIDE_ARCHETYPE
+  - ROLLING_CONTEXT
+  - TAKER_FLOW_CANDIDATE
+
+taker_flow:
+  source_table: ohlcv_data
+  source_columns: [timestamp, symbol, timeframe, volume, buy_volume]
+  timeframe: 5m
+  history_bars: 24
+  strict_pre_entry_only: true
+  features:
+    - taker_imbalance_1
+    - taker_imbalance_3
+    - taker_imbalance_6
+    - taker_imbalance_12
+    - taker_imbalance_24
+    - taker_imbalance_acceleration_3_12
+    - market_taker_imbalance_6
+    - market_taker_breadth_6
+    - btc_taker_imbalance_6
+    - relative_taker_imbalance_6
+  require_complete_eleven_symbol_timestamp: true
+  prohibit_future_candle: true
+
+unavailable_sources:
+  funding:
+    table: market_data
+    observed_rows: 0
+    action: DOCUMENT_GAP_NO_MODEL_INPUT
+  open_interest:
+    table: market_data
+    observed_rows: 0
+    action: DOCUMENT_GAP_NO_MODEL_INPUT
+  order_book:
+    source: NOT_PRESENT
+    action: DOCUMENT_GAP_NO_MODEL_INPUT
+  liquidations:
+    source: NOT_PRESENT
+    action: DOCUMENT_GAP_NO_MODEL_INPUT
+
+targets:
+  danger_first:
+    positive_outcomes: [ADVERSE_FIRST, SAME_BAR_AMBIGUOUS]
+    source_contract: ROE_10_H12
+  clean_entry:
+    source: V11_PRIMARY_CLEAN_ENTRY_LABEL
+  mae:
+    source: V9_MAE_FRACTION
+    quantile: 0.90
+
+models:
+  classification_estimator: LOGISTIC_REGRESSION_STANDARDIZED
+  mae_estimator: HISTOGRAM_GRADIENT_BOOSTING_QUANTILE
+  class_weight: BALANCED
+  one_model_per_side: true
+  baseline_features: ALL_176_V9_FEATURES
+  candidate_features: BASELINE_PLUS_TAKER_FLOW
+  family_ablation: BASELINE_MINUS_ONE_EXISTING_FAMILY
+  family_alone: REPORT_ONLY
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD
+  folds: 4
+  embargo_minutes: 120
+  minimum_rows_per_fold: 500
+  minimum_candidate_improvement_folds: 3
+  require_danger_log_loss_improvement: true
+  require_danger_average_precision_improvement: true
+  require_clean_log_loss_improvement: true
+  require_mae_pinball_improvement: true
+  prohibit_test_threshold_tuning: true
+  prohibit_family_selection_on_aggregate_only: true
+
+deployment:
+  feature_contract_change: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  model_export: PROHIBITED
+  shadow_runtime: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0
