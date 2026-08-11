@@ -1,0 +1,147 @@
+schema_version: aegis-decomposed-entry-v9-preregistration-v1
+experiment_id: aegis-decomposed-entry-v9-research-01
+mode: RESEARCH_ONLY
+selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_experiment: aegis-tail-aware-entry-v8-research-01
+  source_dataset: data/tail_aware_entry_v8/canonical_dataset.jsonl.gz
+  source_manifest: data/tail_aware_entry_v8/dataset_manifest.json
+  source_validation: data/tail_aware_entry_v8/validation.json
+  source_dataset_sha256: dd57cd8a33e7dd6b783b4cce718037c65c0855242f7f1904c84c11a0f2a71010
+  source_manifest_sha256: e92ea3245c51850f27147d2a96bc3d98761d97c803951ed128a3233e7c000421
+  source_validation_sha256: 85d851444636e461357b0812132b758084e6d82513d4eda99d7aed9e6065ec1b
+  candle_database: data/binance_candles.db
+  public_candle_delta: data/long_entry_v21_shadow/public_candles_delta.jsonl
+  candle_database_open_mode: READ_ONLY
+  lookback_days: 365
+  history_bars: 576
+  entry_rule: NEXT_BAR_OPEN
+  prohibit_future_features: true
+
+objective:
+  primary: POSITIVE_CURRENT_TS_STRESS_NET_EXPECTANCY
+  secondary:
+    - IMPROVE_LOWER_TAIL_CVAR
+    - PAYOFF_RATIO_AT_LEAST_ONE
+    - REDUCE_MAE
+    - FAST_POSITIVE_AFTER_COST
+    - CALIBRATED_DIRECTION_AND_TIMING
+  direction_timing_trajectory_are_separate_claims: true
+  low_mae_alone_is_not_success: true
+  win_rate_alone_is_not_success: true
+  protection_cannot_create_directional_edge: true
+
+direction:
+  classes: [LONG, SHORT, ABSTAIN]
+  label_horizon_bars: 24
+  stress_round_trip_fraction: 0.0015
+  minimum_edge_over_opposite_fraction: 0.0010
+  feature_scope: SIDE_NEUTRAL_PLUS_CAUSAL_4H
+  calibration: ONE_VS_REST_PLATT_THEN_NORMALIZE
+  minimum_skilled_folds: 3
+  require_log_loss_below_prior: true
+  require_accuracy_not_below_majority: true
+
+timing:
+  heads:
+    - EXHAUSTED_MOVE
+    - COUNTER_TREND_FAILURE
+    - FALSE_BREAKOUT
+    - WEAK_VOLUME_IMPULSE
+    - OVEREXTENSION_FAILURE
+    - TRANSITION_FAILURE
+    - ADVERSE_CONTINUATION
+  clean_mae_fraction: 0.006
+  clean_positive_bar: 6
+  overextension_atr: 2.0
+  exhaustion_atr: 1.5
+  weak_volume_ratio: 0.9
+  minimum_skilled_heads_per_fold: 4
+  minimum_skilled_folds: 3
+  calibration: PLATT_ON_CALIBRATION_ONLY
+  require_brier_below_prevalence_baseline: true
+  require_average_precision_above_prevalence: true
+
+trajectory:
+  fixed_primary_protection: CURRENT_TS
+  diagnostic_protection_profiles_only: true
+  heads:
+    - POSITIVE_CURRENT_TS_STRESS_PROBABILITY
+    - CATASTROPHIC_CURRENT_TS_STRESS_PROBABILITY
+    - CURRENT_TS_STRESS_NET
+    - MAE_Q90
+    - MFE_Q50
+    - TIME_TO_POSITIVE
+  catastrophic_stress_fraction: -0.010
+  tail_quantile: 0.10
+  payoff_minimum: 1.0
+  require_regression_skill_over_constant: true
+  minimum_skilled_folds: 3
+
+causal_context:
+  retained_v8_features: 167
+  rolling_4h_bars: 48
+  rolling_12h_bars: 144
+  added_features:
+    - ROLLING_4H_RETURN
+    - ROLLING_12H_RETURN
+    - ROLLING_4H_VOLATILITY
+    - ROLLING_4H_VOLUME_RATIO
+    - ROLLING_12H_CLOSE_LOCATION
+    - SIDE_ROLLING_4H_RETURN
+    - SIDE_ROLLING_12H_RETURN
+    - TIMEFRAME_ALIGNMENT_SCORE
+    - TIMEFRAME_CONFLICT_SCORE
+  current_partial_bar_excluded: true
+
+costs:
+  source_base_round_trip_fraction: 0.0010
+  expected_round_trip_fraction: 0.0010
+  stress_round_trip_fraction: 0.0015
+  severe_round_trip_fraction: 0.0020
+  primary_selection_cost: STRESS
+
+models:
+  direction_estimator: HISTOGRAM_GRADIENT_BOOSTING_MULTICLASS
+  timing_estimators: INDEPENDENT_HISTOGRAM_GRADIENT_BOOSTING_BINARY
+  trajectory_estimators: HISTOGRAM_GRADIENT_BOOSTING
+  probability_calibration: PLATT_ON_CALIBRATION_ONLY
+  no_fake_votes: true
+  unknown_state: ABSTAIN
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD
+  folds: 4
+  embargo_minutes: 120
+  independent_rows_only_for_test: true
+  score_quantiles: [0.70, 0.75, 0.80, 0.85, 0.90]
+  direction_probability_quantiles: [0.40, 0.50, 0.60]
+  maximum_timing_risk_quantiles: [0.30, 0.40, 0.50]
+  maximum_mae_quantiles: [0.40, 0.50, 0.60]
+  minimum_reward_risk_quantiles: [0.40, 0.50, 0.60]
+  maximum_selected_per_timestamp: 1
+  minimum_calibration_selections: 40
+  minimum_test_selections_per_fold: 20
+  minimum_positive_folds: 3
+  require_worst_fold_non_negative: true
+  require_stress_net_above_current_brain_control: true
+  require_cvar_above_control: true
+  require_mae_not_worse_than_control: true
+  require_payoff_ratio_at_least: 1.0
+  maximum_p95_opportunity_gap_hours: 72
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+  bootstrap_samples: 500
+  prohibit_test_threshold_tuning: true
+  prohibit_forced_trade_quota: true
+
+deployment:
+  model_export: PROHIBITED_UNTIL_ALL_GATES_PASS
+  shadow_runtime: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0
