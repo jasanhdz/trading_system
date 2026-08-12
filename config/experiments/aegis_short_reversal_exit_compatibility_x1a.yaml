@@ -1,0 +1,127 @@
+schema_version: aegis-short-reversal-exit-compatibility-x1a-preregistration-v1
+experiment_id: aegis-short-reversal-exit-compatibility-x1a-01
+registered_date_utc: '2026-08-12'
+mode: RESEARCH_ONLY
+selection_effect: NONE
+exchange_authority: false
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  source_manifest: data/calibrated_horizon_v11/dataset_manifest.json
+  source_manifest_sha256: 8648567317d7d7690c917afcb36049e1f4af01168c2f9f8b871718cbc41934f4
+  public_candle_delta: data/long_entry_v21_shadow/public_candles_delta.jsonl
+  public_candle_delta_sha256: 849b36377b0bb2ca04d084f4633119baf5e800cdfc1a0ffdfbadcb249a06abc2
+  public_microstructure_database: data/long_entry_v3_shadow/public_microstructure.db
+  public_microstructure_database_sha256: fd7f5a4af37d09ad6a3b76000ec819843efe94f718922e993ae3d607e904b2f1
+  v21_config: config/experiments/aegis_alpha_laboratory_v21.yaml
+  v21_config_sha256: bdfd3fa8c4ce5f4d09f204d1a41737e6ed420aad78a52a85ca0388b414dc1a94
+  x1_config: config/experiments/aegis_short_reversal_exit_compatibility_x1.yaml
+  x1_config_sha256: f53aae39f936270686213514c505667156f15c87b49049ced8e61acd45c00703
+  x1_gap_commit: d2292d8
+  protection_replay: src/aegis/research/hybrid_ts_protection_replay.py
+  protection_replay_sha256: 433792de841e5accc7d715cf0cce806ffef84dde2c6b8bb49ce675b81517a48a
+
+future_evidence:
+  start_inclusive: '2026-07-17T19:00:00+00:00'
+  end_inclusive: '2026-08-09T06:55:00+00:00'
+  strictly_after_v21_holdout: true
+  one_shot_only: true
+  minimum_event_spacing_minutes_per_symbol: 60
+  side: SHORT
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  timeframe: 5m
+  entry_rule: NEXT_BAR_OPEN
+
+flow_contract:
+  identity: V14_MATHEMATICAL_CONTRACT_SPLIT_PUBLIC_SOURCE_V1
+  base_volume_source: PUBLIC_CANDLE_DELTA_VOLUME
+  taker_buy_source: PUBLIC_MICROSTRUCTURE_TAKER_BUY_BASE
+  join_key: [symbol, open_time_ms]
+  closed_bars_only: true
+  latest_bar_offset_minutes: 5
+  required_history_bars: 24
+  required_bar_spacing_minutes: 5
+  require_complete_eleven_symbol_timestamp: true
+  require_taker_buy_between_zero_and_base_volume: true
+  missing_value_policy: OMIT_TIMESTAMP_FAIL_CLOSED
+  synthetic_or_zero_fill: PROHIBITED
+  feature_names:
+    - taker_imbalance_1
+    - taker_imbalance_3
+    - taker_imbalance_6
+    - taker_imbalance_12
+    - taker_imbalance_24
+    - taker_imbalance_acceleration_3_12
+    - market_taker_imbalance_6
+    - market_taker_breadth_6
+    - btc_taker_imbalance_6
+    - relative_taker_imbalance_6
+  source_change_from_v21: EXPLICIT_PHYSICAL_SOURCE_CHANGE_SAME_FORMULA
+
+entry_rule:
+  identity: V21_EXTREME_REVERSAL_SHORT_CONFIG_BOUND
+  source: strategies.EXTREME_REVERSAL
+  modifications: NONE
+  threshold_search: PROHIBITED
+  feature_search: PROHIBITED
+  symbol_overrides: PROHIBITED
+
+exit_hypothesis:
+  candidate_profile: CURRENT_TS
+  frozen_control_profile: LOCK_AT_5_ROE
+  diagnostic_only_profiles: [LOCK_AT_10_ROE, LOCK_AT_20_ROE]
+  primary_outcome: CURRENT_TS_WORST_INTRABAR_PROTECTED_NET_RETURN
+
+cost_contract:
+  embedded_round_trip_cost_fraction: 0.001
+  stress_additional_round_trip_cost_fraction: [0.0005, 0.001]
+  primary_stress_level: 0.0005
+  funding_pnl: NOT_INCLUDED_SOURCE_OUTCOME_UNAVAILABLE
+
+controls:
+  random_seed: 220011
+  definitions:
+    - NO_TRADE_ZERO_RETURN
+    - V21_LOCK_AT_5_ROE_SAME_EVENTS
+    - RANDOM_SHORT_FUTURE_PERIOD_MATCHED_COUNT_CURRENT_TS
+    - UNCONDITIONAL_SHORT_FUTURE_PERIOD_CURRENT_TS
+
+uncertainty:
+  block_unit: UTC_DAY
+  bootstrap_resamples: 2000
+  confidence_interval: 0.95
+  seed: 220012
+
+gate:
+  minimum_candidate_events: 20
+  require_positive_mean_current_ts_net: true
+  require_positive_mean_at_primary_cost_stress: true
+  minimum_profit_factor: 1.10
+  maximum_mean_mae: 0.006
+  minimum_positive_temporal_thirds: 2
+  require_outperformance_of_v21_exit: true
+  require_outperformance_of_random_control: true
+  require_lower_daily_block_bootstrap_bound_non_negative: true
+
+anti_overfitting:
+  no_threshold_search: true
+  no_exit_search: true
+  no_seed_selection: true
+  no_symbol_selection: true
+  no_result_based_gate_changes: true
+  no_reuse_as_x1a_confirmation_after_opening: true
+  negative_result_preservation_required: true
+
+deployment:
+  X1A_READY_FOR_SHADOW: false
+  X1A_READY_FOR_LIVE: false
+  model_training: PROHIBITED
+  model_export: PROHIBITED
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0
+
