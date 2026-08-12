@@ -287,7 +287,9 @@ class CausalRegimeClassifier:
     def observe(self, hourly: Sequence[MinuteBar], four_hourly: Sequence[MinuteBar]) -> RegimeObservation:
         if len(hourly) < 25 or len(four_hourly) < 7:
             raise FastTrackContractError("AEGIS_M1A_REGIME_HISTORY_INSUFFICIENT")
-        timestamp = min(hourly[-1].close_time_ms, four_hourly[-1].close_time_ms)
+        if four_hourly[-1].close_time_ms > hourly[-1].close_time_ms:
+            raise FastTrackContractError("AEGIS_M1A_REGIME_CAUSALITY_VIOLATION")
+        timestamp = hourly[-1].close_time_ms
         if timestamp <= self._last_timestamp:
             raise FastTrackContractError("AEGIS_M1A_REGIME_NON_CHRONOLOGICAL")
         self._last_timestamp = timestamp
@@ -356,6 +358,8 @@ def _regime_raw_metrics(
 ) -> tuple[float, float, float]:
     if len(hourly) < 25 or len(four_hourly) < 7:
         raise FastTrackContractError("AEGIS_M1A_REGIME_HISTORY_INSUFFICIENT")
+    if four_hourly[-1].close_time_ms > hourly[-1].close_time_ms:
+        raise FastTrackContractError("AEGIS_M1A_REGIME_CAUSALITY_VIOLATION")
     ret_1h = _return(hourly, 1)
     ret_4h = _return(four_hourly, 1)
     closes = [row.close for row in hourly[-25:]]

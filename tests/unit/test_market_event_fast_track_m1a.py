@@ -89,7 +89,7 @@ def test_resampling_requires_complete_closed_groups() -> None:
 def test_regime_is_stateful_causal_and_pattern_engine_uses_context() -> None:
     minute = _bars(2000)
     hourly = resample_closed_bars(minute[:1800], 60)
-    four_hourly = resample_closed_bars(minute[:1920], 240)
+    four_hourly = resample_closed_bars(minute[:1680], 240)
     classifier = CausalRegimeClassifier(
         RegimeThresholds(0.0001, 0.00005, 0.00001, 0.01, 0.02, 1, 10_000),
         minimum_state_bars=1,
@@ -98,6 +98,12 @@ def test_regime_is_stateful_causal_and_pattern_engine_uses_context() -> None:
     assert regime.direction is DirectionAxis.BULL
     with pytest.raises(FastTrackContractError, match="NON_CHRONOLOGICAL"):
         classifier.observe(hourly, four_hourly)
+    with pytest.raises(FastTrackContractError, match="CAUSALITY"):
+        classifier = CausalRegimeClassifier(
+            RegimeThresholds(0.0001, 0.00005, 0.00001, 0.01, 0.02, 1, 10_000),
+            minimum_state_bars=1,
+        )
+        classifier.observe(hourly[:-1], resample_closed_bars(minute[:1920], 240))
 
     futures = list(_bars(300, drift=0.00005))
     # A compressed range followed by an explicit upside breakout with flow.
@@ -176,7 +182,7 @@ def test_regime_thresholds_are_fitted_from_train_histories() -> None:
         samples.append(
             (
                 resample_closed_bars(minute[:1800], 60),
-                resample_closed_bars(minute[:1920], 240),
+                resample_closed_bars(minute[:1680], 240),
             )
         )
     thresholds = fit_regime_thresholds_from_train(samples)
