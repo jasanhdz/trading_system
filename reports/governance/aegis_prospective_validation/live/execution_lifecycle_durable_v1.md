@@ -49,13 +49,21 @@ an idempotent reduce-only emergency exit before requesting it.
 
 ## Validation
 
-Fourteen focused durable-lifecycle TypeScript tests pass, plus two existing
-Binance bracket tests. They cover deterministic identity,
+Twenty-one focused durable-lifecycle TypeScript tests pass, including seven
+end-to-end acceptance scenarios. They cover deterministic identity,
 duplicate intent conflict, partial fill, ambiguous timeout received by Binance,
 ambiguous timeout not received, read-before-retry, crash between fill and
 bracket, complete local-state loss, partial bracket coverage, bracket failure,
 idempotent close, corrupted journal, ambiguous transport reads, and exact
 protection reconciliation.
+
+The complete fake lifecycle proceeds from durable intent through entry, fill,
+exact bracket coverage, process restart, duplicate event, reduce-only exit, and
+terminal accounting state. Adverse cases include definitive entry rejection,
+partial fill, both timeout outcomes, stop rejection, missing take-profit,
+restart before bracket, and complete journal loss. This rehearsal found and
+fixed a candidate-only bug where requesting exit again after `CLOSED` could
+degrade the terminal record to `RECONCILIATION_REQUIRED`.
 
 `npm run build` passes. No exchange request was made by these tests; all
 mutation-capable paths used fakes or mocked transport.
