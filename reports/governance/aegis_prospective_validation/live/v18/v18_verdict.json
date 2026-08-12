@@ -1,0 +1,37 @@
+{
+  "schema_id": "aegis-v18-verdict-v1",
+  "experiment_id": "aegis-decomposed-economic-selector-v18-01",
+  "V18_READY_FOR_SHADOW": false,
+  "V18_READY_FOR_LIVE": false,
+  "validation_gate_passed": false,
+  "final_holdout": {
+    "status": "SEALED_NOT_AVAILABLE",
+    "access_count": 0,
+    "opened": false
+  },
+  "direction_results": {
+    "LONG": {
+      "train_selected": 0,
+      "validation_selected": 0,
+      "gate_passed": false
+    },
+    "SHORT": {
+      "train_selected": 0,
+      "validation_selected": 0,
+      "gate_passed": false
+    }
+  },
+  "blockers": [
+    "VALIDATION_GATE_FAILED",
+    "CLEAN_PROBABILITY_GATE_INFEASIBLE_AS_PREREGISTERED",
+    "EXPECTED_UTILITY_PREDOMINANTLY_NEGATIVE",
+    "CLEAN_ENTRY_RANKING_WEAK",
+    "FINAL_HOLDOUT_NOT_MATURE_OR_OPENED",
+    "NEW_SHADOW_FORWARD_EVIDENCE_REQUIRED"
+  ],
+  "model_exported": false,
+  "shadow_changed": false,
+  "live_changed": false,
+  "exchange_calls": 0,
+  "exchange_mutations": 0
+}
