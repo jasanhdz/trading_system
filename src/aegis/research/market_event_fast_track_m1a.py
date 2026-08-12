@@ -113,6 +113,28 @@ class FlowBucket:
         )
 
 
+def flow_buckets_from_klines(rows: Sequence[MinuteBar]) -> tuple[FlowBucket, ...]:
+    """Use Binance's physical one-minute taker-buy field without interpolation."""
+
+    result = []
+    for row in rows:
+        if row.interval_minutes != 1:
+            raise FastTrackContractError("AEGIS_M1A_FLOW_REQUIRES_1M_KLINE")
+        sell_quote = row.quote_volume - row.taker_buy_quote
+        if sell_quote < -1e-9:
+            raise FastTrackContractError("AEGIS_M1A_KLINE_FLOW_INVALID")
+        result.append(
+            FlowBucket(
+                row.symbol,
+                row.open_time_ms,
+                row.taker_buy_quote,
+                max(0.0, sell_quote),
+                row.trade_count,
+            )
+        )
+    return tuple(result)
+
+
 def _csv_rows(path: Path) -> Iterable[list[str]]:
     with zipfile.ZipFile(path) as archive:
         members = [item for item in archive.infolist() if not item.is_dir()]

@@ -19,7 +19,7 @@ from aegis.research.market_event_fast_track_m1a import (
     extract_pattern_features,
     fit_pattern_thresholds_from_train,
     fit_regime_thresholds_from_train,
-    read_agg_trade_archive,
+    flow_buckets_from_klines,
     read_kline_archive,
     resample_closed_bars,
     detect_micro_patterns,
@@ -57,14 +57,16 @@ def main() -> int:
     output = args.output if args.output.is_absolute() else root / args.output
     paths = {
         "futures_klines": archive_root / "futures/um/monthly/klines" / args.symbol / "1m" / f"{args.symbol}-1m-{args.month}.zip",
-        "futures_aggTrades": archive_root / "futures/um/monthly/aggTrades" / args.symbol / f"{args.symbol}-aggTrades-{args.month}.zip",
         "spot_klines": archive_root / "spot/monthly/klines" / args.symbol / "1m" / f"{args.symbol}-1m-{args.month}.zip",
     }
     if any(not path.is_file() for path in paths.values()):
         raise SystemExit("AEGIS_M1A_PILOT_ARCHIVE_MISSING")
     futures_rows = read_kline_archive(paths["futures_klines"], args.symbol)
     spot_by_time = {row.open_time_ms: row for row in read_kline_archive(paths["spot_klines"], args.symbol)}
-    flow_by_time = {row.open_time_ms: row for row in read_agg_trade_archive(paths["futures_aggTrades"], args.symbol)}
+    flow_by_time = {
+        row.open_time_ms: row
+        for row in flow_buckets_from_klines(futures_rows)
+    }
     common = tuple(
         row for row in futures_rows
         if row.open_time_ms in spot_by_time and row.open_time_ms in flow_by_time

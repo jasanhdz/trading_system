@@ -19,6 +19,7 @@ from aegis.research.market_event_fast_track_m1a import (
     extract_pattern_features,
     fit_pattern_thresholds_from_train,
     fit_regime_thresholds_from_train,
+    flow_buckets_from_klines,
     normalize_timestamp_ms,
     read_agg_trade_archive,
     read_kline_archive,
@@ -73,6 +74,10 @@ def test_archive_parsers_preserve_aggressor_semantics(tmp_path) -> None:
     assert bucket.aggressive_buy_quote == 200
     assert bucket.aggressive_sell_quote == 100
     assert bucket.imbalance == pytest.approx(1 / 3)
+    physical = flow_buckets_from_klines(read_kline_archive(kline, "ADAUSDT"))[0]
+    assert physical.aggressive_buy_quote == 600
+    assert physical.aggressive_sell_quote == 400
+    assert physical.imbalance == pytest.approx(0.2)
 
 
 def test_resampling_requires_complete_closed_groups() -> None:

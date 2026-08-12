@@ -27,6 +27,11 @@ aggregate trades, funding and mark-price candles where available. Every archive
 must have a verified checksum, an immutable raw copy and a source manifest.
 Missing periods are quarantined; they are never zero-filled.
 
+For the preregistered one-minute first pass, aggressive flow is reconstructed
+directly from the physical kline fields `taker buy quote volume` and total quote
+volume. Tick-level aggTrades are optional enrichment for a later subminute
+experiment; they are not required to duplicate the same one-minute aggregate.
+
 One-minute observations are the physical base. The 5m, 15m, 1h, 4h and 1d
 views are resampled from closed one-minute observations so all features share a
 single causal clock. Partial higher-timeframe candles are prohibited.

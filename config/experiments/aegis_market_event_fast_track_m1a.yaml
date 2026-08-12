@@ -28,6 +28,8 @@ data:
   archive_types:
     futures_um: [aggTrades, klines, fundingRate, markPriceKlines]
     spot: [aggTrades, klines]
+  one_minute_flow_source: KLINE_TAKER_BUY_QUOTE_AND_TOTAL_QUOTE
+  tick_aggtrades_role: OPTIONAL_SUBMINUTE_ENRICHMENT
   archive_granularity: MONTHLY_THEN_DAILY_GAP_FILL
   checksum_required: true
   timestamp_unit_detection_required: true
