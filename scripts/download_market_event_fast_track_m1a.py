@@ -12,21 +12,8 @@ from aegis.research.binance_public_archive import (
     ArchiveRequest,
     BinancePublicArchiveClient,
     append_manifest,
+    month_range,
 )
-
-
-def _months(start: str, end: str) -> tuple[str, ...]:
-    start_year, start_month = map(int, start.split("-"))
-    end_year, end_month = map(int, end.split("-"))
-    cursor = start_year * 12 + start_month - 1
-    finish = end_year * 12 + end_month - 1
-    if cursor > finish:
-        raise ValueError("start month must not follow end month")
-    values = []
-    while cursor <= finish:
-        values.append(f"{cursor // 12:04d}-{cursor % 12 + 1:02d}")
-        cursor += 1
-    return tuple(values)
 
 
 def main() -> int:
@@ -64,7 +51,7 @@ def main() -> int:
     }
     client = BinancePublicArchiveClient()
     evidence = []
-    for month in _months(args.start_month, args.end_month):
+    for month in month_range(args.start_month, args.end_month):
         for symbol in args.symbols:
             for dataset in args.datasets:
                 market, data_type, interval = mapping[dataset]

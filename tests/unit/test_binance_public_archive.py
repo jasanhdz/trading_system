@@ -8,6 +8,7 @@ from aegis.research.binance_public_archive import (
     BinancePublicArchiveClient,
     PublicArchiveError,
     append_manifest,
+    month_range,
 )
 
 
@@ -24,6 +25,11 @@ def test_archive_urls_are_exact_and_reject_unknown_surfaces() -> None:
         ArchiveRequest("futures/um", "orders", "BTCUSDT", "2026-07").validate()
     with pytest.raises(PublicArchiveError, match="INTERVAL_CONTRACT"):
         ArchiveRequest("spot", "klines", "BTCUSDT", "2026-07").validate()
+    assert month_range("2025-11", "2026-02") == (
+        "2025-11", "2025-12", "2026-01", "2026-02"
+    )
+    with pytest.raises(PublicArchiveError, match="REVERSED"):
+        month_range("2026-02", "2025-11")
 
 
 def test_checksum_and_zip_validation_fail_closed(tmp_path) -> None:

@@ -195,6 +195,22 @@ class BinancePublicArchiveClient:
         )
 
 
+def month_range(start: str, end: str) -> tuple[str, ...]:
+    if not MONTH_PATTERN.fullmatch(start) or not MONTH_PATTERN.fullmatch(end):
+        raise PublicArchiveError("AEGIS_M1A_MONTH_RANGE_INVALID")
+    start_year, start_month = map(int, start.split("-"))
+    end_year, end_month = map(int, end.split("-"))
+    cursor = start_year * 12 + start_month - 1
+    finish = end_year * 12 + end_month - 1
+    if cursor > finish:
+        raise PublicArchiveError("AEGIS_M1A_MONTH_RANGE_REVERSED")
+    values = []
+    while cursor <= finish:
+        values.append(f"{cursor // 12:04d}-{cursor % 12 + 1:02d}")
+        cursor += 1
+    return tuple(values)
+
+
 def append_manifest(path: Path, evidence: Iterable[ArchiveEvidence]) -> None:
     """Append evidence once; reject changed identities or archive hashes."""
 
