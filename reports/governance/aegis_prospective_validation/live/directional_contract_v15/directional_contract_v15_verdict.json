@@ -1,0 +1,40 @@
+{
+  "candidate_passed": false,
+  "exchange_calls": 0,
+  "exchange_mutations": 0,
+  "experiment_id": "aegis-directional-contract-v15-research-01",
+  "live_changed": false,
+  "long": {
+    "candidate_feature_count": 129,
+    "improvement_folds": {
+      "adverse_first": 2,
+      "clean": 0,
+      "cvar": 3,
+      "danger": 2,
+      "mae": 3,
+      "mean_utility": 3,
+      "selected_mae": 3
+    },
+    "passed": false,
+    "post_v14_holdout_mean_utility": -0.0018966357340653344
+  },
+  "model_exported": false,
+  "rows": 96382,
+  "schema_id": "aegis-directional-contract-v15-verdict-v1",
+  "shadow_changed": false,
+  "short": {
+    "candidate_feature_count": 168,
+    "improvement_folds": {
+      "adverse_first": 4,
+      "clean": 1,
+      "cvar": 4,
+      "danger": 2,
+      "mae": 0,
+      "mean_utility": 0,
+      "selected_mae": 3
+    },
+    "passed": false,
+    "post_v14_holdout_mean_utility": -0.0021695427053432716
+  },
+  "verdict": "RESEARCH_ONLY_NOT_PROMOTABLE"
+}
