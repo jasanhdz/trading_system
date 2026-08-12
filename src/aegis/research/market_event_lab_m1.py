@@ -433,6 +433,130 @@ class EventPathOutcome:
     time_to_stop_bars: int | None
 
 
+@dataclass(frozen=True)
+class IndependentEvent:
+    event_id: str
+    family: EventFamily
+    symbol: str
+    side: TradeSide
+    timestamp_ms: int
+    score: float
+
+
+def collapse_correlated_events(
+    events: Sequence[IndependentEvent], *, window_minutes: int = 15
+) -> tuple[IndependentEvent, ...]:
+    """Keep the first causal observation in each market-wide family/side cluster."""
+
+    if window_minutes < 0:
+        raise MarketEventContractError("AEGIS_M1_CLUSTER_WINDOW_INVALID")
+    accepted: list[IndependentEvent] = []
+    last_by_group: dict[tuple[EventFamily, TradeSide], int] = {}
+    window_ms = window_minutes * 60_000
+    for event in sorted(events, key=lambda item: (item.timestamp_ms, item.event_id)):
+        if (
+            event.side not in {TradeSide.LONG, TradeSide.SHORT}
+            or event.symbol not in EXPECTED_SYMBOLS
+            or event.timestamp_ms <= 0
+            or not math.isfinite(event.score)
+        ):
+            raise MarketEventContractError("AEGIS_M1_CLUSTER_EVENT_INVALID")
+        group = (event.family, event.side)
+        previous = last_by_group.get(group)
+        if previous is not None and event.timestamp_ms - previous <= window_ms:
+            continue
+        accepted.append(event)
+        last_by_group[group] = event.timestamp_ms
+    return tuple(accepted)
+
+
+@dataclass(frozen=True)
+class PortfolioEvent:
+    event_id: str
+    timestamp_ms: int
+    symbol: str
+    side: TradeSide
+    holding_bars: int
+    net_return_fraction: float
+
+
+@dataclass(frozen=True)
+class PortfolioReplayResult:
+    starting_equity: float
+    ending_equity: float
+    net_pnl: float
+    trades_executed: int
+    skipped_same_symbol: int
+    skipped_capacity: int
+    maximum_concurrent_positions: int
+    maximum_drawdown_fraction: float
+
+
+def replay_portfolio(
+    events: Sequence[PortfolioEvent],
+    *,
+    starting_equity: float = 1.0,
+    position_fraction: float = 0.1,
+    maximum_concurrent_positions: int | None = None,
+) -> PortfolioReplayResult:
+    """Replay event economics with causal capital and overlap accounting."""
+
+    if (
+        not math.isfinite(starting_equity)
+        or starting_equity <= 0.0
+        or not math.isfinite(position_fraction)
+        or not 0.0 <= position_fraction <= 1.0
+        or maximum_concurrent_positions is not None
+        and maximum_concurrent_positions <= 0
+    ):
+        raise MarketEventContractError("AEGIS_M1_PORTFOLIO_CONFIG_INVALID")
+    equity = starting_equity
+    peak = starting_equity
+    maximum_drawdown = 0.0
+    active: list[tuple[int, str]] = []
+    executed = 0
+    skipped_symbol = 0
+    skipped_capacity = 0
+    maximum_concurrent = 0
+    seen_ids: set[str] = set()
+    for event in sorted(events, key=lambda item: (item.timestamp_ms, item.event_id)):
+        if (
+            event.event_id in seen_ids
+            or event.timestamp_ms <= 0
+            or event.symbol not in EXPECTED_SYMBOLS
+            or event.side not in {TradeSide.LONG, TradeSide.SHORT}
+            or event.holding_bars <= 0
+            or not math.isfinite(event.net_return_fraction)
+        ):
+            raise MarketEventContractError("AEGIS_M1_PORTFOLIO_EVENT_INVALID")
+        seen_ids.add(event.event_id)
+        active = [item for item in active if item[0] > event.timestamp_ms]
+        if event.symbol in {symbol for _, symbol in active}:
+            skipped_symbol += 1
+            continue
+        if maximum_concurrent_positions is not None and len(active) >= maximum_concurrent_positions:
+            skipped_capacity += 1
+            continue
+        allocated = equity * position_fraction
+        equity += allocated * event.net_return_fraction
+        peak = max(peak, equity)
+        maximum_drawdown = max(maximum_drawdown, (peak - equity) / peak)
+        end_timestamp = event.timestamp_ms + event.holding_bars * 5 * 60_000
+        active.append((end_timestamp, event.symbol))
+        executed += 1
+        maximum_concurrent = max(maximum_concurrent, len(active))
+    return PortfolioReplayResult(
+        starting_equity=starting_equity,
+        ending_equity=equity,
+        net_pnl=equity - starting_equity,
+        trades_executed=executed,
+        skipped_same_symbol=skipped_symbol,
+        skipped_capacity=skipped_capacity,
+        maximum_concurrent_positions=maximum_concurrent,
+        maximum_drawdown_fraction=maximum_drawdown,
+    )
+
+
 def replay_event_path(
     *,
     side: TradeSide,

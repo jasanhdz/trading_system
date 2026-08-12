@@ -13,13 +13,17 @@ from aegis.research.market_event_lab_m1 import (
     FAMILY_REQUIREMENTS,
     EventFamily,
     EventThresholds,
+    IndependentEvent,
     MarketEventContractError,
+    PortfolioEvent,
     TrialRecord,
     assess_database_readiness,
     build_event_vector,
+    collapse_correlated_events,
     detect_event,
     initialize_market_event_schema,
     replay_event_path,
+    replay_portfolio,
 )
 
 
@@ -179,6 +183,34 @@ def test_economic_path_is_side_correct_costed_and_conservative_on_same_bar() -> 
             target_fraction=0.02,
             stop_fraction=0.02,
         )
+
+
+def test_correlation_control_is_causal_and_portfolio_accounts_for_overlap() -> None:
+    family = EventFamily.OI_CONFIRMED_BREAKOUT
+    events = (
+        IndependentEvent("first", family, "ADAUSDT", TradeSide.LONG, 1_000_000, 0.5),
+        IndependentEvent("later-higher", family, "BTCUSDT", TradeSide.LONG, 1_300_000, 0.9),
+        IndependentEvent("opposite", family, "BTCUSDT", TradeSide.SHORT, 1_300_000, 0.7),
+        IndependentEvent("outside", family, "ETHUSDT", TradeSide.LONG, 2_000_000, 0.6),
+    )
+    collapsed = collapse_correlated_events(events, window_minutes=15)
+    assert [event.event_id for event in collapsed] == ["first", "opposite", "outside"]
+
+    portfolio = replay_portfolio(
+        (
+            PortfolioEvent("one", 1_000_000, "ADAUSDT", TradeSide.LONG, 12, 0.10),
+            PortfolioEvent("same", 1_300_000, "ADAUSDT", TradeSide.SHORT, 12, 0.10),
+            PortfolioEvent("capacity", 1_300_000, "BTCUSDT", TradeSide.LONG, 12, 0.10),
+            PortfolioEvent("later", 5_000_000, "BTCUSDT", TradeSide.LONG, 12, -0.10),
+        ),
+        position_fraction=0.5,
+        maximum_concurrent_positions=1,
+    )
+    assert portfolio.trades_executed == 2
+    assert portfolio.skipped_same_symbol == 1
+    assert portfolio.skipped_capacity == 1
+    assert portfolio.ending_equity == pytest.approx(1.05 * 0.95)
+    assert portfolio.maximum_drawdown_fraction == pytest.approx(0.05)
 
 
 def _trial(trial_id: str) -> TrialRecord:
