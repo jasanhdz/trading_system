@@ -1,0 +1,18 @@
+{
+  "X1_READY_FOR_LIVE": false,
+  "X1_READY_FOR_SHADOW": false,
+  "candidate_events": 0,
+  "evidence_status": "DATA_SOURCE_COVERAGE_GAP_NOT_OPENED",
+  "exchange_calls": 0,
+  "exchange_mutations": 0,
+  "experiment_id": "aegis-short-reversal-exit-compatibility-x1-01",
+  "future_short_rows_omitted_without_flow": 2970,
+  "future_source_rows": 5940,
+  "holdout_opened_once": false,
+  "live_changed": false,
+  "model_exported": false,
+  "model_training_executed": false,
+  "schema_id": "aegis-short-reversal-exit-compatibility-x1-verdict-v1",
+  "shadow_changed": false,
+  "verdict": "DATA_SOURCE_COVERAGE_GAP"
+}

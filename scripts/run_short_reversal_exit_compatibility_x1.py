@@ -188,7 +188,10 @@ def run(root: Path, config: Mapping[str, Any], output_root: Path) -> Mapping[str
         ),
         "unconditional_short_future_current_ts": economic_summary(population),
         "entry_rule_modifications": "NONE",
-        "holdout_opened_once": True,
+        "evidence_status": (
+            "OPENED" if population else "DATA_SOURCE_COVERAGE_GAP_NOT_OPENED"
+        ),
+        "holdout_opened_once": bool(population),
         "holdout_reusable_for_x1_tuning": False,
         "X1_READY_FOR_SHADOW": bool(result["passed"]),
         "X1_READY_FOR_LIVE": False,
@@ -252,4 +255,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
