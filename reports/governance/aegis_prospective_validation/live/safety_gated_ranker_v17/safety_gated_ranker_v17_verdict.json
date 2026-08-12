@@ -1,0 +1,62 @@
+{
+  "candidate_passed_for_promotion": false,
+  "exchange_calls": 0,
+  "exchange_mutations": 0,
+  "experiment_id": "aegis-safety-gated-ranker-v17-research-01",
+  "future_holdout_required": true,
+  "live_changed": false,
+  "long": {
+    "calibration_infeasible_folds": 1,
+    "positive_mean_utility_folds": 0,
+    "retrospective_hypothesis_supported": false,
+    "successful_folds": 0,
+    "versus_v15": {
+      "adverse_first_rate": 0,
+      "clean_rate": 2,
+      "cvar": 1,
+      "mean_mae_fraction": 0,
+      "mean_utility": 0,
+      "positive_rate": 2
+    },
+    "versus_v16": {
+      "adverse_first_rate": 2,
+      "clean_rate": 1,
+      "cvar": 1,
+      "mean_mae_fraction": 2,
+      "mean_utility": 3,
+      "opportunity_gap": 1,
+      "positive_rate": 1,
+      "selection_count": 1
+    }
+  },
+  "model_exported": false,
+  "retrospective_hypothesis_supported": false,
+  "rows": 96382,
+  "schema_id": "aegis-safety-gated-ranker-v17-verdict-v1",
+  "shadow_changed": false,
+  "short": {
+    "calibration_infeasible_folds": 0,
+    "positive_mean_utility_folds": 0,
+    "retrospective_hypothesis_supported": false,
+    "successful_folds": 0,
+    "versus_v15": {
+      "adverse_first_rate": 2,
+      "clean_rate": 3,
+      "cvar": 2,
+      "mean_mae_fraction": 2,
+      "mean_utility": 3,
+      "positive_rate": 4
+    },
+    "versus_v16": {
+      "adverse_first_rate": 4,
+      "clean_rate": 0,
+      "cvar": 3,
+      "mean_mae_fraction": 4,
+      "mean_utility": 3,
+      "opportunity_gap": 1,
+      "positive_rate": 0,
+      "selection_count": 1
+    }
+  },
+  "verdict": "RESEARCH_ONLY_NOT_PROMOTABLE"
+}
