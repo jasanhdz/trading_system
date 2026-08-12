@@ -19,6 +19,7 @@ from aegis.live_decision import (
 )
 from aegis.hybrid_live_experiment import build_hybrid_live_experiment_selector
 from aegis.research.dual_side_shadow import build_composite_research_observer
+from aegis.v17_execution_challenger import load_v17_challenger_config
 
 
 class PredictRequest(BaseModel):
@@ -45,6 +46,9 @@ def build_service() -> CurrentBrainDecisionService:
         hybrid_live_selector=build_hybrid_live_experiment_selector(
             root / "config/hybrid_directional_live_experiment.yaml",
             repo_root=root,
+        ),
+        v17_challenger_config=load_v17_challenger_config(
+            root / "config/v17_execution_challenger.yaml"
         ),
     )
     service.initialize()

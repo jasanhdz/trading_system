@@ -1,0 +1,25 @@
+schema_version: aegis-v17-execution-challenger-v1
+challenger_id: aegis-safety-gated-ranker-v17
+mode: READY_INACTIVE
+execution_authority: false
+
+# V17 validation intentionally exported no executable model. These values must
+# remain empty until a separately preregistered fit/export produces a
+# reproducible artifact.
+model_artifact: null
+model_sha256: null
+
+feature_schema: aegis-decomposed-entry-v9
+long_feature_count: 129
+short_feature_count: 168
+required_closed_5m_bars: 576
+
+control:
+  identity: aegis-directional-contract-v15
+  unchanged: true
+
+execution_pipeline:
+  owner: binance-futures-bot-ts
+  reuse_existing_pipeline: true
+  parallel_order_pipeline: false
+  final_live_switch_present: false

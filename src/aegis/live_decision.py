@@ -32,6 +32,7 @@ from aegis.hybrid_live_experiment import (
     MODEL_IDENTIFIER as HYBRID_LIVE_MODEL_IDENTIFIER,
     MODEL_SHA256 as HYBRID_LIVE_MODEL_SHA256,
 )
+from aegis.v17_execution_challenger import V17ChallengerConfig
 from aegis.prospective.model_qualification import (
     CANDIDATE_IDENTITY,
     FEATURE_SCHEMA,
@@ -676,6 +677,9 @@ def compatibility_response(
             "hybrid_directional_live": (
                 dict(hybrid_live) if hybrid_live_enabled else {}
             ),
+            "v17_execution_challenger": dict(
+                batch.get("_v17_execution_challenger", {})
+            ),
             "entry_quality_v2": (
                 dict(v2)
                 if isinstance(v2, Mapping)
@@ -735,12 +739,14 @@ class CurrentBrainDecisionService:
         cache_seconds: float = 30.0,
         research_observer: ResearchBatchObserver | None = None,
         hybrid_live_selector: HybridLiveSelector | None = None,
+        v17_challenger_config: V17ChallengerConfig | None = None,
     ) -> None:
         self.engine = engine
         self.provider = provider
         self.cache_seconds = cache_seconds
         self.research_observer = research_observer
         self.hybrid_live_selector = hybrid_live_selector
+        self.v17_challenger_config = v17_challenger_config
         self.started_at = datetime.now(timezone.utc)
         self._cache: tuple[float, Mapping[str, Any]] | None = None
         self._lock = threading.Lock()
@@ -789,6 +795,11 @@ class CurrentBrainDecisionService:
                     **batch,
                     "_hybrid_directional_live": self.hybrid_live_selector.apply(batch),
                 }
+            if self.v17_challenger_config is not None:
+                batch = {
+                    **batch,
+                    "_v17_execution_challenger": self.v17_challenger_config.health(),
+                }
             self._cache = (now, batch)
             self.last_inference_at = datetime.now(timezone.utc)
             return batch
@@ -826,6 +837,10 @@ class CurrentBrainDecisionService:
             health["entry_quality_v2"] = dict(self.research_observer.health())
         if self.hybrid_live_selector is not None:
             health["hybrid_directional_live"] = dict(self.hybrid_live_selector.health())
+        if self.v17_challenger_config is not None:
+            health["v17_execution_challenger"] = dict(
+                self.v17_challenger_config.health()
+            )
         return health
 
 
