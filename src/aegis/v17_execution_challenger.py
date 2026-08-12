@@ -16,6 +16,8 @@ from typing import Any, Mapping
 
 import yaml
 
+from .utils import sha256_file
+
 
 class V17ChallengerError(ValueError):
     pass
@@ -35,6 +37,10 @@ class V17ChallengerConfig:
     execution_authority: bool
     model_artifact: str | None
     model_sha256: str | None
+    research_artifact: str | None
+    research_artifact_sha256: str | None
+    promotion_gate_passed: bool
+    promotion_blockers: tuple[str, ...]
     feature_schema: str
     long_feature_count: int
     short_feature_count: int
@@ -46,18 +52,28 @@ class V17ChallengerConfig:
 
     @property
     def execution_ready(self) -> bool:
-        return self.mode is V17RuntimeMode.READY_INACTIVE and self.model_available
+        return (
+            self.mode is V17RuntimeMode.READY_INACTIVE
+            and self.model_available
+            and self.promotion_gate_passed
+            and not self.promotion_blockers
+        )
 
     def health(self) -> Mapping[str, Any]:
-        blocker = None
-        if not self.model_available:
-            blocker = "V17_REPRODUCIBLE_MODEL_ARTIFACT_REQUIRED"
+        blocker = self.promotion_blockers[0] if self.promotion_blockers else None
+        if not self.model_available and blocker is None:
+            blocker = "V17_EXECUTION_ARTIFACT_REQUIRED"
         return {
             "schema_version": self.schema_version,
             "challenger_id": self.challenger_id,
             "mode": self.mode.value,
             "execution_authority": self.execution_authority,
             "model_available": self.model_available,
+            "research_artifact_available": bool(
+                self.research_artifact and self.research_artifact_sha256
+            ),
+            "promotion_gate_passed": self.promotion_gate_passed,
+            "promotion_blockers": self.promotion_blockers,
             "execution_contract_ready": self.execution_ready,
             "blocker": blocker,
             "feature_schema": self.feature_schema,
@@ -163,6 +179,16 @@ def load_v17_challenger_config(path: Path) -> V17ChallengerConfig:
         execution_authority=bool(payload.get("execution_authority", False)),
         model_artifact=(str(payload["model_artifact"]) if payload.get("model_artifact") else None),
         model_sha256=(str(payload["model_sha256"]) if payload.get("model_sha256") else None),
+        research_artifact=(
+            str(payload["research_artifact"]) if payload.get("research_artifact") else None
+        ),
+        research_artifact_sha256=(
+            str(payload["research_artifact_sha256"])
+            if payload.get("research_artifact_sha256")
+            else None
+        ),
+        promotion_gate_passed=bool(payload.get("promotion_gate_passed", False)),
+        promotion_blockers=tuple(str(value) for value in payload.get("promotion_blockers", ())),
         feature_schema=str(payload.get("feature_schema", "")),
         long_feature_count=int(payload.get("long_feature_count", 0)),
         short_feature_count=int(payload.get("short_feature_count", 0)),
@@ -172,6 +198,20 @@ def load_v17_challenger_config(path: Path) -> V17ChallengerConfig:
         raise V17ChallengerError("unexpected V17 challenger schema")
     if config.execution_authority:
         raise V17ChallengerError("V17 challenger must not have execution authority")
+    if config.promotion_gate_passed:
+        raise V17ChallengerError("V17 promotion gate must remain closed")
+    if not config.promotion_blockers:
+        raise V17ChallengerError("V17 promotion blockers must be explicit")
+    if bool(config.research_artifact) != bool(config.research_artifact_sha256):
+        raise V17ChallengerError("V17 research artifact identity is incomplete")
+    if config.research_artifact:
+        artifact_path = Path(config.research_artifact)
+        if not artifact_path.is_absolute():
+            artifact_path = path.resolve().parents[1] / artifact_path
+        if not artifact_path.is_file():
+            raise V17ChallengerError("V17 research artifact is missing")
+        if sha256_file(artifact_path) != config.research_artifact_sha256:
+            raise V17ChallengerError("V17 research artifact hash mismatch")
     if config.long_feature_count != 129 or config.short_feature_count != 168:
         raise V17ChallengerError("V17 directional feature contract changed")
     if config.required_closed_5m_bars < 576:

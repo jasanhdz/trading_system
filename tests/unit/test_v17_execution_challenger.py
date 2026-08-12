@@ -1,6 +1,8 @@
 from pathlib import Path
+import copy
 
 import pytest
+import yaml
 
 from aegis.v17_execution_challenger import (
     V17CanonicalDecision,
@@ -42,7 +44,9 @@ def test_tracked_challenger_is_fail_closed_and_preserves_v15() -> None:
     assert config.execution_authority is False
     assert config.model_available is False
     assert config.execution_ready is False
-    assert config.health()["blocker"] == "V17_REPRODUCIBLE_MODEL_ARTIFACT_REQUIRED"
+    assert config.health()["research_artifact_available"] is True
+    assert config.health()["blocker"] == "V17_LONG_POLICY_CALIBRATION_INFEASIBLE"
+    assert config.health()["promotion_gate_passed"] is False
 
 
 def test_service_health_exposes_inactive_challenger_without_selecting_it() -> None:
@@ -52,6 +56,20 @@ def test_service_health_exposes_inactive_challenger_without_selecting_it() -> No
         engine, object(), v17_challenger_config=config  # type: ignore[arg-type]
     )
     assert service.health()["v17_execution_challenger"] == config.health()
+
+
+def test_config_rejects_wrong_research_artifact_hash(tmp_path) -> None:
+    source = ROOT / "config/v17_execution_challenger.yaml"
+    payload = yaml.safe_load(source.read_text(encoding="utf-8"))
+    payload = copy.deepcopy(payload)
+    payload["research_artifact"] = str(
+        ROOT / "config/bundles/aegis-v17-research-artifact-v1.json"
+    )
+    payload["research_artifact_sha256"] = "0" * 64
+    target = tmp_path / "v17.yaml"
+    target.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    with pytest.raises(V17ChallengerError, match="hash mismatch"):
+        load_v17_challenger_config(target)
 
 
 def test_canonical_decision_preserves_all_v17_values() -> None:

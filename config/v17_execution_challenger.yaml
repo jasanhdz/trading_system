@@ -3,13 +3,21 @@ challenger_id: aegis-safety-gated-ranker-v17
 mode: READY_INACTIVE
 execution_authority: false
 
-# V17 validation intentionally exported no executable model. These values must
-# remain empty until a separately preregistered fit/export produces a
-# reproducible artifact.
+# No execution artifact exists. The inspectable research artifact below proves
+# reproducible serialization and runtime parity, but carries no promotion or
+# exchange authority because V17 did not demonstrate positive holdout utility.
 model_artifact: null
 model_sha256: null
+research_artifact: config/bundles/aegis-v17-research-artifact-v1.json
+research_artifact_sha256: befd2555bc7600f1f27f4f876fc82a165248f93ee46fbd0a73e3148f310d938d
+promotion_gate_passed: false
+promotion_blockers:
+  - V17_LONG_POLICY_CALIBRATION_INFEASIBLE
+  - V17_LONG_EDGE_EVIDENCE_INSUFFICIENT
+  - V17_SHORT_EDGE_EVIDENCE_INSUFFICIENT
+  - V17_LIFECYCLE_RECOVERY_COVERAGE_INCOMPLETE
 
-feature_schema: aegis-decomposed-entry-v9
+feature_schema: aegis-v17-v9-directional-features-v1
 long_feature_count: 129
 short_feature_count: 168
 required_closed_5m_bars: 576
