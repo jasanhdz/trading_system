@@ -1,0 +1,21 @@
+{
+  "V21_READY_FOR_LIVE": false,
+  "V21_READY_FOR_MODELING": false,
+  "V21_READY_FOR_SHADOW": false,
+  "carry_hypothesis": "DATA_GAP",
+  "eligible_side_strategies": [],
+  "exchange_calls": 0,
+  "exchange_mutations": 0,
+  "experiment_id": "aegis-alpha-laboratory-v21-01",
+  "holdout_opened_once": true,
+  "holdout_reusable_for_v21_tuning": false,
+  "live_changed": false,
+  "model_exported": false,
+  "model_training_executed": false,
+  "opportunity_dataset_sha256": "d4261a1699e663adb0ac6f4d1daa1f9b7bada1ea5201cf7699316f13e699123e",
+  "private_manifest_sha256": "f7c3cf2f1d2f3a33c17fa6ab658cf399a4968fa6e7034fb3fa59c4f91be23147",
+  "private_result_sha256": "8fb414b10d12734d647d14dc54089b1a299c2ef626d4b26e03e1284c3765d052",
+  "schema_id": "aegis-alpha-laboratory-v21-verdict-v1",
+  "shadow_changed": false,
+  "verdict": "NO_PREREGISTERED_SIMPLE_RULE_EDGE"
+}
