@@ -1,0 +1,188 @@
+schema_version: aegis-market-event-fast-track-m1a-preregistration-v1
+experiment_id: aegis-market-event-fast-track-m1a-01
+registered_at_utc: '2026-08-12T00:00:00Z'
+mode: RESEARCH_ONLY
+selection_effect: NONE
+exchange_authority: false
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+objective:
+  statement: >-
+    Test whether preregistered causal micro-patterns, multi-timeframe regime and
+    public Spot/Futures flow contain net economic information beyond candle-only
+    continuous prediction.
+  primary_metric: NET_EXPECTANCY_AFTER_BASE_COSTS
+  secondary_metrics: [profit_factor, mae, mfe, maximum_drawdown, cvar_05, frequency, temporal_stability]
+  optimize_accuracy: false
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  base_interval: 1m
+  derived_intervals: [5m, 15m, 1h, 4h, 1d]
+  directions: [LONG, SHORT]
+  entry_rule: NEXT_1M_BAR_OPEN_AFTER_EVENT_CONFIRMATION
+
+data:
+  official_archive_root: https://data.binance.vision/data
+  archive_types:
+    futures_um: [aggTrades, klines, fundingRate, markPriceKlines]
+    spot: [aggTrades, klines]
+  archive_granularity: MONTHLY_THEN_DAILY_GAP_FILL
+  checksum_required: true
+  timestamp_unit_detection_required: true
+  raw_files_immutable: true
+  source_manifest_required: true
+  default_start_month: '2024-01'
+  default_end_month: '2026-07'
+  missing_archive_policy: SYMBOL_PERIOD_QUARANTINED
+  archive_replacement_policy: NEW_MANIFEST_VERSION_REQUIRED
+
+causality:
+  closed_bars_only: true
+  feature_cutoff: EVENT_CONFIRMATION_TIMESTAMP_INCLUSIVE
+  future_data_in_features: PROHIBITED
+  next_bar_entry: true
+  synthetic_fill: PROHIBITED
+  forward_fill_flow: PROHIBITED
+  forward_fill_regime: PROHIBITED
+  higher_timeframe_partial_bar: PROHIBITED
+
+regime:
+  axes:
+    direction: [BULL, BEAR, RANGE, TRANSITION]
+    volatility: [COMPRESSED, NORMAL, EXPANDING, EXTREME]
+    liquidity: [THIN, NORMAL, DEEP]
+  inputs:
+    - 1h_and_4h_log_return
+    - 1h_and_4h_ema_slope
+    - 1h_realized_volatility
+    - 4h_range_efficiency
+    - market_breadth
+    - btc_relative_direction
+    - futures_spot_basis
+  thresholds: TRAIN_EXPANDING_QUANTILES_ONLY
+  hysteresis_required: true
+  minimum_state_bars: 3
+
+micro_patterns:
+  TREND_PULLBACK_CONTINUATION:
+    context: DIRECTIONAL_REGIME
+    confirmation: pullback_reclaims_fast_reference_with_aligned_flow
+  COMPRESSION_BREAKOUT:
+    context: COMPRESSED_TO_EXPANDING_VOLATILITY
+    confirmation: close_break_with_volume_and_aggressive_flow
+  LIQUIDITY_SWEEP_REJECTION:
+    context: PRIOR_LOCAL_EXTREME
+    confirmation: wick_sweep_then_close_back_inside_range
+  FLOW_PRICE_ABSORPTION_REVERSAL:
+    context: EXTREME_AGGRESSIVE_FLOW
+    confirmation: high_flow_low_price_response_then_opposite_close
+  EXHAUSTION_REVERSAL:
+    context: EXTENDED_DIRECTIONAL_MOVE
+    confirmation: decelerating_return_and_flow_divergence
+  SPOT_FUTURES_DIVERGENCE_CONVERGENCE:
+    context: BASIS_OR_FLOW_DIVERGENCE
+    confirmation: first_causal_convergence_bar
+  MULTITIMEFRAME_RECLAIM:
+    context: 4H_DIRECTION_WITH_1H_PULLBACK
+    confirmation: 15m_reclaim_aligned_with_1h_direction
+  SESSION_FUNDING_DISLOCATION:
+    context: SESSION_AND_FUNDING_WINDOW
+    confirmation: extreme_train_quantile_move_with_flow_confirmation
+
+threshold_policy:
+  initial_rules_use_train_quantiles_only: true
+  continuous_threshold_search: PROHIBITED
+  validation_threshold_search: PROHIBITED
+  symbol_specific_thresholds: PROHIBITED_IN_FIRST_PASS
+  day_of_week_as_standalone_signal: PROHIBITED
+  session_as_standalone_signal: PROHIBITED
+  regime_as_standalone_signal: PROHIBITED
+
+partitions:
+  retrospective_discovery:
+    start: '2024-01-01T00:00:00Z'
+    end: '2025-03-31T23:59:59Z'
+  retrospective_validation:
+    start: '2025-04-01T00:00:00Z'
+    end: '2025-12-31T23:59:59Z'
+  retrospective_pseudo_holdout:
+    start: '2026-01-01T00:00:00Z'
+    end: '2026-07-31T23:59:59Z'
+    promotion_authority: false
+    reason: PRICE_OUTCOMES_WERE_INDIRECTLY_OBSERVED_BY_PRIOR_EXPERIMENTS
+  fresh_forward_confirmation:
+    start: '2026-08-13T00:00:00Z'
+    minimum_days: 30
+    minimum_independent_events_per_direction: 200
+  purge_minutes: 1440
+  embargo_minutes: 1440
+
+labels:
+  horizons_minutes: [15, 30, 60, 120, 240]
+  targets:
+    - NET_RETURN_AFTER_COSTS
+    - MAE_FRACTION
+    - MFE_FRACTION
+    - TARGET_BEFORE_STOP
+    - TIME_TO_FIRST_POSITIVE_NET
+    - TIME_TO_MFE
+  target_grid_price_fraction: [0.0025, 0.005, 0.01]
+  stop_grid_price_fraction: [0.0025, 0.005, 0.01]
+  grid_role: DIAGNOSTIC_PATH_DESCRIPTION_NOT_THRESHOLD_SELECTION
+
+economics:
+  fee_bps_per_side: 5.0
+  slippage_bps_per_side: 2.0
+  stress_slippage_bps_per_side: [5.0, 10.0]
+  funding_included_when_applicable: true
+  equal_capital_comparison: true
+  correlated_cluster_window_minutes: 15
+  one_event_per_family_side_cluster: true
+  same_symbol_overlap: PROHIBITED
+
+controls:
+  - NO_TRADE
+  - TIME_MATCHED_RANDOM_SIDE
+  - REGIME_MATCHED_RANDOM_SIDE
+  - SIMPLE_MOMENTUM
+  - SIMPLE_MEAN_REVERSION
+  - CANDLE_ONLY_MATCHED_EVENT
+
+models:
+  first_pass: RULES_ONLY
+  second_pass_if_rule_family_has_edge:
+    - REGULARIZED_LOGISTIC_REGRESSION
+    - SHALLOW_HISTOGRAM_GRADIENT_BOOSTING
+  separate_questions: [DIRECTION, MAE_RISK, NET_UTILITY]
+  complex_models_before_simple_edge: PROHIBITED
+  seed: 180101
+  seed_search: PROHIBITED
+
+news_and_whales:
+  included_in_m1a: false
+  reason: >-
+    Historical timestamp integrity, entity attribution and revision policy must
+    be solved before these sources can be used causally.
+  future_track: M1B_CONTEXT_EVENTS
+
+gate:
+  minimum_independent_events_per_pattern_direction_validation: 100
+  positive_net_expectancy_required: true
+  bootstrap_ci_95_lower_gt: 0.0
+  profit_factor_ci_95_lower_gt: 1.0
+  positive_validation_thirds: 2
+  maximum_symbol_share: 0.25
+  outperform_time_and_regime_matched_random: true
+  survive_base_and_first_stress_costs: true
+  no_material_leakage: true
+
+deployment:
+  M1A_READY_FOR_RETROSPECTIVE_EVALUATION: false
+  M1A_READY_FOR_FORWARD_SHADOW: false
+  M1A_READY_FOR_LIVE: false
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0
