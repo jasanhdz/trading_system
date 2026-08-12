@@ -48,7 +48,7 @@ def test_legacy_loss_remapping_has_no_prefix_or_dynamic_fallback() -> None:
 def test_public_pandas_globals_use_exact_identity_without_wildcard() -> None:
     assert loader.ALLOWED_GLOBALS >= {("pandas", "Index"), ("pandas", "StringDtype")}
     assert ("pandas", "*") not in loader.ALLOWED_GLOBALS
-    payload = pickle.dumps(pd.Index(["x"]))
+    payload = pickle.dumps(pd.Index(["x"], dtype=object))
     loaded = loader.AllowlistedUnpickler(io.BytesIO(payload)).load()
     assert type(loaded) is pd.Index
     with pytest.raises(loader.HistoricalCompatibilityError, match="UNINVENTORIED"):
