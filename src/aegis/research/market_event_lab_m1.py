@@ -671,28 +671,24 @@ class AppendOnlyTrialLedger:
     def append(self, record: TrialRecord) -> str:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            with os.fdopen(descriptor, "r+", encoding="utf-8") as handle:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-                rows = self._read_and_validate()
-                if record.trial_id in {row["trial_id"] for row in rows}:
-                    raise MarketEventContractError("AEGIS_M1_LEDGER_DUPLICATE_TRIAL")
-                previous = rows[-1]["record_hash"] if rows else None
-                payload = {
-                    "schema_version": LEDGER_SCHEMA_VERSION,
-                    **asdict(record),
-                    "previous_record_hash": previous,
-                }
-                record_hash = self._record_hash(payload)
-                handle.seek(0, os.SEEK_END)
-                handle.write(canonical_json({**payload, "record_hash": record_hash}) + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-                os.chmod(self.path, 0o600)
-                return record_hash
-        finally:
-            if not os.path.exists(self.path):
-                os.close(descriptor)
+        with os.fdopen(descriptor, "r+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            rows = self._read_and_validate()
+            if record.trial_id in {row["trial_id"] for row in rows}:
+                raise MarketEventContractError("AEGIS_M1_LEDGER_DUPLICATE_TRIAL")
+            previous = rows[-1]["record_hash"] if rows else None
+            payload = {
+                "schema_version": LEDGER_SCHEMA_VERSION,
+                **asdict(record),
+                "previous_record_hash": previous,
+            }
+            record_hash = self._record_hash(payload)
+            handle.seek(0, os.SEEK_END)
+            handle.write(canonical_json({**payload, "record_hash": record_hash}) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.chmod(self.path, 0o600)
+            return record_hash
 
     def validate(self) -> tuple[Mapping[str, Any], ...]:
         return tuple(self._read_and_validate())

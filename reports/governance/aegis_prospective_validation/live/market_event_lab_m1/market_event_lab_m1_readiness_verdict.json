@@ -1,0 +1,33 @@
+{
+  "schema_version": "aegis-market-event-lab-m1-readiness-verdict-v1",
+  "experiment_id": "aegis-market-event-lab-m1-01",
+  "evaluated_at_utc": "2026-08-12T21:36:28.184830Z",
+  "implementation_commit": "2a125a4acf4e9a6c7384a6af3e2390cec8cd5a3d",
+  "preregistration_sha256": "a1e86e6d1703cc445e2afa6a13c37b7f75909821ed27350f6d16a6a83c13acb8",
+  "evidence_database_sha256": "fd7f5a4af37d09ad6a3b76000ec819843efe94f718922e993ae3d607e904b2f1",
+  "readiness_report_hash": "cf5000b4dac7964961b016a9b60a75039f10e3f4f87e73fd86290b31293f4b82",
+  "trial_record_hash": "3cc2b8fcf1297c264c486648cd9b2fb40673028f492c65a57d1fc60e663d37bf",
+  "ready_families": [],
+  "family_status": {
+    "LIQUIDATION_CASCADE_REVERSAL": "BLOCKED_DATA_MATURITY",
+    "OI_CONFIRMED_BREAKOUT": "BLOCKED_DATA_MATURITY",
+    "SPOT_FUTURES_DISLOCATION": "BLOCKED_DATA_MATURITY",
+    "DEPTH_ABSORPTION_REVERSAL": "BLOCKED_DATA_MATURITY"
+  },
+  "coverage_summary": {
+    "futures_klines_days": 539.9965277777778,
+    "funding_days": 539.666666724537,
+    "open_interest_days": 1.7430555555555556,
+    "depth_days": 0.007600451388888889,
+    "aggregate_trade_buckets": "ABSENT",
+    "liquidation_events": "ABSENT",
+    "spot_reference": "ABSENT",
+    "basis": "ABSENT"
+  },
+  "M1_READY_FOR_EXPERIMENTS": false,
+  "M1_READY_FOR_SHADOW": false,
+  "M1_READY_FOR_LIVE": false,
+  "network_calls": 0,
+  "exchange_mutations": 0,
+  "runtime_changes": "NONE"
+}
