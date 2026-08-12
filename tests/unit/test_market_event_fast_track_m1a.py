@@ -15,6 +15,8 @@ from aegis.research.market_event_fast_track_m1a import (
     VolatilityAxis,
     LiquidityAxis,
     detect_micro_patterns,
+    extract_pattern_features,
+    fit_pattern_thresholds_from_train,
     normalize_timestamp_ms,
     read_agg_trade_archive,
     read_kline_archive,
@@ -146,3 +148,17 @@ def test_pattern_engine_rejects_future_or_misaligned_sources() -> None:
             symbol="ADAUSDT", futures=futures, spot=shifted, flow=flow,
             regime=regime, thresholds=thresholds, funding_rate=None,
         )
+
+
+def test_thresholds_are_fitted_only_from_explicit_train_snapshots() -> None:
+    futures = _bars(300)
+    spot = _bars(300)
+    flow = tuple(FlowBucket(row.symbol, row.open_time_ms, 600, 400, 20) for row in futures)
+    snapshot = extract_pattern_features(
+        futures=futures, spot=spot, flow=flow, funding_rate=0.0
+    )
+    thresholds = fit_pattern_thresholds_from_train((snapshot,) * 1000)
+    assert thresholds.minimum_flow_imbalance == pytest.approx(abs(snapshot["flow_3"]))
+    assert thresholds.minimum_volume_ratio == pytest.approx(snapshot["volume_ratio"])
+    with pytest.raises(FastTrackContractError, match="TRAIN_ROWS_INSUFFICIENT"):
+        fit_pattern_thresholds_from_train((snapshot,) * 999)

@@ -389,17 +389,14 @@ class PatternCandidate:
     reason_codes: tuple[str, ...]
 
 
-def detect_micro_patterns(
+def extract_pattern_features(
     *,
-    symbol: str,
     futures: Sequence[MinuteBar],
     spot: Sequence[MinuteBar],
     flow: Sequence[FlowBucket],
-    regime: RegimeObservation,
-    thresholds: PatternThresholds,
     funding_rate: float | None,
-) -> tuple[PatternCandidate, ...]:
-    """Detect frozen event families from data available at the current close."""
+) -> Mapping[str, float | int | None]:
+    """Build the complete M1A feature snapshot at one closed minute."""
 
     if len(futures) < 241 or len(spot) < 61 or len(flow) < 13:
         raise FastTrackContractError("AEGIS_M1A_PATTERN_HISTORY_INSUFFICIENT")
@@ -428,15 +425,9 @@ def detect_micro_patterns(
     compression = short_range / max(long_range, 1e-12)
     prior_high = max(row.high for row in futures[-21:-1])
     prior_low = min(row.low for row in futures[-21:-1])
-    breakout_up = current.close / prior_high - 1.0
-    breakout_down = prior_low / current.close - 1.0
-    spot_ret_12 = _return(spot, 12)
-    futures_ret_12 = ret_12
     basis = futures[-1].close / spot[-1].close - 1.0
     prior_basis = futures[-13].close / spot[-13].close - 1.0
-    basis_convergence = abs(prior_basis) - abs(basis)
-    price_response = abs(ret_3)
-    features = {
+    return {
         "ret_1": ret_1,
         "ret_3": ret_3,
         "ret_12": ret_12,
@@ -447,21 +438,106 @@ def detect_micro_patterns(
         "flow_12": flow_12,
         "volume_ratio": volume_ratio,
         "compression": compression,
-        "breakout_up": breakout_up,
-        "breakout_down": breakout_down,
+        "breakout_up": current.close / prior_high - 1.0,
+        "breakout_down": prior_low / current.close - 1.0,
         "upper_wick": upper_wick,
         "lower_wick": lower_wick,
         "body": body,
-        "spot_ret_12": spot_ret_12,
+        "spot_ret_12": _return(spot, 12),
         "basis": basis,
         "prior_basis": prior_basis,
-        "basis_convergence": basis_convergence,
-        "price_response": price_response,
+        "basis_convergence": abs(prior_basis) - abs(basis),
+        "price_response": abs(ret_3),
         "funding_rate": funding_rate,
         "hour_utc": (timestamp // 3_600_000) % 24,
         "weekday_utc": (timestamp // 86_400_000 + 3) % 7,
+        "prior_high": prior_high,
+        "prior_low": prior_low,
     }
+
+
+def _quantile(values: Sequence[float], probability: float) -> float:
+    if not values or not 0.0 <= probability <= 1.0:
+        raise FastTrackContractError("AEGIS_M1A_QUANTILE_INPUT_INVALID")
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * probability
+    lower, upper = math.floor(position), math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def fit_pattern_thresholds_from_train(
+    rows: Sequence[Mapping[str, float | int | None]],
+) -> PatternThresholds:
+    """Fit the preregistered first-pass quantiles from TRAIN snapshots only."""
+
+    required = {
+        "flow_3", "volume_ratio", "compression", "breakout_up", "breakout_down",
+        "upper_wick", "lower_wick", "body", "ret_60", "price_response",
+        "prior_basis", "basis_convergence", "ret_3",
+    }
+    if len(rows) < 1000 or any(not required <= set(row) for row in rows):
+        raise FastTrackContractError("AEGIS_M1A_TRAIN_ROWS_INSUFFICIENT")
+
+    def finite(name: str, transform=abs) -> list[float]:
+        values = []
+        for row in rows:
+            raw = row[name]
+            if raw is None or not math.isfinite(float(raw)):
+                raise FastTrackContractError("AEGIS_M1A_TRAIN_VALUE_INVALID")
+            values.append(transform(float(raw)))
+        return values
+
+    wick_ratios = [
+        max(float(row["upper_wick"]), float(row["lower_wick"]))
+        / max(float(row["body"]), 1e-12)
+        for row in rows
+    ]
+    breakout = [
+        max(float(row["breakout_up"]), float(row["breakout_down"]), 0.0)
+        for row in rows
+    ]
+    return PatternThresholds(
+        minimum_flow_imbalance=_quantile(finite("flow_3"), 0.90),
+        minimum_volume_ratio=_quantile(finite("volume_ratio", lambda value: value), 0.80),
+        maximum_compression_ratio=_quantile(finite("compression", lambda value: value), 0.20),
+        minimum_breakout_fraction=_quantile(breakout, 0.90),
+        minimum_wick_body_ratio=_quantile(wick_ratios, 0.80),
+        minimum_extension_fraction=_quantile(finite("ret_60"), 0.90),
+        maximum_absorption_response=_quantile(finite("price_response"), 0.20),
+        minimum_basis_divergence=_quantile(finite("prior_basis"), 0.90),
+        minimum_reclaim_fraction=_quantile(finite("ret_3"), 0.60),
+        minimum_session_move=_quantile(finite("ret_60"), 0.85),
+    )
+
+
+def detect_micro_patterns(
+    *,
+    symbol: str,
+    futures: Sequence[MinuteBar],
+    spot: Sequence[MinuteBar],
+    flow: Sequence[FlowBucket],
+    regime: RegimeObservation,
+    thresholds: PatternThresholds,
+    funding_rate: float | None,
+) -> tuple[PatternCandidate, ...]:
+    """Detect frozen event families from data available at the current close."""
+
+    features = extract_pattern_features(
+        futures=futures, spot=spot, flow=flow, funding_rate=funding_rate
+    )
+    timestamp = futures[-1].close_time_ms
+    current = futures[-1]
     feature_hash = Sha256HashProvider().digest_value(features)
+    ret_3, ret_12, ret_60, ret_240 = (float(features[name]) for name in ("ret_3", "ret_12", "ret_60", "ret_240"))
+    flow_1, flow_3 = float(features["flow_1"]), float(features["flow_3"])
+    volume_ratio, compression = float(features["volume_ratio"]), float(features["compression"])
+    breakout_up, breakout_down = float(features["breakout_up"]), float(features["breakout_down"])
+    upper_wick, lower_wick, body = float(features["upper_wick"]), float(features["lower_wick"]), float(features["body"])
+    prior_high, prior_low = float(features["prior_high"]), float(features["prior_low"])
+    prior_basis, basis_convergence = float(features["prior_basis"]), float(features["basis_convergence"])
+    price_response = float(features["price_response"])
     candidates: list[PatternCandidate] = []
 
     def emit(pattern: MicroPattern, side: TradeSide, *reasons: str) -> None:
