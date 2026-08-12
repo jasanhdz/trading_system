@@ -1,161 +1,131 @@
-# V17 Technical Integration Readiness
+# V17 Final Technical Readiness
 
 Date: 2026-08-12 UTC
 
-## Scope and safety state
+## Gate
 
-This change prepares and tests the software boundary only. It does not select
-V17, change the running services, alter credentials, or submit exchange
-requests. V15/current production authority remains unchanged. V17 is a
-challenger with `execution_authority: false`.
+`V17_READY_FOR_LIVE = FALSE`
 
-## Version selection
+V17 is now reproducible and its Python/TypeScript numerical boundary is proven,
+but it is not economically promotable. LONG passed 0/4 folds and SHORT passed
+0/4 folds. Every evaluated holdout has negative mean utility. LONG fold 4
+cannot produce a valid preregistered calibration policy; reducing the minimum
+selection count would still select negative-utility candidates.
 
-- The running Python API is assembled by `src/aegis/live_api.py`.
-- Its operational selector is `config/hybrid_directional_live_experiment.yaml`.
-- The TypeScript client consumes `POST /ml-v2/predict` and accepts a decision
-  only when `CurrentBrainCanonicalDecision` validates the complete contract,
-  authority, model, bundle, configuration, feature schema, symbol, and action.
-- Per-symbol TypeScript execution is additionally selected by `mode: LIVE` and
-  `AEGIS_LIVE_ENABLED=1`. Shadow symbols are evaluated but cannot execute.
-- V17 is declared separately in `config/v17_execution_challenger.yaml`; it is
-  visible in health and response telemetry, but cannot select an action.
+No V17 execution authority, activation record, runtime selector, exchange
+request, or service restart was created by this work.
 
-## Signal and execution path
+## Root Causes
 
-`closed market data -> Python features/model/layers/candidate -> HTTP response
--> AegisMLService -> canonical authority validation -> entry policy -> wallet
-balance sizing -> exchange filters -> market intent -> position confirmation
--> SL/TP creation and read-back -> persisted state -> break-even/trailing ->
-reconciliation -> exit`.
+1. `model_exported: false` was deliberate in the preregistered research code,
+   which had no final-fit/export prescription. A deterministic, inspectable
+   research artifact now exists, but it remains `RESEARCH_ONLY`.
+2. V17 lacks edge rather than merely failing a strict threshold. LONG fold
+   utilities are -0.22697%, -0.23217%, -0.19630%, and infeasible. SHORT fold
+   utilities are -0.12452%, -0.12296%, -0.18697%, and -0.23650%.
+3. LONG fold 4 had only 47 distinct ranking-calibration timestamps. Quantiles
+   0.80, 0.90, and 0.95 selected 13, 5, and 3 events, with mean utility
+   -0.19162%, -0.24640%, and -0.27104%. The preregistered minimum is 20.
+4. The 129 LONG and 168 SHORT inputs are exact direction-specific selections
+   from the V9 176-feature vector, not padding. They require 576 closed 5m bars
+   to construct 15m/1h and rolling causal context. Current Live's 83 features
+   are the base of that chain, not a directly interchangeable schema.
+5. The existing TypeScript entry path does not durably represent order intent,
+   ambiguous acknowledgement, or partial-fill state. It therefore cannot
+   prove read-before-retry, restart-before-bracket, complete local-state loss,
+   or duplicate-event recovery without an execution lifecycle redesign.
+6. The API restart loop came from loading the large current-brain model twice:
+   once as `__main__` and again when Uvicorn imported `aegis.live_api:app`.
+   Memory exceeded PM2's 10 GiB limit. Uvicorn now uses one lazy application
+   factory. The API has remained online for more than two hours at about 5.6
+   GiB with zero unstable restarts.
 
-There is no new V17 order path. A future authorized V17 decision must enter the
-same canonical boundary and therefore reuse all TypeScript execution,
-protection, recovery, and telemetry behavior.
+## Feature And Artifact Contract
 
-## V15 versus V17
+- Schema: `aegis-v17-v9-directional-features-v1`
+- LONG: 129 ordered float64 features; schema hash
+  `373ad9bb654833ff872b3ee50d475cbfecdcaec43b85f3369c14119f31b7c03e`
+- SHORT: 168 ordered float64 features; schema hash
+  `3631db9e26c1aacf2ef0b9fa8383296d62ad09a143f9eadc2715c2ae0cbe9532`
+- Required history: 576 closed 5m bars
+- Normalizers: frozen StandardScaler for clean, danger, and ranker; native
+  histogram-gradient-boosting input for MAE q90
+- Failures are explicit for missing/extra/reordered/non-float/non-finite
+  features, insufficient/open history, version/hash drift, normalizer drift,
+  and nested model hash drift.
 
-| Property | V15 | V17 |
-|---|---|---|
-| Role | directional safety composite | safety gate followed by pairwise ranker |
-| LONG features | 129 | same V15 contract, 129 |
-| SHORT features | 168 | same V15 contract, 168 |
-| Base feature family | decomposed V9 | decomposed V9 |
-| Minimum causal 5m history | 576 bars due to 1h aggregation | 576 bars |
-| Exported executable model | no | no |
-| Historical verdict | RESEARCH_ONLY_NOT_PROMOTABLE | RESEARCH_ONLY_NOT_PROMOTABLE |
-| Successful folds | did not pass aggregate contract | 0/4 LONG, 0/4 SHORT |
-| Runtime authority | none | none |
+Research artifact SHA-256:
+`befd2555bc7600f1f27f4f876fc82a165248f93ee46fbd0a73e3148f310d938d`.
+An independent rerun produced a byte-identical file with the same hash.
 
-V17 cannot be made a truthful runtime selector from the current files. Its
-training script fits scikit-learn estimators inside each validation fold and
-explicitly reports `model_exported: false`. The preregistration also prohibits
-model export and Live promotion. There is no canonical final-fit prescription,
-frozen calibration policy, serialized estimator, or artifact hash. Mapping the
-83 current Live features to the 129/168 V17 contracts would fabricate inputs.
+## Python/TypeScript Parity
 
-## Existing execution protections
+The golden dataset contains 22 closed historical events: one LONG and one
+SHORT event for every canonical symbol. Python reload and TypeScript frozen
+evaluation both pass. Maximum Python serialization differences over 256 rows
+per side were:
 
-- Exchange quantity and price rounding use `stepSize`, `tickSize`, precision,
-  minimum quantity/notional, and adapter-side validation.
-- Leverage and isolated margin are set before entry using the existing path.
-- A market entry is followed by bounded position read-back.
-- Failure to confirm the position invokes the existing emergency-close path.
-- Required SL and TP are created and then read back from regular/algo order
-  surfaces.
-- With `close_if_bracket_fails: true`, creation or validation failure invokes
-  emergency close and persists `FAILED_CLOSED`; an entry is not considered
-  managed merely because the market request was acknowledged.
-- On restart, persisted symbol state is reconciled with the exchange. Missing
-  required brackets are recreated from persisted entry/risk values.
-- Break-even arms from configured ROE and only improves the stop.
-- Trailing activates from configured ROE/callback and only improves the stop.
-- Existing daily trades, consecutive losses, daily loss, cooldown, duplicate
-  symbol, portfolio/probe/momentum, Live-enable, and symbol-mode controls remain
-  unchanged.
+| Side | Clean | Danger | MAE q90 | Rank |
+| --- | ---: | ---: | ---: | ---: |
+| LONG | 2.22e-16 | 1.67e-16 | 1.04e-17 | 1.56e-7 |
+| SHORT | 1.67e-16 | 2.22e-16 | 2.78e-17 | 1.71e-7 |
 
-## Telemetry readiness
+Probability/MAE tolerance is 1e-12. Rank tolerance is 1e-6 because the
+research SGD ranker is fitted/served from float32 while the inspectable JSON
+evaluators accumulate in float64. No decision, selected flag, policy status,
+feature order, or schema mismatch occurred.
 
-The isolated V17 compatibility module preserves expected price, market time,
-feature hash, model identity/hash, policy identity, clean/danger probability,
-MAE q90, and rank score without deriving missing trading values. It also
-defines direction-aware slippage calculation. It is intentionally not imported
-by `TradingService`, because changing that file would invalidate the byte-level
-V15 control. Existing operational records already contain actual entry price,
-quantity, leverage, position fraction, SL, TP, bracket confirmation, trailing
-settings, fees, MAE, MFE, exit reason, PnL, and execution errors. Runtime V17
-telemetry wiring belongs in the future hash-bound V17 activation change.
+## Lifecycle Result
 
-## Automated evidence
+The existing fake pipeline passes sizing, exchange filters, market intent,
+position confirmation retries, SL/TP placement and read-back, emergency close
+on unconfirmed position or bracket failure, bracket reconstruction, break-even,
+trailing, reconciliation, exit, and accounting telemetry. Focused TypeScript
+coverage passed 115/115.
 
-Focused tests prove:
+The final lifecycle gate remains failed because the current exchange port
+collapses a market response to `avgPrice` and `orderId`. It has no durable
+pre-request intent/ack state for partial fill, timeout ambiguity,
+read-before-retry, restart before brackets, total state loss, or duplicate
+event identity. A parallel simulator would not prove the production pipeline,
+so these cases were not falsely marked complete.
 
-- inactive V17 configuration has no exchange authority;
-- malformed/non-finite V17 output fails closed;
-- the V17 selected flag cannot disagree with its frozen gate and rank policy;
-- TypeScript validates the canonical V17 evidence envelope losslessly and
-  rejects malformed or policy-inconsistent decisions;
-- existing fake lifecycle tests cover sizing, market intent, position
-  confirmation, SL, TP, and telemetry through the control pipeline;
-- unconfirmed positions and failed/missing brackets invoke fail-closed handling;
-- restart management recreates missing brackets;
-- canonical model/hash drift is rejected.
+## Tests And Failure Classification
 
-## Remaining blockers
+- Python focused V17/API/loader: 61 passed.
+- Python full: 724 passed, 5 failed.
+- The five failures are category E (environment): historical Phase E/E5
+  preflights require branch `feature/aegis-ts-clean-rebuild`, while the
+  authorized work is on `work/entry-quality-evidence-20260726`.
+- The prior pandas failure was category D (fixture): pandas 3 inferred an
+  Arrow-backed index. The fixture now explicitly requests `dtype=object`; the
+  frozen pickle allowlist was not widened.
+- TypeScript full: 762 passed.
+- Three prior TypeScript failures were category B: stale source-digest
+  expectations for already-authorized files. The digest inventory was updated.
+- TypeScript build/strict compilation: passed.
+- Prettier on modified TypeScript: passed.
+- No separate TypeScript `typecheck` or `lint` scripts exist.
+- Read-only audit static import/endpoint validation: passed.
+- Python compilation and Git whitespace checks: passed.
 
-1. Define a separately preregistered final-fit/export procedure for V17.
-2. Fit and serialize the exact LONG and SHORT safety heads and rankers without
-   test leakage.
-3. Freeze gate/rank thresholds, model hashes, feature ordering, normalizers,
-   and a 576-bar causal snapshot contract.
-4. Validate direct-versus-runtime prediction parity and run V17 in Shadow.
-5. Obtain forward evidence. Historical failure must not be reinterpreted as
-   promotion evidence.
-6. Add the resulting exact authority profile to TypeScript only after the
-   artifact exists; the current hard-coded authority validation correctly
-   rejects unknown V17 hashes.
+## Blocking Conditions
 
-Until these are complete, the state is
-`TECHNICAL_EXECUTION_PIPELINE_COMPATIBLE_MODEL_ARTIFACT_REQUIRED`, not ready for
-Live.
+- V17 LONG policy calibration is infeasible.
+- V17 LONG and SHORT have no positive holdout utility in any fold.
+- No executable/promotion artifact exists; only a non-authoritative research
+  artifact exists.
+- Required ambiguous-order, partial-fill, durable idempotency, and complete
+  recovery scenarios are not represented by the current execution contract.
+- The historical branch-bound Python preflights do not pass on this work branch.
+- V17 has not earned Shadow promotion evidence.
 
-## Verification commands
+## V18 Evidence-Based Direction
 
-```bash
-cd /home/jasan/Develop/trading_system
-PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python -m pytest \
-  tests/unit/test_v17_execution_challenger.py \
-  tests/unit/test_live_decision_api.py -q
+Do not tune V17 thresholds on the same holdouts. Preregister V18 with a new
+untouched temporal period, out-of-fold safety predictions, labels aligned to
+net lifecycle utility, side/regime calibration-drift analysis, a minimum
+opportunity-rate constraint, and stable subgroup tests before fitting a global
+ranker. Keep V15/V16/V17 as fixed controls.
 
-cd /home/jasan/Develop/trading_system/binance-futures-bot-ts
-npm test -- --run \
-  src/challengers/V17ExecutionCompatibility.test.ts \
-  src/app/services/TradingService.aegis-live.test.ts \
-  src/domain/services/CurrentBrainCanonicalDecision.test.ts \
-  src/infra/adapters/BinanceAdapter.brackets.test.ts \
-  src/infra/logging/AegisTurboHistoryLogger.test.ts
-npm run build
-git diff --check
-```
-
-## Preflight checklist
-
-- [ ] V17 executable artifact exists and hashes match a frozen manifest.
-- [ ] V17 129/168 feature vectors are generated causally from at least 576
-      closed 5m bars for all configured symbols.
-- [ ] Direct model and HTTP predictions have exact/tolerated parity.
-- [ ] V17 Shadow output is current, finite, non-fallback, and reconciled.
-- [ ] TypeScript recognizes exactly the approved V17 authority profile.
-- [ ] Full fake lifecycle and restart tests pass.
-- [ ] Read-only account audit is complete and all exposure is explained.
-- [ ] Exactly one Python API and one TypeScript manager exist.
-- [ ] Credentials and exchange mutations remain outside test processes.
-- [ ] V17 activation remains absent until owner action.
-
-## Final manual boundary
-
-There is currently no responsible single `ready -> live` action because the
-executable V17 artifact does not exist. After the blockers above are closed,
-the only owner action should be activation of the exact hash-bound V17
-authority record through the project's deployment procedure. No activation
-command is supplied by this task, and no runtime service was changed.
+There is no responsible manual `ready -> live` procedure for V17 at this time.
