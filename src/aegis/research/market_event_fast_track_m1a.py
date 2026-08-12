@@ -291,15 +291,7 @@ class CausalRegimeClassifier:
         if timestamp <= self._last_timestamp:
             raise FastTrackContractError("AEGIS_M1A_REGIME_NON_CHRONOLOGICAL")
         self._last_timestamp = timestamp
-        ret_1h = _return(hourly, 1)
-        ret_4h = _return(four_hourly, 1)
-        closes = [row.close for row in hourly[-25:]]
-        ema_fast = _ema(closes, 8)
-        ema_slow = _ema(closes, 24)
-        direction_score = 0.35 * ret_1h + 0.45 * ret_4h + 0.20 * (ema_fast / ema_slow - 1.0)
-        returns = [hourly[index].close / hourly[index - 1].close - 1.0 for index in range(len(hourly) - 23, len(hourly))]
-        volatility = math.sqrt(sum(value * value for value in returns) / len(returns))
-        liquidity = sorted(row.quote_volume for row in hourly[-24:])[12]
+        direction_score, volatility, liquidity = _regime_raw_metrics(hourly, four_hourly)
         boundary = (
             self.thresholds.direction_exit
             if self._current in {DirectionAxis.BULL, DirectionAxis.BEAR}
@@ -359,6 +351,51 @@ class CausalRegimeClassifier:
         )
 
 
+def _regime_raw_metrics(
+    hourly: Sequence[MinuteBar], four_hourly: Sequence[MinuteBar]
+) -> tuple[float, float, float]:
+    if len(hourly) < 25 or len(four_hourly) < 7:
+        raise FastTrackContractError("AEGIS_M1A_REGIME_HISTORY_INSUFFICIENT")
+    ret_1h = _return(hourly, 1)
+    ret_4h = _return(four_hourly, 1)
+    closes = [row.close for row in hourly[-25:]]
+    direction_score = (
+        0.35 * ret_1h
+        + 0.45 * ret_4h
+        + 0.20 * (_ema(closes, 8) / _ema(closes, 24) - 1.0)
+    )
+    returns = [
+        hourly[index].close / hourly[index - 1].close - 1.0
+        for index in range(len(hourly) - 23, len(hourly))
+    ]
+    volatility = math.sqrt(sum(value * value for value in returns) / len(returns))
+    liquidity = sorted(row.quote_volume for row in hourly[-24:])[12]
+    return direction_score, volatility, liquidity
+
+
+def fit_regime_thresholds_from_train(
+    samples: Sequence[tuple[Sequence[MinuteBar], Sequence[MinuteBar]]],
+) -> RegimeThresholds:
+    """Fit global regime boundaries from chronological TRAIN histories."""
+
+    if len(samples) < 100:
+        raise FastTrackContractError("AEGIS_M1A_REGIME_TRAIN_INSUFFICIENT")
+    metrics = [_regime_raw_metrics(hourly, four_hourly) for hourly, four_hourly in samples]
+    direction = [abs(item[0]) for item in metrics]
+    volatility = [item[1] for item in metrics]
+    liquidity = [item[2] for item in metrics]
+    enter = _quantile(direction, 0.70)
+    return RegimeThresholds(
+        direction_enter=enter,
+        direction_exit=enter * 0.60,
+        compressed_volatility=_quantile(volatility, 0.20),
+        expanding_volatility=_quantile(volatility, 0.70),
+        extreme_volatility=_quantile(volatility, 0.95),
+        thin_liquidity=_quantile(liquidity, 0.20),
+        deep_liquidity=_quantile(liquidity, 0.80),
+    )
+
+
 @dataclass(frozen=True)
 class PatternThresholds:
     minimum_flow_imbalance: float
@@ -400,6 +437,12 @@ def extract_pattern_features(
 
     if len(futures) < 241 or len(spot) < 61 or len(flow) < 13:
         raise FastTrackContractError("AEGIS_M1A_PATTERN_HISTORY_INSUFFICIENT")
+    recent_futures = futures[-241:]
+    if any(
+        current.open_time_ms - previous.open_time_ms != 60_000
+        for previous, current in zip(recent_futures, recent_futures[1:])
+    ):
+        raise FastTrackContractError("AEGIS_M1A_PATTERN_HISTORY_GAP")
     timestamp = futures[-1].close_time_ms
     if spot[-1].close_time_ms > timestamp or flow[-1].open_time_ms > futures[-1].open_time_ms:
         raise FastTrackContractError("AEGIS_M1A_PATTERN_CAUSALITY_VIOLATION")

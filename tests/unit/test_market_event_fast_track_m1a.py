@@ -1,4 +1,5 @@
 import zipfile
+from dataclasses import replace
 
 import pytest
 
@@ -17,6 +18,7 @@ from aegis.research.market_event_fast_track_m1a import (
     detect_micro_patterns,
     extract_pattern_features,
     fit_pattern_thresholds_from_train,
+    fit_regime_thresholds_from_train,
     normalize_timestamp_ms,
     read_agg_trade_archive,
     read_kline_archive,
@@ -162,3 +164,23 @@ def test_thresholds_are_fitted_only_from_explicit_train_snapshots() -> None:
     assert thresholds.minimum_volume_ratio == pytest.approx(snapshot["volume_ratio"])
     with pytest.raises(FastTrackContractError, match="TRAIN_ROWS_INSUFFICIENT"):
         fit_pattern_thresholds_from_train((snapshot,) * 999)
+
+
+def test_regime_thresholds_are_fitted_from_train_histories() -> None:
+    samples = []
+    for index in range(100):
+        minute = tuple(
+            replace(row, quote_volume=row.quote_volume * (1.0 + index * 0.01))
+            for row in _bars(2000, drift=0.00005 + index * 0.000001)
+        )
+        samples.append(
+            (
+                resample_closed_bars(minute[:1800], 60),
+                resample_closed_bars(minute[:1920], 240),
+            )
+        )
+    thresholds = fit_regime_thresholds_from_train(samples)
+    assert thresholds.direction_exit < thresholds.direction_enter
+    assert thresholds.compressed_volatility < thresholds.expanding_volatility
+    with pytest.raises(FastTrackContractError, match="REGIME_TRAIN_INSUFFICIENT"):
+        fit_regime_thresholds_from_train(tuple(samples[:99]))
