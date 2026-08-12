@@ -1,0 +1,102 @@
+schema_version: aegis-directional-contract-v15-preregistration-v1
+experiment_id: aegis-directional-contract-v15-research-01
+mode: RESEARCH_ONLY
+selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  source_manifest: data/calibrated_horizon_v11/dataset_manifest.json
+  source_manifest_sha256: 8648567317d7d7690c917afcb36049e1f4af01168c2f9f8b871718cbc41934f4
+  source_v11_config: config/experiments/aegis_calibrated_horizon_v11_research.yaml
+  source_v11_config_sha256: 4aa8dbaec916f21506badb58e93f101f4a2655bf02d8c310a33dd91f06eb6eac
+  source_v14_validation: data/feature_information_v14/validation.json
+  source_v14_validation_sha256: b6d8c29d64ead1283e8e0e55e2818c54a413e8b3e0c0109c9a2fc24b992f8ecc
+  source_v14_config: config/experiments/aegis_feature_information_v14_research.yaml
+  source_v14_config_sha256: d397d1241bf0e505f56e62d716eacde65758eeff9a06ff4d7f08c098f5d2016c
+  source_v14_report: reports/governance/aegis_prospective_validation/live/feature_information_v14/aegis_feature_information_v14_research_report.md
+  source_v14_report_sha256: 07e5f33e50624f7ad667e346d1b71b6fef14d6bc60ba9b789caa502fc5198306
+  entry_rule: NEXT_BAR_OPEN
+
+contracts:
+  baseline:
+    identity: V9_ALL_176
+    feature_count: 176
+  deduplicated:
+    identity: V15_DEDUPLICATED_168
+    feature_count: 168
+    remove_positions:
+      - {index: 61, name: 15m_ret_1, retained_equivalent: ret_3}
+      - {index: 91, name: 1h_ret_1, retained_equivalent: ret_12}
+      - {index: 92, name: 1h_ret_3, retained_equivalent: 15m_ret_12}
+      - {index: 93, name: 1h_ret_6, retained_equivalent: 15m_ret_24}
+      - {index: 126, name: volume_ratio_6_24, retained_equivalent: volume_ratio_6_24@40}
+      - {index: 154, name: favorable_close_location, retained_equivalent: side_close_position_in_range}
+      - {index: 168, name: rolling_12h_return, retained_equivalent: 1h_ret_12}
+      - {index: 175, name: timeframe_conflict_score, retained_equivalent: one_minus_timeframe_alignment_score}
+  directional:
+    LONG:
+      identity: V15_LONG_DEDUP_WITHOUT_UNSTABLE_FAMILIES
+      base: V15_DEDUPLICATED_168
+      remove_families: [LOCAL_MOMENTUM_TREND, ROLLING_CONTEXT]
+      evidence_role: V14_EXPLORATORY_HYPOTHESIS
+    SHORT:
+      identity: V15_SHORT_DEDUPLICATED
+      base: V15_DEDUPLICATED_168
+      remove_families: []
+      evidence_role: V14_NO_STABLE_FAMILY_REMOVAL
+
+targets:
+  danger_first:
+    positive_outcomes: [ADVERSE_FIRST, SAME_BAR_AMBIGUOUS]
+    source_contract: ROE_10_H12
+  clean_entry:
+    source: V11_PRIMARY_CLEAN_ENTRY_LABEL
+  mae:
+    source: V9_MAE_FRACTION
+    quantile: 0.90
+  economic_utility:
+    source: ROE_10_H12_REALIZED_UTILITY
+    includes_frozen_severe_costs: true
+
+models:
+  classification_estimator: LOGISTIC_REGRESSION_STANDARDIZED
+  mae_estimator: HISTOGRAM_GRADIENT_BOOSTING_QUANTILE
+  class_weight: BALANCED
+  one_bundle_per_side_and_contract: true
+  score_formula: CLEAN_PROBABILITY_MINUS_DANGER_PROBABILITY_MINUS_NORMALIZED_Q90_MAE
+  mae_normalizer: ROE_10_H12_ADVERSE_FRACTION
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD_WITH_CALIBRATION
+  embargo_minutes: 120
+  minimum_rows_per_partition: 500
+  minimum_selected_per_fold: 30
+  maximum_selected_per_timestamp: 1
+  score_quantiles: [0.80, 0.90, 0.95]
+  folds:
+    - {id: 1, train_end: '2025-11-26T18:55:00+00:00', calibration_end: '2026-01-02T06:55:00+00:00', test_end: '2026-02-07T18:55:00+00:00', role: RETROSPECTIVE}
+    - {id: 2, train_end: '2026-01-02T06:55:00+00:00', calibration_end: '2026-02-07T18:55:00+00:00', test_end: '2026-03-16T06:55:00+00:00', role: RETROSPECTIVE}
+    - {id: 3, train_end: '2026-03-16T06:55:00+00:00', calibration_end: '2026-04-21T18:55:00+00:00', test_end: '2026-05-28T06:55:00+00:00', role: RETROSPECTIVE}
+    - {id: 4, train_end: '2026-07-03T18:55:00+00:00', calibration_end: '2026-07-17T18:55:00+00:00', test_end: '2026-08-09T06:55:00+00:00', role: POST_V14_HOLDOUT}
+  candidate_required_improvement_folds: 3
+  final_holdout_must_not_regress: true
+  require_danger_log_loss_and_average_precision: true
+  require_clean_log_loss_and_average_precision: true
+  require_mae_pinball: true
+  require_economic_mean_utility: true
+  require_cvar_not_worse: true
+  require_adverse_first_rate_not_worse: true
+  require_mean_mae_not_worse: true
+  prohibit_test_threshold_tuning: true
+
+deployment:
+  feature_contract_change: PROHIBITED
+  model_export: PROHIBITED
+  shadow_runtime: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0
