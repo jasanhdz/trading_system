@@ -1,0 +1,20 @@
+{
+  "schema_id": "aegis-causal-opportunity-v20-verdict-v1",
+  "experiment_id": "aegis-causal-opportunity-dataset-v20-01",
+  "source_rows": 90442,
+  "opportunity_rows": 7172,
+  "eligible_side_families": [],
+  "V20_READY_FOR_MODELING": false,
+  "V20_READY_FOR_SHADOW": false,
+  "V20_READY_FOR_LIVE": false,
+  "model_training_executed": false,
+  "model_exported": false,
+  "disposition": "NO_SIMPLE_FAMILY_EDGE_MODEL_TRAINING_PROHIBITED",
+  "dataset_sha256": "fa9e8cc0c28d308d54c0b3b88f451bc15fdf58ccebe32a0ac4e49eb1deaedc77",
+  "feasibility_report_sha256": "fe506c77ff8f68e6b64fe4f94ad9343a49d1d2b123860c8f8d73d81e01f6d25d",
+  "manifest_sha256": "e6793aeccc537693be5d588caeae33feb63c642d4b72888145ac82c526278ce3",
+  "live_changed": false,
+  "shadow_changed": false,
+  "exchange_calls": 0,
+  "exchange_mutations": 0
+}
