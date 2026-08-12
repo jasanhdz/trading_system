@@ -49,12 +49,13 @@ an idempotent reduce-only emergency exit before requesting it.
 
 ## Validation
 
-Seventeen focused TypeScript tests pass. They cover deterministic identity,
+Fourteen focused durable-lifecycle TypeScript tests pass, plus two existing
+Binance bracket tests. They cover deterministic identity,
 duplicate intent conflict, partial fill, ambiguous timeout received by Binance,
 ambiguous timeout not received, read-before-retry, crash between fill and
 bracket, complete local-state loss, partial bracket coverage, bracket failure,
-idempotent close, corrupted journal, adapter order lookup, and exact protection
-reconciliation.
+idempotent close, corrupted journal, ambiguous transport reads, and exact
+protection reconciliation.
 
 `npm run build` passes. No exchange request was made by these tests; all
 mutation-capable paths used fakes or mocked transport.
