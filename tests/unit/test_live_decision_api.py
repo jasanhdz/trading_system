@@ -758,3 +758,12 @@ def test_pm2_definition_uses_local_module_and_no_credentials() -> None:
     python_block = text.split('name: "02-Aegis-API"', 1)[1]
     assert "BINANCE_API" not in python_block
     assert '"PYTHONPATH": "/home/jasan/Develop/trading_system/src"' in python_block
+
+
+def test_live_api_uses_single_lazy_application_factory() -> None:
+    source = (Path(__file__).parents[2] / "src/aegis/live_api.py").read_text(
+        encoding="utf-8"
+    )
+    assert "app = create_app()" not in source
+    assert '"aegis.live_api:create_app"' in source
+    assert "factory=True" in source

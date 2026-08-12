@@ -95,9 +95,6 @@ def create_app(service: CurrentBrainDecisionService | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Aegis current-brain local HTTP API")
     parser.add_argument("--host", default="127.0.0.1")
@@ -106,10 +103,11 @@ def main() -> int:
     if args.host != "127.0.0.1" or args.port != 8001:
         raise SystemExit("AEGIS_CURRENT_BRAIN_BINDING_PROHIBITED")
     uvicorn.run(
-        "aegis.live_api:app",
+        "aegis.live_api:create_app",
         host=args.host,
         port=args.port,
         workers=1,
+        factory=True,
         access_log=False,
     )
     return 0
