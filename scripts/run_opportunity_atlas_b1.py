@@ -105,6 +105,14 @@ def _component_gate(validation: dict[str, Any], forward: dict[str, Any]) -> dict
         "direction_forward": forward["direction"]["balanced_accuracy"] >= .55,
         "ranking_validation": all(value["spearman"] >= .05 for value in validation["ranking"].values()),
         "ranking_forward": all(value["spearman"] >= .05 for value in forward["ranking"].values()),
+        "ranking_outperforms_random_validation": all(
+            value["top_rank_outperforms_random"]
+            for value in validation["ranking"].values()
+        ),
+        "ranking_outperforms_random_forward": all(
+            value["top_rank_outperforms_random"]
+            for value in forward["ranking"].values()
+        ),
         "mae_validation": all(value["mae_spearman"] >= .10 for value in validation["path_risk"].values()),
         "mae_forward": all(value["mae_spearman"] >= .10 for value in forward["path_risk"].values()),
     }

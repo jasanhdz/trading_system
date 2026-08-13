@@ -27,6 +27,16 @@ def test_event_features_require_complete_cross_symbol_cluster():
     assert event_features(_panel(10)).empty
 
 
+def test_event_features_apply_four_hour_independence_grid():
+    first = _panel()
+    second = _panel()
+    second["timestamp_ms"] = 3_600_000
+    third = _panel()
+    third["timestamp_ms"] = 4 * 3_600_000
+    result = event_features(pd.concat([first, second, third], ignore_index=True))
+    assert result["timestamp_ms"].tolist() == [0, 4 * 3_600_000]
+
+
 def test_event_feature_contract_is_order_sensitive():
     assert feature_contract_hash(EVENT_FEATURES) != feature_contract_hash(tuple(reversed(EVENT_FEATURES)))
 

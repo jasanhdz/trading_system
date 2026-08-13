@@ -56,7 +56,7 @@ def feature_contract_hash(names: Sequence[str]) -> str:
 
 
 def event_features(panel: pd.DataFrame, symbols_required: int = 11) -> pd.DataFrame:
-    hourly = panel.loc[panel["timestamp_ms"].mod(3_600_000).eq(0)].copy()
+    hourly = panel.loc[panel["timestamp_ms"].mod(4 * 3_600_000).eq(0)].copy()
     counts = hourly.groupby("timestamp_ms")["symbol"].nunique()
     valid = counts.loc[counts.eq(symbols_required)].index
     hourly = hourly.loc[hourly["timestamp_ms"].isin(valid)]
@@ -213,7 +213,32 @@ def component_metrics(models: FrozenModels, events: pd.DataFrame, rows: pd.DataF
         predicted_return = models.ranking[side].predict(side_rows.loc[:, list(SYMBOL_FEATURES)])
         predicted_mae = models.mae[side].predict(side_rows.loc[:, list(SYMBOL_FEATURES)])
         predicted_mfe = models.mfe[side].predict(side_rows.loc[:, list(SYMBOL_FEATURES)])
-        ranking[side] = {"events": len(side_rows), "spearman": safe_spearman(side_rows["gross_return"], predicted_return)}
+        ranked = side_rows.assign(predicted_return=predicted_return)
+        top = (
+            ranked.sort_values(
+                ["timestamp_ms", "predicted_return", "symbol"],
+                ascending=[True, False, True],
+            )
+            .drop_duplicates("timestamp_ms", keep="first")
+        )
+        random_rows = []
+        for timestamp, group in side_rows.groupby("timestamp_ms", sort=True):
+            digest = hashlib.sha256(
+                f"b1-rank:{side}:{int(timestamp)}".encode("ascii")
+            ).digest()
+            ordered = group.sort_values("symbol")
+            random_rows.append(
+                ordered.iloc[int.from_bytes(digest[:8], "big") % len(ordered)]
+            )
+        random_frame = pd.DataFrame(random_rows)
+        ranking[side] = {
+            "events": len(side_rows),
+            "spearman": safe_spearman(side_rows["gross_return"], predicted_return),
+            "top_rank_gross_expectancy": float(top["gross_return"].mean()),
+            "random_gross_expectancy": float(random_frame["gross_return"].mean()),
+            "top_rank_outperforms_random": float(top["gross_return"].mean())
+            > float(random_frame["gross_return"].mean()),
+        }
         path[side] = {
             "mae_spearman": safe_spearman(side_rows["mae"], predicted_mae),
             "mfe_spearman": safe_spearman(side_rows["mfe"], predicted_mfe),
