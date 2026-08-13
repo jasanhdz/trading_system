@@ -1,0 +1,138 @@
+schema_version: aegis-market-microstructure-events-c2-preregistration-v1
+experiment_id: aegis-market-microstructure-events-c2-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+runtime_selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  c1_result_sha256: 261f03a857aad78b7ffc26f447ce3add631ea693729923c2baf2d2949368a385
+  m1_contract: src/aegis/research/market_event_lab_m1.py
+  existing_database: data/long_entry_v3_shadow/public_microstructure.db
+  existing_coverage:
+    futures_klines: {rows: 1710710, symbols: 11, span_days: 540.0}
+    funding: {rows: 17820, symbols: 11, span_days: 539.67}
+    mark_price: {rows: 17820, symbols: 11, span_days: 539.67}
+    open_interest: {rows: 5501, symbols: 11, span_days: 1.74}
+    depth_snapshots: {rows: 11, symbols: 11, span_days: 0.01}
+    liquidation_events: {rows: 0, symbols: 0, span_days: 0.0}
+
+purpose:
+  statement: >-
+    Acquire genuinely incremental point-in-time public microstructure data and
+    test preregistered event mechanisms individually before any committee.
+  evidence_class: PROSPECTIVE_DATA_AND_EVENT_DISCOVERY
+  prohibited: [AUTHORIZE_SHADOW, AUTHORIZE_LIVE, EXPORT_TRADING_MODEL]
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  market: BINANCE_USDM_PERPETUAL
+  sides: [LONG, SHORT]
+
+source_contract:
+  authenticated_requests: 0
+  credentials_loaded: false
+  mutations: 0
+  public_rest_allowlist:
+    - GET /fapi/v1/klines
+    - GET /fapi/v1/fundingRate
+    - GET /futures/data/openInterestHist
+    - GET /fapi/v1/depth
+  public_stream_allowlist:
+    - <symbol>@aggTrade
+    - <symbol>@forceOrder
+    - <symbol>@depth20@100ms
+  source_semantics:
+    agg_trade: EVERY_PUBLIC_AGGREGATED_TAKER_ORDER_RECEIVED
+    force_order: LATEST_LIQUIDATION_SNAPSHOT_PER_SYMBOL_PER_1000MS_NOT_COMPLETE_TAPE
+    depth: TOP_20_PARTIAL_BOOK_SNAPSHOT
+    open_interest: PERIODIC_PUBLIC_REST_SNAPSHOT_RECENT_HISTORY_ONLY
+  raw_payload_retention: PROHIBITED_AFTER_VALIDATED_NORMALIZATION
+  canonical_rows_only: true
+  duplicate_identity: SOURCE_EVENT_NATURAL_KEY
+  future_fill: PROHIBITED
+  synthetic_zero_fill: PROHIBITED
+  timestamp_rewrite: PROHIBITED
+  daily_manifest: SHA256_CHAINED_APPEND_ONLY
+  permissions: '0600'
+
+canonical_tables:
+  aggregate_trades:
+    primary_key: [symbol, aggregate_trade_id]
+    required: [event_time_ms, trade_time_ms, price, quantity, quote_notional, buyer_is_maker]
+  liquidation_events:
+    primary_key: [symbol, order_trade_time_ms, side, price, original_quantity]
+    required: [event_time_ms, order_status, executed_quantity, average_price, quote_notional]
+  depth_snapshots:
+    primary_key: [symbol, transaction_time_ms]
+    required: [last_update_id, bid_notional_20, ask_notional_20, imbalance_20, spread_bps]
+  open_interest:
+    primary_key: [symbol, timestamp_ms]
+    required: [open_interest, open_interest_value]
+
+event_families:
+  OI_CONFIRMED_BREAKOUT:
+    hypothesis: ALIGNED_PRICE_FLOW_AND_EXPANDING_OI_CONTINUE
+    required_sources: [futures_klines, aggregate_trades, open_interest]
+  LIQUIDATION_ABSORPTION_REVERSAL:
+    hypothesis: FORCED_FLOW_WITH_WEAK_PRICE_RESPONSE_AND_RECLAIM_REVERSES
+    required_sources: [futures_klines, aggregate_trades, liquidation_events, depth_snapshots]
+  LIQUIDATION_CONTINUATION:
+    hypothesis: FORCED_FLOW_WITH_PRICE_EXPANSION_OI_AND_DEPTH_ALIGNMENT_CONTINUES
+    required_sources: [futures_klines, aggregate_trades, liquidation_events, open_interest, depth_snapshots]
+  DEPTH_ABSORPTION_REVERSAL:
+    hypothesis: AGGRESSIVE_FLOW_WITH_BOOK_ABSORPTION_AND_IMBALANCE_FLIP_REVERSES
+    required_sources: [aggregate_trades, depth_snapshots]
+  FLOW_IMPULSE_CONTINUATION:
+    hypothesis: PERSISTENT_AGGRESSOR_IMBALANCE_WITH_PRICE_ACCEPTANCE_CONTINUES
+    required_sources: [futures_klines, aggregate_trades]
+  BTC_ALT_LEAD_LAG:
+    hypothesis: BTC_OR_ETH_IMPULSE_PRECEDES_CAUSAL_RESIDUAL_ALTCOIN_RESPONSE
+    required_sources: [futures_klines, aggregate_trades]
+  SPOT_FUTURES_DISLOCATION_CONTROL:
+    hypothesis: EXTREME_BASIS_WITH_CAUSAL_CONVERGENCE
+    required_sources: [funding, mark_price, spot_reference, basis]
+
+event_contract:
+  observation_windows_seconds: [30, 60, 300]
+  entry: NEXT_COMPLETE_1M_OPEN_AFTER_CONFIRMATION
+  horizons_minutes: [15, 60, 240]
+  favorable_barrier_bps: [20, 42, 80]
+  adverse_barrier_bps: [20, 42, 80]
+  same_bar_ambiguity: ADVERSE_FIRST
+  correlation_cluster_minutes: 15
+  thresholds_fit_on: TRAIN_ONLY
+  detector_default: ABSTAIN
+
+evaluation:
+  minimum_collection_days_for_pilot: 7
+  minimum_collection_days_for_discovery: 60
+  minimum_independent_events_per_family_side: 300
+  costs_bps: [8, 14, 20]
+  metrics: [net_expectancy, profit_factor, win_rate, mae, mfe, cvar_05, duration, frequency]
+  controls: [RANDOM_TIMESTAMP_MATCHED_SIDE, PRICE_ONLY, C1_BASELINE]
+  uncertainty: DAY_CLUSTER_BOOTSTRAP_95
+  pass_requires:
+    validation_net_expectancy_gt: 0.0
+    pseudo_forward_net_expectancy_gt: 0.0
+    bootstrap_lower_95_gt: 0.0
+    profit_factor_gt: 1.10
+    stress_20bps_positive: true
+    outperform_all_controls: true
+    positive_temporal_thirds_gte: 2
+    positive_symbols_gte: 7
+  threshold_search: PROHIBITED_AFTER_VALIDATION
+  family_combination: PROHIBITED_UNTIL_INDIVIDUAL_FAMILY_PASSES
+
+deployment:
+  C2_COLLECTOR_READY: false
+  C2_DATA_READY: false
+  C2_EVENT_FAMILY_FOUND: false
+  C2_READY_FOR_MODELING: false
+  C2_READY_FOR_SHADOW: false
+  C2_READY_FOR_LIVE: false
+  runtime_changes: NONE
+  exchange_calls: 0
+  exchange_mutations: 0
