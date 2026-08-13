@@ -4,11 +4,14 @@ import pytest
 
 from aegis.research.residual_regime_alpha_b2 import (
     B2ContractError,
+    RANK_FEATURES,
     RegimeThresholds,
     add_barrier_outcomes,
     add_causal_residuals,
     assign_regimes,
+    choose_regime_mechanisms,
     contract_hash,
+    fit_pairwise_rankers,
 )
 
 
@@ -64,3 +67,35 @@ def test_barrier_same_minute_fails_closed():
 
 def test_feature_contract_hash_is_order_sensitive():
     assert contract_hash(("a", "b")) != contract_hash(("b", "a"))
+
+
+def test_regime_mechanism_requires_calibration_confirmation():
+    records = []
+    for timestamp, gross in ((1, 0.01), (2, -0.01)):
+        for side in ("LONG", "SHORT"):
+            records.append({
+                "timestamp_ms": timestamp, "symbol": "ADAUSDT", "side": side,
+                "regime": "RANGE__NORMAL", "gross_return": gross if side == "LONG" else -gross,
+                "return_4h": 0.01, "extension_z_24h": -1.0,
+                "relative_strength_btc_4h": 0.01,
+            })
+    choices, evidence = choose_regime_mechanisms(pd.DataFrame(records), {1}, {2})
+    assert choices == {}
+    assert not evidence["RANGE__NORMAL"]["confirmed"]
+
+
+def test_pairwise_ranker_learns_deterministic_order():
+    records = []
+    for timestamp in range(180):
+        for index, symbol in enumerate(("A", "B", "C")):
+            row = {name: 0.0 for name in RANK_FEATURES}
+            row.update({
+                "timestamp_ms": timestamp, "symbol": symbol, "side": "LONG",
+                "regime": "TREND_UP__NORMAL", "residual_utility": float(index),
+                "return_4h": float(index),
+            })
+            records.append(row)
+    frame = pd.DataFrame(records)
+    model = fit_pairwise_rankers(frame, set(range(180)))[("LONG", "TREND_UP__NORMAL")]
+    latest = frame.loc[frame.timestamp_ms.eq(179)]
+    assert model.score(latest).argmax() == 2
