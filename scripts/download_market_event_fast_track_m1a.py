@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from aegis.config import CANONICAL_SYMBOLS
@@ -35,6 +36,7 @@ def main() -> int:
         ],
     )
     parser.add_argument("--interval", default="1m")
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument(
         "--output-root", type=Path, default=Path("data/market_event_fast_track_m1a/raw")
     )
@@ -49,17 +51,34 @@ def main() -> int:
         "spot-klines": ("spot", "klines", args.interval),
         "spot-aggTrades": ("spot", "aggTrades", None),
     }
-    client = BinancePublicArchiveClient()
-    evidence = []
+    if not 1 <= args.workers <= 16:
+        parser.error("--workers must be between 1 and 16")
+    requests = []
     for month in month_range(args.start_month, args.end_month):
         for symbol in args.symbols:
             for dataset in args.datasets:
                 market, data_type, interval = mapping[dataset]
-                evidence.append(
-                    client.download(
-                        ArchiveRequest(market, data_type, symbol, month, interval), output
-                    )
+                requests.append(
+                    ArchiveRequest(market, data_type, symbol, month, interval)
                 )
+
+    def download(request: ArchiveRequest):
+        return BinancePublicArchiveClient().download(request, output)
+
+    evidence = []
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        pending = {executor.submit(download, request): request for request in requests}
+        for completed, future in enumerate(as_completed(pending), start=1):
+            evidence.append(future.result())
+            if completed % 50 == 0 or completed == len(pending):
+                print(
+                    json.dumps(
+                        {"completed": completed, "archives": len(pending)},
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+    evidence.sort(key=lambda item: item.url)
     manifest = output.parent / "archive_manifest.jsonl"
     append_manifest(manifest, evidence)
     print(
