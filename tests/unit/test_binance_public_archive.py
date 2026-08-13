@@ -1,4 +1,5 @@
 import hashlib
+import io
 import zipfile
 
 import pytest
@@ -78,3 +79,36 @@ def test_manifest_is_idempotent_and_rejects_changed_archive(tmp_path) -> None:
     assert len(manifest.read_text().splitlines()) == 1
     with pytest.raises(PublicArchiveError, match="CONFLICT"):
         append_manifest(manifest, (row.__class__(**{**row.__dict__, "actual_sha256": "0" * 64}),))
+
+
+def test_streamed_download_hashes_chunks_and_replaces_atomically(tmp_path, monkeypatch):
+    payload = b"large-archive-payload" * 100
+    expected = hashlib.sha256(payload).hexdigest()
+
+    class Response(io.BytesIO):
+        def geturl(self):
+            return "https://data.binance.vision/data/test.zip"
+
+    client = BinancePublicArchiveClient()
+    monkeypatch.setattr(client.opener, "open", lambda *args, **kwargs: Response(payload))
+    destination = tmp_path / "test.zip"
+    client._download_verified(
+        "https://data.binance.vision/data/test.zip", destination, expected
+    )
+    assert destination.read_bytes() == payload
+    assert destination.stat().st_mode & 0o777 == 0o400
+
+
+def test_streamed_download_rejects_hash_mismatch_without_destination(tmp_path, monkeypatch):
+    class Response(io.BytesIO):
+        def geturl(self):
+            return "https://data.binance.vision/data/test.zip"
+
+    client = BinancePublicArchiveClient()
+    monkeypatch.setattr(client.opener, "open", lambda *args, **kwargs: Response(b"bad"))
+    destination = tmp_path / "test.zip"
+    with pytest.raises(PublicArchiveError, match="HASH_MISMATCH"):
+        client._download_verified(
+            "https://data.binance.vision/data/test.zip", destination, "0" * 64
+        )
+    assert not destination.exists()

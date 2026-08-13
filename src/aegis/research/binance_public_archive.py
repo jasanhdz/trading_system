@@ -112,6 +112,36 @@ class BinancePublicArchiveClient:
                 raise PublicArchiveError("AEGIS_M1A_ARCHIVE_RESPONSE_HOST_INVALID")
             return response.read()
 
+    def _download_verified(self, url: str, destination: Path, expected: str) -> None:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname != ARCHIVE_HOST:
+            raise PublicArchiveError("AEGIS_M1A_ARCHIVE_HOST_INVALID")
+        request = urllib.request.Request(url, method="GET")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", dir=destination.parent
+        )
+        digest = hashlib.sha256()
+        try:
+            with (
+                self.opener.open(request, timeout=self.timeout_seconds) as response,
+                os.fdopen(descriptor, "wb") as handle,
+            ):
+                resolved = urllib.parse.urlparse(response.geturl())
+                if resolved.scheme != "https" or resolved.hostname != ARCHIVE_HOST:
+                    raise PublicArchiveError("AEGIS_M1A_ARCHIVE_RESPONSE_HOST_INVALID")
+                while chunk := response.read(1024 * 1024):
+                    digest.update(chunk)
+                    handle.write(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if digest.hexdigest() != expected:
+                raise PublicArchiveError("AEGIS_M1A_ARCHIVE_HASH_MISMATCH")
+            os.chmod(temporary_name, 0o400)
+            os.replace(temporary_name, destination)
+        finally:
+            if os.path.exists(temporary_name):
+                os.unlink(temporary_name)
+
     @staticmethod
     def parse_checksum(payload: bytes, expected_filename: str) -> str:
         try:
@@ -160,24 +190,8 @@ class BinancePublicArchiveClient:
             if sha256_file(destination) != expected:
                 raise PublicArchiveError("AEGIS_M1A_IMMUTABLE_ARCHIVE_CONFLICT")
         else:
-            payload = self._read(request.url)
-            actual = hashlib.sha256(payload).hexdigest()
-            if actual != expected:
-                raise PublicArchiveError("AEGIS_M1A_ARCHIVE_HASH_MISMATCH")
-            descriptor, temporary_name = tempfile.mkstemp(
-                prefix=f".{request.filename}.", dir=target
-            )
-            try:
-                with os.fdopen(descriptor, "wb") as handle:
-                    handle.write(payload)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.chmod(temporary_name, 0o400)
-                os.replace(temporary_name, destination)
-                downloaded = True
-            finally:
-                if os.path.exists(temporary_name):
-                    os.unlink(temporary_name)
+            self._download_verified(request.url, destination, expected)
+            downloaded = True
         os.chmod(destination, 0o400)
         actual = sha256_file(destination)
         members = self.validate_zip(destination)
