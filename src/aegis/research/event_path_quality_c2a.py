@@ -258,3 +258,63 @@ def contracts_from_preregistration(config: Mapping[str, object]) -> tuple[PathCo
         for horizon in horizons
         for favorable_value, adverse_value in zip(favorable, adverse, strict=True)
     )
+
+
+def detect_registered_events(
+    rows: pd.DataFrame, config: Mapping[str, object]
+) -> pd.DataFrame:
+    detectors = config.get("event_detectors")
+    if not isinstance(detectors, Mapping):
+        raise C2AContractError("AEGIS_C2A_DETECTOR_CONFIG_MISSING")
+    impulse = detectors.get("FLOW_IMPULSE_CONTINUATION")
+    absorption = detectors.get("FLOW_ABSORPTION_REVERSAL")
+    if not isinstance(impulse, Mapping) or not isinstance(absorption, Mapping):
+        raise C2AContractError("AEGIS_C2A_DETECTOR_CONFIG_INVALID")
+    required = {
+        "event_timestamp_ms", "symbol", "side", "side_flow_z",
+        "trade_count_z", "side_flow_imbalance_3m",
+        "side_flow_persistence_5m", "side_price_response_1m",
+    }
+    if not required.issubset(rows.columns):
+        raise C2AContractError("AEGIS_C2A_DETECTOR_FEATURE_MISSING")
+    values = rows.copy()
+    impulse_mask = (
+        values["side_flow_z"].ge(float(impulse["side_flow_z_minimum"]))
+        & values["trade_count_z"].ge(float(impulse["side_trade_count_z_minimum"]))
+        & values["side_flow_imbalance_3m"].ge(float(impulse["side_flow_imbalance_3m_minimum"]))
+        & values["side_flow_persistence_5m"].ge(float(impulse["side_flow_persistence_5m_minimum"]))
+        & values["side_price_response_1m"].ge(float(impulse["side_price_response_1m_minimum"]))
+    )
+    absorption_mask = (
+        values["side_flow_z"].le(-float(absorption["opposing_flow_z_minimum"]))
+        & values["trade_count_z"].ge(float(absorption["opposing_trade_count_z_minimum"]))
+        & values["side_price_response_1m"].ge(float(absorption["side_price_response_1m_minimum"]))
+        & values["side_flow_imbalance_3m"].ge(float(absorption["side_flow_imbalance_3m_minimum"]))
+    )
+    parts = []
+    if impulse_mask.any():
+        parts.append(values.loc[impulse_mask].assign(event_family="FLOW_IMPULSE_CONTINUATION"))
+    if absorption_mask.any():
+        parts.append(values.loc[absorption_mask].assign(event_family="FLOW_ABSORPTION_REVERSAL"))
+    if not parts:
+        return values.iloc[0:0].assign(event_family=pd.Series(dtype="object"))
+    return pd.concat(parts, ignore_index=True).sort_values(
+        ["event_timestamp_ms", "symbol", "side", "event_family"], ignore_index=True
+    )
+
+
+def collapse_registered_events(rows: pd.DataFrame, cooldown_minutes: int) -> pd.DataFrame:
+    if cooldown_minutes <= 0:
+        raise C2AContractError("AEGIS_C2A_COOLDOWN_INVALID")
+    selected = []
+    last: dict[tuple[str, str, str], int] = {}
+    for row in rows.sort_values(
+        ["event_timestamp_ms", "symbol", "side", "event_family"]
+    ).itertuples(index=False):
+        key = (str(row.symbol), str(row.side), str(row.event_family))
+        timestamp = int(row.event_timestamp_ms)
+        if key in last and timestamp - last[key] < cooldown_minutes * 60_000:
+            continue
+        last[key] = timestamp
+        selected.append(row._asdict())
+    return pd.DataFrame(selected, columns=rows.columns)

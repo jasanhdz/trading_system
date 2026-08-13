@@ -34,7 +34,13 @@ bars may produce labels only and may never enter event features.
 
 Train, validation and final holdout dates are frozen in
 `config/experiments/aegis_event_path_quality_c2a.yaml`. Flow thresholds are
-fit on TRAIN only. Event overlap is reduced with a fixed 15-minute cooldown.
+fit on TRAIN only. Two fixed detectors are registered before outcome analysis:
+flow impulse continuation requires side-aligned `flow_z >= 2.5`, trade-count
+`z >= 1.0`, three-minute imbalance `>= 0.10`, five-minute persistence
+`>= 0.20` and non-negative one-minute response. Absorption reversal requires
+opposing `flow_z >= 2.5`, trade-count `z >= 1.0`, a side reclaim of at least
+one basis point and three-minute imbalance no worse than `-0.10`. Event overlap
+is reduced with a fixed 15-minute cooldown.
 Final holdout may be opened once and cannot be used for repeated threshold or
 feature selection.
 

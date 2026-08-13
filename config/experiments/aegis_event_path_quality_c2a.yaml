@@ -46,6 +46,20 @@ flow_features:
     - flow_persistence
   thresholds_fit_on: TRAIN_ONLY
 
+event_detectors:
+  FLOW_IMPULSE_CONTINUATION:
+    side_flow_z_minimum: 2.5
+    side_trade_count_z_minimum: 1.0
+    side_flow_imbalance_3m_minimum: 0.10
+    side_flow_persistence_5m_minimum: 0.20
+    side_price_response_1m_minimum: 0.0
+  FLOW_ABSORPTION_REVERSAL:
+    opposing_flow_z_minimum: 2.5
+    opposing_trade_count_z_minimum: 1.0
+    side_price_response_1m_minimum: 0.0001
+    side_flow_imbalance_3m_minimum: -0.10
+  threshold_search_after_registration: PROHIBITED
+
 targets:
   horizons_minutes: [15, 60, 240]
   favorable_barrier_bps: [20, 42, 80]
