@@ -66,7 +66,9 @@ def main() -> int:
         type=Path,
         default=Path("data/market_event_fast_track_m1a/full_run_01"),
     )
-    parser.add_argument("--horizon-minutes", type=int, default=60)
+    parser.add_argument(
+        "--horizons-minutes", nargs="+", type=int, default=[15, 30, 60, 120, 240]
+    )
     parser.add_argument("--symbols", nargs="+", default=list(CANONICAL_SYMBOLS))
     parser.add_argument("--rebuild-cache", action="store_true")
     args = parser.parse_args()
@@ -152,24 +154,30 @@ def main() -> int:
         frame = pd.read_parquet(cache_root / f"{symbol}.parquet")
         classified = classify_hourly_regime(hourly_frames[symbol], regime_thresholds)
         attached = attach_regime(frame, classified)
-        evaluated_symbol = evaluate_events(
-            symbol_events, {symbol: attached}, args.horizon_minutes
-        )
-        evaluated_parts.append(evaluated_symbol)
-        control_candidates = matched_random_control(
-            evaluated_symbol, {symbol: attached}, args.horizon_minutes
-        )
-        control_parts.append(
-            evaluate_events(
-                control_candidates, {symbol: attached}, args.horizon_minutes
+        symbol_real_count = 0
+        symbol_control_count = 0
+        for horizon in args.horizons_minutes:
+            evaluated_symbol = evaluate_events(
+                symbol_events, {symbol: attached}, horizon
             )
-        )
+            evaluated_symbol["horizon_minutes"] = horizon
+            evaluated_parts.append(evaluated_symbol)
+            control_candidates = matched_random_control(
+                evaluated_symbol, {symbol: attached}, horizon
+            )
+            evaluated_control = evaluate_events(
+                control_candidates, {symbol: attached}, horizon
+            )
+            evaluated_control["horizon_minutes"] = horizon
+            control_parts.append(evaluated_control)
+            symbol_real_count += len(evaluated_symbol)
+            symbol_control_count += len(evaluated_control)
         print(
-            f"events_evaluated symbol={symbol} real={len(evaluated_symbol)} "
-            f"control={len(control_parts[-1])}",
+            f"events_evaluated symbol={symbol} real={symbol_real_count} "
+            f"control={symbol_control_count}",
             flush=True,
         )
-        del frame, attached, evaluated_symbol, control_candidates
+        del frame, attached, evaluated_symbol, evaluated_control, control_candidates
         gc.collect()
     evaluated = pd.concat(evaluated_parts, ignore_index=True)
     controls = pd.concat(control_parts, ignore_index=True)
@@ -185,14 +193,27 @@ def main() -> int:
     for path in (raw_path, independent_path, evaluated_path, control_path):
         os.chmod(path, 0o600)
 
-    real_summaries = summaries(evaluated)
-    control_summaries = summaries(controls)
+    real_summaries = {}
+    control_summaries = {}
+    for horizon in args.horizons_minutes:
+        for key, value in summaries(
+            evaluated.loc[evaluated["horizon_minutes"].eq(horizon)]
+        ).items():
+            partition, pattern, side = key.split(":")
+            real_summaries[f"{partition}:{horizon}m:{pattern}:{side}"] = value
+        for key, value in summaries(
+            controls.loc[controls["horizon_minutes"].eq(horizon)]
+        ).items():
+            partition, pattern, side = key.split(":")
+            control_summaries[f"{partition}:{horizon}m:{pattern}:{side}"] = value
     comparisons = {}
     for key, real in real_summaries.items():
         control = control_summaries.get(key)
-        partition, pattern, side = key.split(":")
+        partition, horizon_name, pattern, side = key.split(":")
+        horizon = int(horizon_name.removesuffix("m"))
         group = evaluated.loc[
             evaluated["partition"].eq(partition)
+            & evaluated["horizon_minutes"].eq(horizon)
             & evaluated["pattern"].eq(pattern)
             & evaluated["side"].eq(side)
         ]
@@ -255,7 +276,7 @@ def main() -> int:
         "config_sha256": sha256_file(config),
         "symbols": list(args.symbols),
         "source_minutes": source_counts,
-        "horizon_minutes": args.horizon_minutes,
+        "horizons_minutes": args.horizons_minutes,
         "pattern_thresholds": asdict(pattern_thresholds),
         "regime_thresholds": asdict(regime_thresholds),
         "raw_candidate_count": len(raw_candidates),
