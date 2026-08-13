@@ -1,0 +1,202 @@
+schema_version: aegis-compression-entry-m1c-preregistration-v1
+experiment_id: aegis-compression-entry-m1c-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+runtime_selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  m1b_config:
+    path: config/experiments/aegis_market_event_economic_path_m1b.yaml
+    sha256: 842a66bd9e32a30745ced4108070a02d457acb053c1a06e45a076f2627c00124
+  m1b_result:
+    path: reports/governance/aegis_prospective_validation/live/market_event_economic_path_m1b/aegis_market_event_economic_path_m1b_result.md
+    sha256: dc81a2ae30de1f90cd5509f3af9cbaef2423df6644c8044afee7ba32cd16fcc0
+  m1b_private_result_sha256: 2223bcf4d9ee36816881528af022ad4d792fb2e59053c6f45f85e423c77fec3d
+  m1b_dataset_sha256: 957b0d9903cbfbc930d53827dc349ea2e0ac5df025961e23fc5c4198cb6956bf
+  implementation_commit: f1af935abbc3dfd88a361c6f9e7a16d5f5177907
+
+hypothesis:
+  statement: >-
+    A causal pullback-and-reclaim confirmation plus multi-timeframe context can
+    retain the gross information observed in Compression LONG while reducing
+    adverse excursion enough to produce stable net expectancy after costs.
+  disclosed_origin: M1B_RETROSPECTIVE_COMPRESSION_LONG_ATTRIBUTION
+  primary_variant: PULLBACK_RECLAIM__CURRENT_TS_240
+  retrospective_promotion_authority: false
+  abstention_is_valid: true
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  side: LONG
+  source_population: M1A_COMPRESSION_BREAKOUT_LONG
+  source_interval: 1m
+
+entries:
+  IMMEDIATE:
+    role: FROZEN_BASELINE
+    rule: NEXT_1M_BAR_OPEN_AFTER_ORIGINAL_EVENT_CONFIRMATION
+  PULLBACK_RECLAIM:
+    role: PRIMARY_CHALLENGER
+    observation_bars: 5
+    confirmation_requires:
+      - candle_low_lte_original_event_close
+      - candle_close_gte_original_prior_high
+      - candle_close_gt_candle_open
+    entry: NEXT_1M_BAR_OPEN_AFTER_FIRST_VALID_CONFIRMATION
+    no_confirmation: ABSTAIN
+  entry_choice_after_validation: PROHIBITED
+
+features:
+  schema: aegis-m1c-compression-multitimeframe-features-v1
+  cutoff: ENTRY_CONFIRMATION_TIMESTAMP_INCLUSIVE
+  base_schema: aegis-m1b-economic-path-features-v1
+  added_ordered_features:
+    - side_return_5m
+    - side_return_15m
+    - side_return_240m
+    - side_taker_flow_5m
+    - side_taker_flow_15m
+    - realized_volatility_5m
+    - realized_volatility_15m
+    - realized_volatility_60m
+    - realized_volatility_240m
+    - favorable_range_location_15m
+    - favorable_range_location_60m
+    - favorable_range_location_240m
+    - side_trend_distance_sma_15m
+    - side_trend_distance_sma_60m
+    - side_trend_distance_sma_240m
+  feature_count: 38
+  missing_or_nonfinite: REJECT_EVENT
+  future_fill: PROHIBITED
+  extra_or_reordered: REJECT_CONTRACT
+
+regimes:
+  thresholds_source: DEVELOPMENT_TRAIN_ONLY
+  direction:
+    classes: [DOWN, TRANSITION, UP]
+    threshold: TRAIN_ABS_DIRECTION_SCORE_Q70
+  volatility:
+    classes: [COMPRESSED, NORMAL, EXPANDING]
+    lower_threshold: TRAIN_REALIZED_VOLATILITY_Q30
+    upper_threshold: TRAIN_REALIZED_VOLATILITY_Q70
+  use: PREDEFINED_SUBGROUP_STABILITY_AUDIT
+  post_validation_symbol_or_regime_exclusion: PROHIBITED
+
+exits:
+  CURRENT_TS_240:
+    role: PRIMARY
+    horizon_minutes: 240
+    leverage: 15.0
+    hard_stop_roe: -0.40
+    take_profit_roe: 0.50
+    break_even_trigger_roe: 0.08
+    trailing_activation_roe: 0.15
+    trailing_callback_roe: 0.08
+  TIMEBOX_60:
+    role: SECONDARY_DIAGNOSTIC
+    horizon_minutes: 60
+    protection_parameters: SAME_AS_CURRENT_TS
+  EARLY_LOCK_120:
+    role: SECONDARY_DIAGNOSTIC
+    horizon_minutes: 120
+    leverage: 15.0
+    hard_stop_roe: -0.40
+    take_profit_roe: 0.50
+    break_even_trigger_roe: 0.05
+    trailing_activation_roe: 0.10
+    trailing_callback_roe: 0.05
+  secondary_exit_cannot_replace_primary_after_validation: true
+
+costs:
+  PRIMARY_14BPS:
+    fee_bps_per_side: 5.0
+    slippage_bps_per_side: 2.0
+  OPTIMISTIC_8BPS_DIAGNOSTIC:
+    fee_bps_per_side: 3.0
+    slippage_bps_per_side: 1.0
+  STRESS_20BPS:
+    fee_bps_per_side: 5.0
+    slippage_bps_per_side: 5.0
+  ZERO_COST_ATTRIBUTION:
+    promotion_authority: false
+  realized_funding_included: true
+
+models:
+  positive_net_probability:
+    estimator: L2_LOGISTIC_REGRESSION
+    calibration: PLATT_ON_CALIBRATION_ONLY
+  mae_q90:
+    estimator: GRADIENT_BOOSTING_QUANTILE
+    quantile: 0.90
+  net_utility:
+    estimator: HUBER_GRADIENT_BOOSTING_REGRESSION
+  model_per_entry_exit_variant: true
+  complex_models: PROHIBITED
+  seed: 181101
+  seed_search: PROHIBITED
+
+temporal_protocol:
+  development_train: ['2024-01-01T00:00:00Z', '2025-04-01T00:00:00Z']
+  development_calibration: ['2025-04-01T00:00:00Z', '2025-10-01T00:00:00Z']
+  contaminated_retrospective_validation: ['2025-10-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  fresh_forward_start: '2026-08-13T00:00:00Z'
+  fresh_forward_minimum_days: 30
+  purge_minutes: 240
+  embargo_minutes: 240
+  validation_open_once: true
+  threshold_source: DEVELOPMENT_CALIBRATION_ONLY
+
+selection:
+  probability_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  mae_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  utility_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  choose_by: CALIBRATION_CONSERVATIVE_NET_UTILITY
+  maximum_selected_per_timestamp: 1
+  validation_threshold_tuning: PROHIBITED
+
+controls:
+  - NO_TRADE
+  - M1B_COMPRESSION_LONG_SELECTED
+  - M1C_IMMEDIATE_UNFILTERED
+  - M1C_PULLBACK_UNFILTERED
+  - SYMBOL_DIRECTION_REGIME_TIME_MATCHED_RANDOM
+
+primary_gate:
+  variant: PULLBACK_RECLAIM__CURRENT_TS_240
+  cost: PRIMARY_14BPS
+  minimum_validation_events: 100
+  net_expectancy_gt: 0.0
+  day_block_bootstrap_expectancy_lower_95_gt: 0.0
+  profit_factor_lower_95_gt: 1.0
+  mean_mae_lte: 0.005
+  positive_temporal_thirds_gte: 2
+  maximum_symbol_share_lte: 0.25
+  outperform_immediate_unfiltered: true
+  outperform_matched_random: true
+  stress_20bps_expectancy_gt: 0.0
+  eligible_direction_regimes_positive_gte: 2
+  eligible_volatility_regimes_positive_gte: 2
+  zero_material_leakage: true
+
+anti_overfitting:
+  all_variants_reported: true
+  primary_variant_frozen_before_results: true
+  no_feature_mining_on_validation: true
+  no_exit_choice_on_validation: true
+  no_cost_choice_on_validation: true
+  no_seed_selection: true
+  no_symbol_exclusion_after_results: true
+  retrospective_cannot_authorize_shadow_or_live: true
+
+deployment:
+  M1C_READY_FOR_FORWARD_COLLECTION: false
+  M1C_READY_FOR_SHADOW: false
+  M1C_READY_FOR_LIVE: false
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0
