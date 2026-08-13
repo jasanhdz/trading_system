@@ -112,7 +112,7 @@ features:
 
 outcomes:
   maximum_horizon_minutes: 240
-  exact_ts_protection_replay:
+  m1a_parameter_equivalent_1m_protection_replay:
     leverage: 15.0
     hard_stop_roe: -0.40
     take_profit_roe: 0.50
@@ -123,6 +123,11 @@ outcomes:
     atr_period: 14
     atr_multiplier: 1.5
     intrabar_value: WORST_OF_OPEN_HIGH_LOW_CLOSE_AND_OPEN_LOW_HIGH_CLOSE
+    exact_runtime_equivalence: false
+    limitation: ATR_AND_GUARD_UPDATES_USE_1M_BARS_NOT_RUNTIME_5M_BARS
+  v21_extreme_reversal_outcome:
+    source: FROZEN_V21_CURRENT_TS_5M_REPLAY
+    recomputation: PROHIBITED
   costs:
     fee_bps_per_side: 5.0
     slippage_bps_per_side: 2.0

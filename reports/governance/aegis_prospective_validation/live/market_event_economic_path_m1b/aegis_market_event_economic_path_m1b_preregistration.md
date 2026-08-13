@@ -39,10 +39,14 @@ economic results were generated.
 
 ## Economic Contract
 
-The primary outcome is the worst result across the two deterministic OHLC
-intrabar paths under the existing TypeScript hard stop, take profit,
-break-even, ATR trailing and fixed callback fallback. Fees, slippage and
-funding are included. A positive fixed-horizon return alone cannot pass M1B.
+For M1A populations, the primary outcome is the worst result across the two
+deterministic 1-minute OHLC paths under the existing TypeScript hard stop, take
+profit, break-even, ATR trailing and fixed callback parameters. This is
+parameter-equivalent, not exact runtime equivalence, because ATR and guard
+updates occur on 1-minute rather than runtime 5-minute bars. V21 extreme
+reversal retains its frozen 5-minute `CURRENT_TS` replay outcome. Fees,
+slippage and funding are included. A positive fixed-horizon return alone cannot
+pass M1B.
 
 The first permitted models are regularized logistic regression, quantile
 gradient boosting for MAE and robust gradient boosting for protected net
