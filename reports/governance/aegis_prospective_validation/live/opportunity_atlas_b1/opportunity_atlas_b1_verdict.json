@@ -1,0 +1,31 @@
+{
+  "schema_version": "aegis-opportunity-atlas-b1-verdict-v1",
+  "experiment_id": "aegis-opportunity-atlas-b1-01",
+  "preregistration_commit": "bc0c35f",
+  "implementation_commit": "e3a046e",
+  "private_result_sha256": "b76d4c27f27ee18d625e1577b27979ff513a332727b654303143d881c6f11631",
+  "event_rows": {
+    "60m": 5607,
+    "240m": 5606
+  },
+  "symbol_side_rows": {
+    "60m": 123354,
+    "240m": 123332
+  },
+  "component_findings": {
+    "opportunity": "TARGET_BASE_RATE_EXCESSIVE_AND_CALIBRATION_UNSTABLE",
+    "direction": "NO_SEPARABILITY_ABOVE_CHANCE",
+    "ranking": "NO_STABLE_CROSS_SECTIONAL_INFORMATION",
+    "path_risk": "STABLE_MAE_MFE_SEPARABILITY_FOUND"
+  },
+  "B1_COMPONENT_SEPARABILITY_FOUND": false,
+  "B1_PATH_RISK_SEPARABILITY_FOUND": true,
+  "B1_COMBINED_POLICY_FOUND": false,
+  "B1_READY_FOR_FORWARD_EXPERIMENT": false,
+  "B1_READY_FOR_SHADOW": false,
+  "B1_READY_FOR_LIVE": false,
+  "exchange_calls": 0,
+  "exchange_mutations": 0,
+  "runtime_changes": "NONE",
+  "verdict": "B1_PATH_RISK_LEARNABLE_DIRECTION_AND_RANKING_NOT_DEMONSTRATED"
+}
