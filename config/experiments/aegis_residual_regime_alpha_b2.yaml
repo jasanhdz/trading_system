@@ -1,0 +1,129 @@
+schema_version: aegis-residual-regime-alpha-b2-preregistration-v1
+experiment_id: aegis-residual-regime-alpha-b2-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+runtime_selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_panel: data/economic_alpha_discovery_a1/run_01/causal_panel.parquet
+  source_panel_sha256: a07fd4f2cafc796239e7a9c13c13037c18ed81fed8285d3ce83ddfb6f77f9797
+  source_events_60m_sha256: 8ba9d92c3bf6b5f5bb2497fe123a23c757d86da96e4277a6e3112664774a63ef
+  source_events_240m_sha256: 961f0217398aee865935099b2e447ed1a97c52b024176ce45ae92abd5ad55608
+  source_symbol_sides_60m_sha256: 60c8341cac908ffc8882c150617bbfe91fe936c6a9352325c3068893b65508f5
+  source_symbol_sides_240m_sha256: 3e5b7fcfa4847c2933f101010f51759a9d66e4b9c93e9ebce8fa4574552f6a70
+
+evidence:
+  project_wide_untouched: false
+  promotion_authority: false
+  purpose: RESIDUAL_ALPHA_REGIME_AND_PATH_DIAGNOSTIC
+  permitted: [REJECT_HYPOTHESES, JUSTIFY_NEW_FORWARD_EXPERIMENT]
+  prohibited: [AUTHORIZE_SHADOW, AUTHORIZE_LIVE, CLAIM_PROFITABLE_EDGE]
+
+partitions:
+  train: ['2024-01-01T00:00:00Z', '2025-01-01T00:00:00Z']
+  calibration: ['2025-01-02T00:00:00Z', '2025-07-01T00:00:00Z']
+  validation: ['2025-07-02T00:00:00Z', '2026-01-01T00:00:00Z']
+  pseudo_forward: ['2026-01-02T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 1440
+
+event_contract:
+  grid_minutes: 240
+  entry: NEXT_15M_OPEN
+  horizons_minutes: [60, 240]
+  symbols_required: 11
+  incomplete_cluster: REJECT
+  incomplete_future_path: REJECT
+
+residual_contract:
+  beta_estimator: CAUSAL_ROLLING_OLS_WITH_INTERCEPT
+  beta_lookback_events: 180
+  beta_minimum_events: 84
+  beta_clip: [-3.0, 3.0]
+  market_factor: BTCUSDT
+  common_alt_factor: CROSS_SECTIONAL_MEDIAN_BTC_RESIDUAL_EXCLUDING_BTC
+  target: SIDE_SIGNED_SYMBOL_RETURN_MINUS_BTC_BETA_RETURN_MINUS_COMMON_ALT_FACTOR
+  funding: INCLUDED_IN_REALIZED_RAW_ECONOMICS_ONLY
+  ranking_utility: RESIDUAL_RETURN_MINUS_14BPS_MINUS_0_25_X_MAE
+
+regime_contract:
+  inputs: [btc_return_4h, btc_return_24h, median_volatility_24h, breadth_4h]
+  thresholds_fit_on: TRAIN_ONLY
+  trend_lower_quantile: 0.33
+  trend_upper_quantile: 0.67
+  volatility_lower_quantile: 0.33
+  volatility_upper_quantile: 0.67
+  transition: SIGN_BTC_4H_DIFFERS_FROM_SIGN_BTC_24H
+  states: [TREND_UP, TREND_DOWN, RANGE, TRANSITION]
+  volatility_states: [COMPRESSION, NORMAL, EXPANSION]
+
+barrier_contract:
+  favorable_gross_return: 0.0042
+  adverse_gross_return: 0.0042
+  same_bar_ambiguity: ADVERSE_FIRST_FAIL_CLOSED
+  no_hit: NO_DECISIVE_BARRIER
+  costs_bps: [0, 8, 14, 20]
+  primary_cost_bps: 14
+
+models:
+  transparent_baselines: [REGIME_MOMENTUM, REGIME_REVERSAL, RELATIVE_STRENGTH]
+  ranker: TIMESTAMP_GROUPED_PAIRWISE_LOGISTIC_L2
+  pair_target: HIGHER_RESIDUAL_UTILITY
+  maximum_pairs_per_timestamp_side: 55
+  minimum_regime_training_rows: 500
+  path_risk: HIST_GRADIENT_BOOSTING_REGRESSOR_PER_SIDE
+  hyperparameter_search: PROHIBITED
+  seed_search: PROHIBITED
+  random_state: 1807
+
+policy_diagnostic:
+  direction_source: BEST_TRANSPARENT_BASELINE_BY_TRAIN_THEN_CALIBRATION_CONFIRMATION
+  baseline_train_gross_expectancy_gt: 0.0
+  baseline_calibration_gross_expectancy_gt: 0.0
+  predicted_mae_quantile_from_calibration: 0.50
+  predicted_mfe_quantile_from_calibration: 0.50
+  ranker_top_one_per_event_side: true
+  abstention_default: true
+  no_threshold_tuning_on_validation: true
+
+component_gates:
+  transparent_direction:
+    validation_net_expectancy_gt: 0.0
+    pseudo_forward_net_expectancy_gt: 0.0
+    positive_regime_periods_gte: 2
+  residual_ranking:
+    validation_grouped_spearman_gte: 0.05
+    pseudo_forward_grouped_spearman_gte: 0.05
+    top_rank_outperforms_random: true
+  path_risk:
+    validation_mae_spearman_gte: 0.10
+    pseudo_forward_mae_spearman_gte: 0.10
+  barriers:
+    validation_favorable_first_rate_gt_base: true
+    pseudo_forward_favorable_first_rate_gt_base: true
+
+combined_gate:
+  minimum_events: 100
+  primary_net_expectancy_gt: 0.0
+  day_cluster_bootstrap_lower_95_gt: 0.0
+  profit_factor_gt: 1.10
+  stress_20bps_positive: true
+  positive_temporal_thirds_gte: 2
+  positive_symbols_gte: 7
+  maximum_symbol_share_lte: 0.25
+  outperform_random_control: true
+  every_component_gate_passes: true
+
+deployment:
+  B2_RESIDUAL_ALPHA_FOUND: false
+  B2_REGIME_SPECIALIZATION_FOUND: false
+  B2_PATH_RISK_CONFIRMED: false
+  B2_COMBINED_POLICY_FOUND: false
+  B2_READY_FOR_FORWARD_EXPERIMENT: false
+  B2_READY_FOR_SHADOW: false
+  B2_READY_FOR_LIVE: false
+  exchange_calls: 0
+  exchange_mutations: 0
+  runtime_changes: NONE
