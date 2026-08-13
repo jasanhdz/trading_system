@@ -7,6 +7,7 @@ from aegis.research.economic_alpha_discovery_a1 import (
     cross_sectional_winners,
     daily_space,
     deterministic_random_symbol,
+    robust_scale,
     side_components,
 )
 
@@ -70,3 +71,10 @@ def test_robust_scale_and_random_control_are_reproducible():
     rows = pd.DataFrame({"symbol": ["ETHUSDT", "BTCUSDT", "ADAUSDT"]})
     first = deterministic_random_symbol(rows, "frozen-event")
     assert first == deterministic_random_symbol(rows, "frozen-event")
+
+
+def test_robust_scale_uses_frozen_quantile_fallback_for_sparse_discrete_signal():
+    values = pd.Series([-0.5] * 98 + [0.0, 0.5])
+    scale = robust_scale(values)
+    assert scale.scale_method == "Q01_Q99_FALLBACK"
+    assert scale.iqr > 0.0

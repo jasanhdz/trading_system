@@ -26,6 +26,7 @@ class RobustScale:
     iqr: float
     lower: float = -math.inf
     upper: float = math.inf
+    scale_method: str = "IQR"
 
     def apply(self, values: pd.Series) -> pd.Series:
         clipped = values.clip(self.lower, self.upper)
@@ -154,10 +155,17 @@ def robust_scale(values: pd.Series) -> RobustScale:
         raise AlphaDiscoveryContractError("AEGIS_A1_SCALE_DATA_INSUFFICIENT")
     q25, q75 = finite.quantile([0.25, 0.75])
     iqr = float(q75 - q25)
+    method = "IQR"
+    if math.isfinite(iqr) and iqr <= 1e-12:
+        q01, q99 = finite.quantile([0.01, 0.99])
+        iqr = float(q99 - q01)
+        method = "Q01_Q99_FALLBACK"
     if not math.isfinite(iqr) or iqr <= 1e-12:
         raise AlphaDiscoveryContractError("AEGIS_A1_SCALE_DEGENERATE")
     lower, upper = finite.quantile([0.001, 0.999])
-    return RobustScale(float(finite.median()), iqr, float(lower), float(upper))
+    return RobustScale(
+        float(finite.median()), iqr, float(lower), float(upper), method
+    )
 
 
 def side_components(panel: pd.DataFrame, side: str) -> pd.DataFrame:
