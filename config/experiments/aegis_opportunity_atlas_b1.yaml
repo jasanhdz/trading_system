@@ -1,0 +1,177 @@
+schema_version: aegis-opportunity-atlas-b1-preregistration-v1
+experiment_id: aegis-opportunity-atlas-b1-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+runtime_selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_panel: data/economic_alpha_discovery_a1/run_01/causal_panel.parquet
+  source_panel_sha256: a07fd4f2cafc796239e7a9c13c13037c18ed81fed8285d3ce83ddfb6f77f9797
+  source_result_sha256: fed5675dc88afe2c1bf40c8c61eaa937aa9460bca3bb26e1c43ac3b773840fa1
+  v20_config_sha256: 26d0bb0a431b34745423c3582e3e87ce473d22fe4ec39a91ffd249bc444d5768
+  v20_result_sha256: fe506c77ff8f68e6b64fe4f94ad9343a49d1d2b123860c8f8d73d81e01f6d25d
+
+evidence:
+  project_wide_untouched: false
+  promotion_authority: false
+  purpose: ARCHITECTURE_AND_SEPARABILITY_DIAGNOSTIC
+  permitted: [REJECT_COMPONENTS, JUSTIFY_NEW_FORWARD_EXPERIMENT]
+  prohibited: [AUTHORIZE_SHADOW, AUTHORIZE_LIVE, CLAIM_PROFITABLE_EDGE]
+
+partitions:
+  train: ['2024-01-01T00:00:00Z', '2025-01-01T00:00:00Z']
+  calibration: ['2025-01-02T00:00:00Z', '2025-07-01T00:00:00Z']
+  validation: ['2025-07-02T00:00:00Z', '2026-01-01T00:00:00Z']
+  pseudo_forward: ['2026-01-02T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 1440
+
+event_contract:
+  state_grid: 1h
+  source_state: COMPLETED_15M_CAUSAL_PANEL
+  cluster_identity: ONE_TIMESTAMP_ACROSS_ALL_11_SYMBOLS
+  minimum_cluster_spacing_minutes: 240
+  entry: NEXT_15M_OPEN
+  horizons_minutes: [60, 240]
+  symbols_required: 11
+  incomplete_cluster: REJECT
+  incomplete_future_path: REJECT
+
+questions:
+  opportunity:
+    target: ANY_SYMBOL_SIDE_GROSS_RETURN_GTE_42BPS
+    direction_agnostic: true
+  direction:
+    target: SIDE_OF_MAXIMUM_GROSS_RETURN
+    population: OPPORTUNITY_POSITIVE_ONLY
+  ranking:
+    target: SYMBOL_SIDE_GROSS_RETURN
+    population: ALL_SYMBOL_SIDE_ROWS
+  path_risk:
+    targets: [MAE, MFE, TIME_TO_PRIMARY_COST_EXCEEDANCE]
+
+features:
+  event:
+    - btc_return_1h
+    - btc_return_4h
+    - btc_return_24h
+    - breadth_4h
+    - cross_symbol_return_dispersion_1h
+    - cross_symbol_return_dispersion_4h
+    - cross_symbol_median_volatility_24h
+    - cross_symbol_max_volatility_24h
+    - cross_symbol_median_volume_persistence
+    - cross_symbol_max_volume_persistence
+    - cross_symbol_mean_abs_taker_flow
+    - cross_symbol_basis_dispersion
+    - cross_symbol_funding_dispersion
+    - utc_hour_sin
+    - utc_hour_cos
+    - weekday_sin
+    - weekday_cos
+  symbol:
+    - return_1h
+    - return_4h
+    - return_24h
+    - relative_strength_btc_4h
+    - cross_sectional_return_rank_4h
+    - realized_volatility_4h
+    - realized_volatility_24h
+    - volume_persistence_1h
+    - taker_flow_1h
+    - distance_sma_4h
+    - distance_sma_24h
+    - extension_z_24h
+    - basis_z_7d
+    - basis_convergence_1h
+    - funding_rate
+  training_serving_contract: EXACT_NAMES_ORDER_DTYPES_HASH
+
+baselines:
+  opportunity:
+    model: HIST_GRADIENT_BOOSTING_CLASSIFIER
+    max_iter: 150
+    max_leaf_nodes: 15
+    learning_rate: 0.05
+    l2_regularization: 1.0
+    random_state: 1801
+    selection_probability_quantile_from_calibration: 0.90
+  direction:
+    model: LOGISTIC_REGRESSION_BALANCED_L2
+    random_state: 1802
+  ranking:
+    model: HIST_GRADIENT_BOOSTING_REGRESSOR_PER_SIDE
+    max_iter: 150
+    max_leaf_nodes: 15
+    learning_rate: 0.05
+    l2_regularization: 1.0
+    random_state: 1803
+  path_risk:
+    model: HIST_GRADIENT_BOOSTING_REGRESSOR_PER_SIDE
+    random_state: 1804
+  hyperparameter_search: PROHIBITED
+  seed_search: PROHIBITED
+
+policy_diagnostic:
+  opportunity_probability: CALIBRATION_Q90
+  direction_confidence_min: 0.55
+  predicted_gross_return_min: 0.0042
+  predicted_mae_max: 0.01
+  abstention_default: true
+  maximum_event_selection: 1
+  no_threshold_tuning_on_validation: true
+
+economics:
+  costs_bps: [0, 8, 14, 20]
+  primary_cost_bps: 14
+  primary_opportunity_gross_bps: 42
+  funding_included: true
+  metrics: [expectancy, profit_factor, win_rate, mae, mfe, cvar_05, frequency]
+
+controls:
+  - NO_TRADE
+  - RANDOM_TIMESTAMP_MATCHED_SYMBOL_SIDE
+  - BTC_DIRECTIONAL_REFERENCE
+  - SIMPLE_4H_MOMENTUM
+  - SIMPLE_4H_REVERSAL
+  - OPPORTUNITY_ONLY_WITH_RANDOM_DIRECTION_AND_SYMBOL
+
+component_gates:
+  opportunity:
+    validation_roc_auc_gte: 0.55
+    pseudo_forward_roc_auc_gte: 0.55
+    calibration_brier_improves_base_rate: true
+  direction:
+    validation_balanced_accuracy_gte: 0.55
+    pseudo_forward_balanced_accuracy_gte: 0.55
+  ranking:
+    validation_spearman_gte: 0.05
+    pseudo_forward_spearman_gte: 0.05
+    top_rank_outperforms_random: true
+  path_risk:
+    validation_mae_spearman_gte: 0.10
+    pseudo_forward_mae_spearman_gte: 0.10
+
+combined_gate:
+  minimum_events: 100
+  primary_net_expectancy_gt: 0.0
+  day_cluster_bootstrap_lower_95_gt: 0.0
+  profit_factor_gt: 1.10
+  stress_20bps_positive: true
+  positive_temporal_thirds_gte: 2
+  positive_symbols_gte: 7
+  maximum_symbol_share_lte: 0.25
+  outperform_all_controls: true
+  every_component_gate_passes: true
+
+deployment:
+  B1_COMPONENT_SEPARABILITY_FOUND: false
+  B1_COMBINED_POLICY_FOUND: false
+  B1_READY_FOR_FORWARD_EXPERIMENT: false
+  B1_READY_FOR_SHADOW: false
+  B1_READY_FOR_LIVE: false
+  exchange_calls: 0
+  exchange_mutations: 0
+  runtime_changes: NONE
