@@ -1,0 +1,219 @@
+schema_version: aegis-market-event-economic-path-m1b-preregistration-v1
+experiment_id: aegis-market-event-economic-path-m1b-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+runtime_selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  m1a_config:
+    path: config/experiments/aegis_market_event_fast_track_m1a.yaml
+    sha256: d948dffe06bf4af7abc2a99855810b7e21728b2c00814ba38dbaaec00ed211bf
+  m1a_result:
+    path: reports/governance/aegis_prospective_validation/live/market_event_fast_track_m1a/aegis_market_event_fast_track_m1a_full_result.md
+    sha256: 1cabaf783b772d2b787005dbbf0f6decbbee9d936bb2f64f12430e47965b8987
+  m1a_private_report_sha256: 374838985a6c0abfd37b8c05bfac763d2735eda31374ce14d7dbae68d251c7a8
+  v21_config:
+    path: config/experiments/aegis_alpha_laboratory_v21.yaml
+    sha256: bdfd3fa8c4ce5f4d09f204d1a41737e6ed420aad78a52a85ca0388b414dc1a94
+  v21_result:
+    path: reports/governance/aegis_prospective_validation/live/v21/aegis_alpha_laboratory_v21_result.md
+    sha256: 7da4648cd26adbd01e990c70518669c73e397439ae5dddab767c28fc9c824bbb
+  v21_private_result_sha256: 8fb414b10d12734d647d14dc54089b1a299c2ef626d4b26e03e1284c3765d052
+
+objective:
+  statement: >-
+    Determine whether funding, executable mark/spot dislocation, causal flow,
+    regime, and path-risk estimation can select economically useful subsets of
+    previously identified event populations without changing their definitions.
+  primary_metric: WORST_INTRABAR_TS_PROTECTED_NET_EXPECTANCY
+  optimize_accuracy: false
+  abstention_is_valid: true
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  interval: 1m
+  directions: [LONG, SHORT]
+  entry_rule: NEXT_1M_BAR_OPEN_AFTER_CAUSAL_EVENT_CONFIRMATION
+
+candidate_populations:
+  SPOT_FUTURES_DISLOCATION_LONG:
+    source: M1A_SPOT_FUTURES_DIVERGENCE_CONVERGENCE_LONG
+    side: LONG
+    retrospective_selection_disclosed: true
+  COMPRESSION_BREAKOUT_LONG:
+    source: M1A_COMPRESSION_BREAKOUT_LONG
+    side: LONG
+    retrospective_selection_disclosed: true
+  EXTREME_REVERSAL_SHORT:
+    source: V21_EXTREME_REVERSAL_SHORT
+    side: SHORT
+    retrospective_selection_disclosed: true
+
+data:
+  immutable_checksum_archives_required: true
+  required:
+    - futures_1m_klines
+    - spot_1m_klines
+    - futures_1m_mark_price_klines
+    - futures_funding_rate
+  optional_not_imputed:
+    - historical_open_interest
+    - historical_liquidations
+    - historical_depth
+    - tick_aggtrades
+  missing_optional_value: NOT_PRESENT
+  synthetic_zero_fill: PROHIBITED
+  future_fill: PROHIBITED
+
+features:
+  cutoff: EVENT_CONFIRMATION_TIMESTAMP_INCLUSIVE
+  schema: aegis-m1b-economic-path-features-v1
+  groups:
+    price_flow:
+      - side_return_3m
+      - side_return_12m
+      - side_return_60m
+      - side_taker_flow_1m
+      - side_taker_flow_3m
+      - volume_ratio_24m
+      - compression_ratio
+      - breakout_distance
+    cross_market:
+      - mark_spot_basis
+      - basis_change_15m
+      - basis_zscore_7d
+      - latest_funding_rate
+      - side_adjusted_funding_rate
+      - funding_age_hours
+    regime:
+      - direction_score
+      - realized_volatility_1h
+      - liquidity_ratio_1h
+      - btc_return_1h
+      - cross_symbol_breadth_1h
+    context:
+      - utc_hour_sin
+      - utc_hour_cos
+      - weekday_sin
+      - weekday_cos
+  validation:
+    reject_missing: true
+    reject_extra: true
+    reject_wrong_order: true
+    reject_non_finite: true
+    reject_stale_funding: true
+    maximum_funding_age_hours: 12
+
+outcomes:
+  maximum_horizon_minutes: 240
+  exact_ts_protection_replay:
+    leverage: 15.0
+    hard_stop_roe: -0.40
+    take_profit_roe: 0.50
+    break_even_trigger_roe: 0.08
+    break_even_offset_fraction: 0.003
+    trailing_activation_roe: 0.15
+    trailing_callback_roe: 0.08
+    atr_period: 14
+    atr_multiplier: 1.5
+    intrabar_value: WORST_OF_OPEN_HIGH_LOW_CLOSE_AND_OPEN_LOW_HIGH_CLOSE
+  costs:
+    fee_bps_per_side: 5.0
+    slippage_bps_per_side: 2.0
+    stress_slippage_bps_per_side: [5.0, 10.0]
+    realized_funding_included: true
+  labels:
+    - positive_protected_net
+    - protected_net_return
+    - mae_fraction
+    - mfe_fraction
+    - time_to_first_positive_net
+    - target_before_stop
+    - bars_held
+    - exit_reason
+
+models:
+  probability_positive_net:
+    estimator: L2_LOGISTIC_REGRESSION
+    calibration: PLATT_ON_CALIBRATION_ONLY
+  mae_risk:
+    estimator: GRADIENT_BOOSTING_QUANTILE
+    quantile: 0.90
+  net_utility:
+    estimator: HUBER_GRADIENT_BOOSTING_REGRESSION
+  complex_models: PROHIBITED
+  seed: 181001
+  seed_search: PROHIBITED
+
+temporal_protocol:
+  development_train:
+    start: '2024-01-01T00:00:00Z'
+    end: '2025-03-31T23:59:59Z'
+  development_calibration:
+    start: '2025-04-01T00:00:00Z'
+    end: '2025-09-30T23:59:59Z'
+  retrospective_validation:
+    start: '2025-10-01T00:00:00Z'
+    end: '2026-07-31T23:59:59Z'
+    promotion_authority: false
+  fresh_forward:
+    start: '2026-08-13T00:00:00Z'
+    minimum_days: 30
+    promotion_authority: SHADOW_ONLY_AFTER_SEPARATE_REVIEW
+  purge_minutes: 240
+  embargo_minutes: 240
+  threshold_source: DEVELOPMENT_CALIBRATION_ONLY
+  validation_threshold_tuning: PROHIBITED
+
+selection:
+  calibration_candidate_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  choose_one_policy_by: CONSERVATIVE_NET_UTILITY
+  requirements:
+    predicted_positive_probability_minimum: CALIBRATION_SELECTED
+    predicted_mae_q90_maximum: CALIBRATION_SELECTED
+    predicted_net_utility_minimum: CALIBRATION_SELECTED
+  maximum_selected_per_cross_section: 1
+  duplicate_symbol_event: PROHIBITED
+
+controls:
+  - NO_TRADE
+  - UNFILTERED_CANDIDATE_FAMILY
+  - TIME_REGIME_MATCHED_RANDOM
+  - M1A_FROZEN_FAMILY
+  - V21_FROZEN_SHORT_REVERSAL
+
+gate:
+  minimum_validation_events_per_population: 100
+  positive_net_expectancy: true
+  day_block_bootstrap_ci_95_lower_gt: 0.0
+  profit_factor_ci_95_lower_gt: 1.0
+  maximum_mean_mae: 0.006
+  positive_temporal_thirds: 2
+  maximum_symbol_share: 0.25
+  outperform_unfiltered_population: true
+  outperform_matched_random: true
+  survive_first_stress_cost: true
+  zero_material_leakage: true
+
+anti_overfitting:
+  all_trials_retained: true
+  one_validation_open: true
+  no_feature_mining_on_validation: true
+  no_threshold_mining_on_validation: true
+  no_seed_selection: true
+  no_symbol_exclusion_after_results: true
+  retrospective_result_cannot_authorize_shadow_or_live: true
+
+deployment:
+  M1B_READY_FOR_MODELING: false
+  M1B_READY_FOR_FORWARD_COLLECTION: false
+  M1B_READY_FOR_SHADOW: false
+  M1B_READY_FOR_LIVE: false
+  model_export_to_runtime: PROHIBITED
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0
