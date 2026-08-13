@@ -146,7 +146,7 @@ def main() -> int:
     funding_root = root / "data/market_event_economic_path_m1b/raw"
     minute = {symbol: pd.read_parquet(minute_root / f"{symbol}.parquet") for symbol in CANONICAL_SYMBOLS}
     funding = {symbol: load_funding(funding_root, symbol) for symbol in CANONICAL_SYMBOLS}
-    reports, gates, artifacts = {}, {}, []
+    reports, gates, artifacts = {}, [], []
     for horizon in HORIZONS:
         event_path = output / f"events_{horizon}m.parquet"
         row_path = output / f"symbol_sides_{horizon}m.parquet"
