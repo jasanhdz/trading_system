@@ -103,6 +103,18 @@ models:
   residual_value: STANDARDIZED_RIDGE_ALPHA_10
   barrier_quality: STANDARDIZED_LOGISTIC_BALANCED_L2
   path_risk: HIST_GRADIENT_BOOSTING_REGRESSOR
+  fit_scope: ONE_MODEL_PER_SIDE_HORIZON_AND_CANDIDATE
+  ridge:
+    alpha: 10.0
+  logistic:
+    C: 1.0
+    class_weight: balanced
+    max_iter: 1000
+  path_regressor:
+    max_iter: 100
+    max_leaf_nodes: 15
+    learning_rate: 0.05
+    l2_regularization: 1.0
   baseline: PRICE_STATE
   candidates:
     - PRICE_STATE_PLUS_FLOW_ACTIVITY
@@ -119,6 +131,7 @@ metrics:
   barrier_quality: [log_loss, average_precision, brier]
   path_risk: [mae_spearman, mean_absolute_error]
   uncertainty: DAY_CLUSTER_BOOTSTRAP_95
+  top_decile_selection: CALIBRATION_PREDICTED_RESIDUAL_VALUE_Q90_THEN_MAX_ONE_PER_TIMESTAMP_SIDE
 
 incremental_gate:
   validation_grouped_spearman_lift_gte: 0.01

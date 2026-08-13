@@ -37,6 +37,14 @@ The same frozen model classes, partitions and metrics are used for every
 candidate. No family interactions, hyperparameter search, threshold tuning,
 seed selection, symbol removal or side removal are permitted.
 
+Each model is fit separately by side, horizon and candidate. Residual value
+uses standardized ridge regression with `alpha=10`; barrier quality uses
+standardized class-balanced logistic regression with `C=1`; MAE uses histogram
+gradient boosting with 100 iterations, 15 leaves, learning rate `0.05` and L2
+regularization `1`. Top-decile economics uses the CALIBRATION q90 predicted
+residual-value threshold and at most one selected symbol per timestamp and
+side.
+
 ## Evidence Limits
 
 The source history has already informed A1, A2, B1 and B2. C1 can reject data
