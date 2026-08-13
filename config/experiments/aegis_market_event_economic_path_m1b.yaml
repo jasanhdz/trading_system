@@ -36,7 +36,10 @@ universe:
   symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
   interval: 1m
   directions: [LONG, SHORT]
-  entry_rule: NEXT_1M_BAR_OPEN_AFTER_CAUSAL_EVENT_CONFIRMATION
+  entry_rules:
+    m1a_populations: NEXT_1M_BAR_OPEN_AFTER_CAUSAL_EVENT_CONFIRMATION
+    v21_extreme_reversal_short: FROZEN_V21_NEXT_5M_BAR_OPEN
+  cross_population_entry_normalization: PROHIBITED
 
 candidate_populations:
   SPOT_FUTURES_DISLOCATION_LONG:

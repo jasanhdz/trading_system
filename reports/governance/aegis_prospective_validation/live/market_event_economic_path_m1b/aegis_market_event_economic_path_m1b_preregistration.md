@@ -32,6 +32,11 @@ development evidence. Only observations beginning 2026-08-13 can eventually
 provide fresh forward evidence, and even that requires a separate Shadow
 review.
 
+M1A populations retain next-1-minute entry. V21 extreme reversal retains its
+frozen next-5-minute entry and entry price. Cross-population timestamp or entry
+normalization is prohibited. This clarification was frozen before M1B model or
+economic results were generated.
+
 ## Economic Contract
 
 The primary outcome is the worst result across the two deterministic OHLC
