@@ -318,3 +318,92 @@ def collapse_registered_events(rows: pd.DataFrame, cooldown_minutes: int) -> pd.
         last[key] = timestamp
         selected.append(row._asdict())
     return pd.DataFrame(selected, columns=rows.columns)
+
+
+def economic_summary(rows: pd.DataFrame, utility_column: str) -> Mapping[str, object]:
+    if utility_column not in rows:
+        raise C2AContractError("AEGIS_C2A_UTILITY_COLUMN_MISSING")
+    values = rows[utility_column].to_numpy(dtype=np.float64)
+    if not len(values):
+        return {
+            "events": 0, "net_expectancy": None, "profit_factor": None,
+            "win_rate": None, "cvar_10": None,
+        }
+    if not np.isfinite(values).all():
+        raise C2AContractError("AEGIS_C2A_UTILITY_NON_FINITE")
+    wins, losses = values[values > 0.0], values[values < 0.0]
+    tail_count = max(1, math.ceil(len(values) * 0.10))
+    return {
+        "events": len(values),
+        "net_expectancy": float(values.mean()),
+        "profit_factor": (
+            float(wins.sum() / abs(losses.sum())) if len(losses)
+            else math.inf if len(wins) else 0.0
+        ),
+        "win_rate": float((values > 0.0).mean()),
+        "cvar_10": float(np.sort(values)[:tail_count].mean()),
+    }
+
+
+def day_cluster_bootstrap(
+    rows: pd.DataFrame, utility_column: str, *, repetitions: int = 1_000,
+    seed: int = 181001,
+) -> Mapping[str, float]:
+    if repetitions <= 0 or not len(rows):
+        raise C2AContractError("AEGIS_C2A_BOOTSTRAP_INPUT_INVALID")
+    values = rows.assign(
+        day=pd.to_datetime(rows["event_timestamp_ms"], unit="ms", utc=True).dt.floor("1D")
+    )
+    clusters = [
+        group[utility_column].to_numpy(dtype=np.float64)
+        for _, group in values.groupby("day", sort=True)
+    ]
+    if not clusters or any(not np.isfinite(cluster).all() for cluster in clusters):
+        raise C2AContractError("AEGIS_C2A_BOOTSTRAP_CLUSTER_INVALID")
+    random = np.random.default_rng(seed)
+    expectancy = []
+    for _ in range(repetitions):
+        sample = np.concatenate([
+            clusters[index] for index in random.integers(0, len(clusters), len(clusters))
+        ])
+        expectancy.append(float(sample.mean()))
+    return {
+        "expectancy_lower_95": float(np.quantile(expectancy, 0.025)),
+        "expectancy_upper_95": float(np.quantile(expectancy, 0.975)),
+    }
+
+
+def deterministic_matched_control(
+    population: pd.DataFrame, selected: pd.DataFrame
+) -> pd.DataFrame:
+    """Match event counts by symbol and side without consulting outcomes."""
+
+    if selected.empty:
+        return population.iloc[0:0].copy()
+    keys = set(zip(
+        selected["event_timestamp_ms"], selected["symbol"], selected["side"], strict=True
+    ))
+    pool = population.loc[[
+        (timestamp, symbol, side) not in keys
+        for timestamp, symbol, side in zip(
+            population["event_timestamp_ms"], population["symbol"],
+            population["side"], strict=True,
+        )
+    ]].copy()
+    samples = []
+    for (symbol, side), events in selected.groupby(["symbol", "side"], sort=True):
+        candidates = pool.loc[pool.symbol.eq(symbol) & pool.side.eq(side)].copy()
+        if len(candidates) < len(events):
+            raise C2AContractError("AEGIS_C2A_MATCHED_CONTROL_INSUFFICIENT")
+        identity = (
+            candidates["event_timestamp_ms"].astype(str) + ":"
+            + candidates["symbol"] + ":" + candidates["side"]
+        )
+        candidates["control_order"] = pd.util.hash_pandas_object(
+            identity, index=False, hash_key="1810011810011810"
+        ).to_numpy(dtype=np.uint64)
+        samples.append(
+            candidates.sort_values(["control_order", "event_timestamp_ms"])
+            .head(len(events)).drop(columns="control_order")
+        )
+    return pd.concat(samples, ignore_index=True)

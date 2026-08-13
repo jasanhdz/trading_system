@@ -5,7 +5,10 @@ from aegis.research.event_path_quality_c2a import (
     _side_path_outcomes,
     build_path_dataset,
     collapse_registered_events,
+    day_cluster_bootstrap,
     detect_registered_events,
+    deterministic_matched_control,
+    economic_summary,
 )
 from aegis.research.market_event_fast_track_m1a import FlowBucket, MinuteBar
 
@@ -86,3 +89,21 @@ def test_registered_detectors_are_side_aware_and_cooldown_is_deterministic():
     }
     collapsed = collapse_registered_events(detected, 15)
     assert len(collapsed) == 2
+
+
+def test_economic_metrics_and_control_are_deterministic():
+    population = pd.DataFrame({
+        "event_timestamp_ms": [1_000_000 + index * 60_000 for index in range(20)],
+        "symbol": ["ADAUSDT"] * 20, "side": ["LONG"] * 20,
+        "utility": [.01 if index % 2 else -.005 for index in range(20)],
+    })
+    selected = population.iloc[[1, 5, 9]].copy()
+    first = deterministic_matched_control(population, selected)
+    second = deterministic_matched_control(population, selected)
+    assert first.event_timestamp_ms.tolist() == second.event_timestamp_ms.tolist()
+    assert len(first) == len(selected)
+    summary = economic_summary(selected, "utility")
+    assert summary["events"] == 3
+    assert summary["net_expectancy"] > 0
+    interval = day_cluster_bootstrap(selected, "utility", repetitions=10)
+    assert interval["expectancy_lower_95"] == interval["expectancy_upper_95"]
