@@ -7,7 +7,9 @@ from aegis.research.information_value_audit_c1 import (
     FAMILIES,
     canonical_features,
     contract_hash,
+    evaluate_bundle,
     feature_names,
+    fit_bundle,
 )
 
 
@@ -59,3 +61,24 @@ def test_candidate_contract_is_order_sensitive_and_baseline_first():
     names = feature_names("PRICE_STATE_PLUS_FLOW_ACTIVITY")
     assert names[:len(FAMILIES["PRICE_STATE"])] == FAMILIES["PRICE_STATE"]
     assert contract_hash(names) != contract_hash(tuple(reversed(names)))
+
+
+def test_frozen_models_fit_and_evaluate_without_future_threshold_tuning():
+    rows = []
+    for timestamp in range(90):
+        for symbol_index in range(11):
+            source = _source("LONG").iloc[0].to_dict()
+            source.update({
+                "timestamp_ms": timestamp, "symbol": f"S{symbol_index}",
+                "residual_utility": (symbol_index - 5) * .001,
+                "favorable_first": symbol_index >= 5, "mae": .01 - symbol_index * .0005,
+                "gross_return": (symbol_index - 5) * .0015, "mfe": symbol_index * .001,
+            })
+            rows.append(source)
+    frame = pd.DataFrame(rows)
+    frame = pd.concat([frame, canonical_features(frame)], axis=1)
+    bundle = fit_bundle(frame, set(range(60)), set(range(60, 75)), "PRICE_STATE")
+    metrics, selected = evaluate_bundle(bundle, frame.loc[frame.timestamp_ms.ge(75)])
+    assert np.isfinite(bundle.selection_threshold)
+    assert np.isfinite(metrics["grouped_spearman"])
+    assert set(selected.timestamp_ms).issubset(set(range(75, 90)))

@@ -1,0 +1,15 @@
+{
+  "C1_INCREMENTAL_INFORMATION_FOUND": false,
+  "C1_NEW_SOURCE_ACQUISITION_REQUIRED": true,
+  "C1_READY_FOR_C2": false,
+  "C1_READY_FOR_LIVE": false,
+  "C1_READY_FOR_SHADOW": false,
+  "exchange_calls": 0,
+  "exchange_mutations": 0,
+  "experiment_id": "aegis-information-value-audit-c1-01",
+  "passing_candidates": [],
+  "result_sha256": "261f03a857aad78b7ffc26f447ce3add631ea693729923c2baf2d2949368a385",
+  "runtime_changes": "NONE",
+  "schema_version": "aegis-information-value-audit-c1-verdict-v1",
+  "verdict": "C1_AVAILABLE_INFORMATION_HAS_NO_STABLE_INCREMENTAL_ECONOMIC_EDGE"
+}

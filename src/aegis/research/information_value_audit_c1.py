@@ -169,6 +169,8 @@ def fit_bundle(
 
 
 def _safe_spearman(actual: Sequence[float], predicted: Sequence[float]) -> float:
+    if np.nanstd(np.asarray(actual, dtype=float)) <= 1e-15 or np.nanstd(np.asarray(predicted, dtype=float)) <= 1e-15:
+        return 0.0
     value = float(spearmanr(actual, predicted).statistic)
     return value if math.isfinite(value) else 0.0
 
