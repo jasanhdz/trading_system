@@ -1,0 +1,146 @@
+schema_version: aegis-conditional-direction-w8-preregistration-v1
+experiment_id: aegis-conditional-direction-w8-01
+registered_at_utc: '2026-08-14T18:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  prior_holdout_access: PROHIBITED
+  prior_retuning: PROHIBITED
+  w7_preregistration_sha256: 68d67be21e9baafe232e542edc9899fab7f96458e787aceccf0a31f3884d5ed1
+  w7_verdict_sha256: 0c08e96ef94da3e1981f8095e5830462529898d5648db51b5b1b57b2f38af5e1
+  w7_config_sha256: 2e0e39ecfe22d382b4aac7dcb21e24342676dfe6108badd2baa01e2f3e760814
+
+phase_0:
+  source_dataset: data/feature_information_v14/canonical_dataset.jsonl.gz
+  source_dataset_sha256: dc5cfef8d13d00e999cfcda86d84e739de078f68c8f5085027fe285d54bbb286
+  expected_rows: 90442
+  expected_paired_episodes: 45221
+  historical_authority: AEGIS_SHORT_CANDIDATE_E3
+  required_audit:
+    - candidate_counts
+    - probability_semantics
+    - vote_counts
+    - rejection_reasons
+    - side_gates
+    - policy_thresholds
+    - feature_asymmetry
+    - label_balance
+
+population:
+  unit: OPPORTUNITY_EPISODE
+  source_rows: ALL_INDEPENDENT_PAIRED_CAUSAL_EPISODES
+  canonical_source_side: LONG
+  require_long_short_pair: true
+  require_identical_pre_entry_features: true
+  w7_opportunity_policy:
+    identity: H60:LOGISTIC_L2:P_GTE_0.7
+    fit_population: FROZEN_W7_TRAIN_SHORT_SIGNALS_ONLY
+    fit_end: '2026-01-01T00:00:00Z'
+    target: DIRECTION_NEUTRAL_MAGNITUDE_GTE_50BPS_AT_60M
+    threshold: 0.70
+    refit_selection_prohibited: true
+
+partitions:
+  train: ['2025-08-09T00:00:00Z', '2026-01-01T00:00:00Z']
+  validation: ['2026-01-01T00:00:00Z', '2026-05-01T00:00:00Z']
+  final_holdout:
+    state: SEALED_NOT_OPENED
+    identity: FUTURE_INDEPENDENT_W8_EVIDENCE_NOT_YET_COLLECTED
+  purge_minutes: 120
+  disclosure: HISTORICAL_DEVELOPMENT_DATA_PREVIOUSLY_INSPECTED_NO_PROMOTION_AUTHORITY
+
+targets:
+  horizons_minutes: [15, 30, 60]
+  primary_horizon_minutes: 60
+  round_trip_cost_bps: 14.0
+  stress_round_trip_cost_bps: [20.0, 30.0]
+  favorable_barrier_bps: 30.0
+  adverse_barrier_bps: 30.0
+  same_bar_resolution: ADVERSE_FIRST
+  utility:
+    favorable_first: FAVORABLE_BARRIER_MINUS_COST
+    adverse_first: NEGATIVE_ADVERSE_BARRIER_MINUS_COST
+    neither: FIXED_HORIZON_DIRECTIONAL_RETURN_MINUS_COST
+  economic_label:
+    minimum_best_utility_bps: 2.0
+    minimum_directional_advantage_bps: 10.0
+    classes: [LONG, SHORT, SKIP]
+  symmetry_required: true
+  leverage_in_objective: false
+
+features:
+  source_schema: V9_DIRECTION_NEUTRAL_PLUS_V14_TAKER_FLOW
+  symbol_categorical: true
+  forbidden_prefixes: [future_, target_, outcome_, side_]
+  opportunity:
+    - w7_opportunity_probability
+  funding_basis:
+    archive_root: data/market_event_economic_path_m1b/raw
+    fields: [mark_contract_basis, basis_change_15m, basis_zscore_7d, latest_funding_rate, funding_age_hours]
+  open_interest: NOT_PRESENT
+  positioning: NOT_PRESENT
+  liquidations: NOT_PRESENT
+
+ablations:
+  PRICE_STRUCTURE:
+    groups: [PRICE_STRUCTURE]
+  PRICE_PLUS_OPPORTUNITY:
+    groups: [PRICE_STRUCTURE, OPPORTUNITY]
+  PRICE_PLUS_FUNDING_BASIS:
+    groups: [PRICE_STRUCTURE, FUNDING_BASIS]
+  PRICE_PLUS_TAKER:
+    groups: [PRICE_STRUCTURE, TAKER]
+  PRICE_PLUS_RELATIVE:
+    groups: [PRICE_STRUCTURE, RELATIVE]
+  FULL_AVAILABLE:
+    groups: [PRICE_STRUCTURE, OPPORTUNITY, FUNDING_BASIS, TAKER, RELATIVE]
+  OI: NOT_RUN_SOURCE_ABSENT
+
+models:
+  families:
+    - A_MULTICLASS_LOGISTIC
+    - B_DUAL_UTILITY_RIDGE
+    - C_ADVANTAGE_RIDGE
+  random_seed: 823001
+  internal_fit_fraction: 0.70
+  no_deep_learning: true
+  selection_partition: TRAIN_INTERNAL_CALIBRATION_ONLY
+  action_rules:
+    A_MULTICLASS_LOGISTIC:
+      minimum_direction_probability: 0.50
+    B_DUAL_UTILITY_RIDGE:
+      minimum_predicted_utility_bps: 2.0
+      minimum_predicted_advantage_bps: 10.0
+    C_ADVANTAGE_RIDGE:
+      minimum_absolute_predicted_advantage_bps: 38.0
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: UTC_DAY_BLOCK
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+  temporal_folds: 4
+
+economic_gate:
+  minimum_validation_trades: 300
+  minimum_net_expectancy_bps: 2.0
+  require_expectancy_ci_lower_positive: true
+  require_profit_factor_above_one: true
+  minimum_positive_symbols: 7
+  minimum_positive_temporal_folds: 3
+  require_20bps_cost_stress_positive: true
+  maximum_trade_fraction: 0.80
+
+deployment:
+  production_changes: PROHIBITED
+  typescript_changes: PROHIBITED
+  guard_changes: PROHIBITED
+  leverage_changes: PROHIBITED
+  pm2_changes: PROHIBITED
+  shadow: PROHIBITED_UNTIL_W8_GATE
+  live: PROHIBITED
+  authenticated_requests: 0
+  exchange_mutations: 0
