@@ -1,0 +1,160 @@
+schema_version: aegis-general-orderbook-direction-w9-1-preregistration-v1
+experiment_id: aegis-general-orderbook-direction-w9-1-01
+registered_at_utc: '2026-08-14T20:15:00Z'
+mode: OFFLINE_HISTORICAL_RESEARCH_ONLY
+runtime_effect: NONE
+
+authority:
+  w9_status: AEGIS_W9_BLOCKED_DATA_QUALITY
+  prior_holdouts: SEALED_W1_THROUGH_W9
+  w7_opportunity_training_dependency: NONE
+  w7_retuning: PROHIBITED
+  w9_2_execution: PROHIBITED_UNLESS_W9_1_GATE_PASSES
+
+data:
+  exchange: binance-futures
+  provider: TARDIS_FREE_FIRST_DAY_SAMPLES
+  data_types: [incremental_book_L2, quotes, trades]
+  symbols: [ADAUSDT, BNBUSDT, BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT]
+  symbol_selection: PREREGISTERED_LIQUIDITY_AND_SCALE_REPRESENTATIVES_FROM_AEGIS_UNIVERSE
+  synthetic_depth: PROHIBITED
+  native_sequence_validation: PROVIDER_RAW_FEED_DOCUMENTED_CSV_OMITS_IDS
+  anchor_spacing_seconds: 120
+  warmup_seconds: 10
+  maximum_target_horizon_seconds: 60
+  episode_overlap: PROHIBITED
+
+partitions:
+  train_months: ['2024-09', '2025-03', '2025-09']
+  validation_months: ['2025-12', '2026-03']
+  final_holdout:
+    month: '2026-06'
+    state: SEALED_NOT_OPENED
+    download_prohibited_before_gate: true
+
+data_gate:
+  minimum_train_episodes: 10000
+  minimum_validation_episodes: 6000
+  minimum_symbols_per_partition: 6
+  minimum_train_months: 3
+  minimum_validation_months: 2
+  require_all_files_reconstructable: true
+  maximum_crossed_or_invalid_fraction: 0.0
+  maximum_l2_quote_mid_p99_difference_bps: 5.0
+  action_on_failure: STOP_BEFORE_MODELING
+
+anchors:
+  schedule: FIXED_UTC_GRID
+  interval_seconds: 120
+  identity_fields: [symbol, anchor_local_timestamp_us]
+  bootstrap_unit: SYMBOL_UTC_DAY_BLOCK
+
+features:
+  windows_ms: [100, 250, 500, 1000, 2000, 5000]
+  static:
+    - spread_bps
+    - microprice_minus_mid_bps
+    - OBI_L1
+    - OBI_L5
+    - OBI_L10
+    - OBI_L20
+    - bid_depth_1bp
+    - ask_depth_1bp
+    - bid_depth_2bp
+    - ask_depth_2bp
+    - bid_depth_5bp
+    - ask_depth_5bp
+  dynamics:
+    - bid_depletion
+    - ask_depletion
+    - bid_replenishment
+    - ask_replenishment
+    - depth_velocity
+    - depth_acceleration
+    - spread_change
+    - microprice_velocity
+  flow:
+    - aggressive_buy_volume
+    - aggressive_sell_volume
+    - signed_delta
+    - cumulative_delta
+    - trade_count
+    - mean_trade_size
+    - large_trade_fraction
+    - flow_velocity
+  response:
+    - price_impact_per_buy_volume
+    - price_impact_per_sell_volume
+    - signed_flow_price_response
+    - flow_without_price_response
+  absorption:
+    - sell_pressure_low_downside_response
+    - buy_pressure_low_upside_response
+    - bid_replenishment_under_sell_flow
+    - ask_replenishment_under_buy_flow
+
+targets:
+  type: FIRST_BARRIER_FROM_ANCHOR
+  primary:
+    barrier_bps: 25
+    horizon_seconds: 60
+  diagnostic_families:
+    - {barrier_bps: 10, horizon_seconds: 30}
+    - {barrier_bps: 15, horizon_seconds: 60}
+  classes: [UP_FIRST, DOWN_FIRST, NEITHER]
+  same_timestamp_resolution: CAPTURE_ORDER
+  terminal_return_recorded: true
+
+models:
+  families:
+    - MULTINOMIAL_LOGISTIC_L2
+    - DUAL_BINARY_LOGISTIC_L2
+    - DIRECTIONAL_RIDGE
+    - SHALLOW_TREE_DEPTH3
+    - HIST_GRADIENT_BOOSTING
+  ablations: [STATIC, STATIC_DYNAMICS, PLUS_FLOW, PLUS_RESPONSE, PLUS_ABSORPTION, FULL]
+  internal_train_selection_fraction: 0.70
+  confidence_thresholds: [0.55, 0.60, 0.65, 0.70]
+  random_seed: 910001
+  no_deep_learning: true
+
+latency:
+  scenarios_ms: [0, 100, 250, 500, 1000]
+  required_survival_ms: 250
+
+economics:
+  baseline_round_trip_cost_bps: 14.0
+  stress_round_trip_cost_bps: 20.0
+  leverage_in_objective: false
+  primary_metric: NET_EXPECTANCY_BPS_PER_TAKEN_EPISODE
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: SYMBOL_UTC_DAY_BLOCK
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+  leave_one_symbol_out: true
+
+gate:
+  minimum_balanced_accuracy_for_information: 0.38
+  minimum_validation_taken_episodes: 500
+  minimum_net_expectancy_bps: 3.0
+  require_ci_lower_positive: true
+  require_profit_factor_above_one: true
+  minimum_positive_symbols: 4
+  minimum_positive_validation_months: 2
+  require_20bps_stress_positive: true
+  require_250ms_latency_positive: true
+  maximum_single_symbol_share: 0.35
+
+deployment:
+  production_changes: PROHIBITED
+  typescript_changes: PROHIBITED
+  brain_changes: PROHIBITED
+  guards: PROHIBITED
+  leverage: PROHIBITED
+  pm2: PROHIBITED
+  shadow: PROHIBITED
+  live: PROHIBITED
+  authenticated_requests: 0
+  exchange_mutations: 0
