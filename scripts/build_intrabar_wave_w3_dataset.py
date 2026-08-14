@@ -139,9 +139,12 @@ def _prepare_minutes(frame: pd.DataFrame, five: pd.DataFrame) -> pd.DataFrame:
 
 
 def _partition(timestamp: pd.Timestamp, config: dict[str, Any]) -> str | None:
+    purge = pd.Timedelta(minutes=int(config["partitions"]["purge_minutes"]))
     for name in ("train", "validation"):
         start, end = (pd.Timestamp(value) for value in config["partitions"][name])
-        if start <= timestamp < end:
+        effective_start = start if name == "train" else start + purge
+        effective_end = end - purge
+        if effective_start <= timestamp < effective_end:
             return name.upper()
     return None
 
