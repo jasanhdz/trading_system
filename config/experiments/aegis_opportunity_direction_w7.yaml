@@ -1,0 +1,148 @@
+schema_version: aegis-opportunity-direction-w7-preregistration-v1
+experiment_id: aegis-opportunity-direction-decomposition-w7-01
+registered_at_utc: '2026-08-14T15:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+prior_experiments:
+  holdout_access: PROHIBITED
+  retuning: PROHIBITED
+  artifacts:
+    W1:
+      preregistration_sha256: 78eb9a536141bbd8d4f1287a9092294fc383721a7382af19205ca39b3717211b
+      verdict_sha256: e5ef86d1bf9f561fbcabe4418852996ea3ef3a7bbaa8e30486f4cf7764ca8a5b
+    W2:
+      preregistration_sha256: 83294f5a70228455328818d67a47e40e2fdc5d73922536da673438e5f0fde75a
+      verdict_sha256: 4a11f2693a3c6a3b6cd4c3cfb1506b93c394d764e2ee910578628f12f25cf3a3
+    W3:
+      preregistration_sha256: 82bee73dfed491d75afd391c86552a1306f01d4d6270c820a0b0b9ca40ffbc39
+      verdict_sha256: ad45c3233b649185d29b03a85decd9d10f065847dbb08d6478a23fdab2f4c9f2
+    W4:
+      preregistration_sha256: 6bbf14db91ec9e366f8dedb5c0dafa544c5d5775e2d988094e92a1acacb34e52
+      verdict_sha256: 232eda7845601e3933c7dac042e8ef6bf395cfb08ae82e6910df523b98f11631
+    W5:
+      preregistration_sha256: 1d03149b228e6fd11b5be4876421997770521831f93f4f23fcae7d9da37836a5
+      verdict_sha256: f8964c4e89e54066d0fa55af9ee147206a3761d16e2b3dd529fbbc06366c4ec4
+    W6:
+      preregistration_sha256: 078bdbaa73135c0df12e340c1d403d57747b78f9274f49fe3ac43e0bd776bd60
+      verdict_sha256: 196970901d55f681635cc03990195a46e54a7db3d76bcf2a02b18ccc890444a1
+
+W7A:
+  hypothesis: >-
+    A direction-neutral estimate of future movement magnitude can select a
+    subset of frozen Aegis directional entries with materially better net
+    expectancy, without changing their side.
+  source:
+    dataset: data/feature_information_v14/canonical_dataset.jsonl.gz
+    dataset_sha256: dc5cfef8d13d00e999cfcda86d84e739de078f68c8f5085027fe285d54bbb286
+    candle_database: data/binance_candles.db
+    candle_database_mode: READ_ONLY
+  population:
+    action_required: SHORT
+    row_side_required: SHORT
+    independent_required: true
+    frozen_direction_source: entry_brain_action
+    long_status: NOT_AVAILABLE_CURRENT_BRAIN_SHORT_ONLY
+    hold_rows_are_signals: false
+    unit: AEGIS_SIGNAL_EPISODE
+  entry:
+    timestamp: source_timestamp
+    price: NEXT_COMPLETE_5M_OPEN_STORED_AS_ENTRY_PRICE
+  opportunity_target:
+    direction_neutral: true
+    definition: MAX_ABSOLUTE_HIGH_LOW_EXCURSION_FROM_ENTRY
+    horizons_minutes: [15, 30, 60]
+    decisive_thresholds_bps: [30, 50, 75, 100]
+    primary_decisive_threshold_bps: 50
+    target_must_not_use_aegis_side: true
+  economic_outcome:
+    direction: FROZEN_AEGIS_DIRECTION
+    definition: TERMINAL_DIRECTIONAL_RETURN_AT_HORIZON_MINUS_COST
+    primary_horizon_minutes: 60
+    base_round_trip_cost_bps: 14
+    stress_round_trip_cost_bps: [20, 30]
+    skipped_signal_return_bps: 0
+    leverage_in_objective: false
+  features:
+    schema: V9_DIRECTION_NEUTRAL_PLUS_V14_TAKER_FLOW
+    source_vectors: [v9_direction_features, v14_taker_flow_features]
+    categorical: [symbol]
+    side_feature_prohibited: true
+    future_feature_prohibited: true
+  partitions:
+    train: ['2025-08-09T00:00:00Z', '2026-01-01T00:00:00Z']
+    validation: ['2026-01-01T00:00:00Z', '2026-05-01T00:00:00Z']
+    final_holdout: ['2026-05-01T00:00:00Z', '2026-07-18T00:00:00Z']
+    purge_minutes: 120
+    final_holdout_state: SEALED
+    prior_data_inspection_disclosure: ALL_HISTORY_PREVIOUSLY_INSPECTED_NO_PROMOTION_AUTHORITY
+  models:
+    magnitude_regression:
+      - RIDGE_L2
+      - HIST_GRADIENT_BOOSTING
+    decisive_probability:
+      - LOGISTIC_L2
+    internal_fit_fraction: 0.70
+    regression_take_thresholds_bps: [30, 50, 75, 100]
+    probability_take_thresholds: [0.60, 0.70, 0.80, 0.90]
+    random_seed: 719001
+    no_deep_learning: true
+    model_selection_partition: TRAIN_INTERNAL_CALIBRATION_ONLY
+  opportunity_value_gate:
+    minimum_validation_spearman: 0.15
+    minimum_validation_auc: 0.60
+    minimum_horizons_passing: 2
+  economic_gate:
+    minimum_validation_taken_signals: 50
+    maximum_skip_fraction: 0.95
+    minimum_taken_net_expectancy_bps: 2.0
+    minimum_portfolio_improvement_bps: 2.0
+    require_taken_expectancy_ci_lower_positive: true
+    minimum_positive_symbols: 7
+    minimum_positive_temporal_folds: 3
+    temporal_folds: 4
+    require_profit_factor_above_one: true
+    require_20bps_cost_survival: true
+  statistics:
+    bootstrap_repetitions: 10000
+    bootstrap_unit: UTC_ENTRY_DAY
+    fdr_method: BENJAMINI_HOCHBERG
+    fdr_alpha: 0.05
+
+W7B:
+  execution_condition: >-
+    Run only if W7A finds economic value or if W7A confirms opportunity is
+    learnable while frozen Aegis direction remains the economic bottleneck.
+  required_new_sources:
+    - OPEN_INTEREST
+    - FUNDING
+    - PREMIUM_BASIS
+    - CROWDING_LONG_SHORT_RATIO
+    - LIQUIDATIONS
+    - RELATIVE_STRENGTH_AND_BREADTH
+  no_synthetic_history: true
+  prior_findings:
+    funding_basis: M1B_PREVIOUSLY_TESTED_NO_VALIDATED_EDGE
+    relative_strength: B1_B2_PREVIOUSLY_TESTED_NO_VALIDATED_EDGE
+  train_if_new_information_complete: true
+
+gates:
+  W7A_OPPORTUNITY_VALUE_FOUND: false
+  W7A_META_LABEL_EDGE_FOUND: false
+  W7B_DIRECTIONAL_ALPHA_FOUND: false
+  W7B_CROSS_SECTIONAL_ALPHA_FOUND: false
+  W7_COMBINED_EDGE_FOUND: false
+  W7_MODELING_JUSTIFIED: false
+  W7_READY_FOR_SHADOW: false
+  W7_READY_FOR_LIVE: false
+
+safety:
+  production_changes: NONE
+  typescript_changes: NONE
+  guard_changes: NONE
+  leverage_changes: NONE
+  pm2_changes: NONE
+  authenticated_requests: 0
+  exchange_mutations: 0
