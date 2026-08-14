@@ -159,7 +159,7 @@ def summarize_returns(frame: pd.DataFrame) -> dict[str, Any]:
         "episodes": int(len(frame)),
         "trades": int(frame["traded"].sum()),
         "net_expectancy": float(returns.mean()) if len(returns) else 0.0,
-        "profit_factor": float(positive / negative) if negative > 0.0 else float("inf"),
+        "profit_factor": float(positive / negative) if negative > 0.0 else 1_000_000_000.0,
         "win_rate": float((returns > 0.0).mean()) if len(returns) else 0.0,
         "mean_mae_atr": float(frame["mae_atr"].mean()) if len(frame) else 0.0,
         "median_profit_capture_ratio": float(
