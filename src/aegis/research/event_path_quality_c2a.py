@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -19,6 +21,70 @@ ZSCORE_LOOKBACK = 1_440
 
 class C2AContractError(ValueError):
     pass
+
+
+AGG_TRADE_COLUMNS = (
+    "agg_trade_id", "price", "quantity", "first_trade_id", "last_trade_id",
+    "transact_time", "is_buyer_maker",
+)
+
+
+def read_agg_trade_archives_chunked(
+    paths: Sequence[Path], symbol: str, *, chunk_size: int = 1_000_000
+) -> tuple[FlowBucket, ...]:
+    """Aggregate verified archives by minute without materializing every trade."""
+
+    if not paths or not symbol or chunk_size <= 0:
+        raise C2AContractError("AEGIS_C2A_AGG_ARCHIVE_INPUT_INVALID")
+    grouped_parts = []
+    for path in paths:
+        try:
+            with zipfile.ZipFile(path) as archive:
+                members = [item for item in archive.infolist() if not item.is_dir()]
+                if len(members) != 1:
+                    raise C2AContractError("AEGIS_C2A_AGG_ARCHIVE_MEMBER_INVALID")
+                with archive.open(members[0]) as source:
+                    chunks = pd.read_csv(source, chunksize=chunk_size)
+                    for chunk in chunks:
+                        if tuple(chunk.columns) != AGG_TRADE_COLUMNS:
+                            raise C2AContractError("AEGIS_C2A_AGG_ARCHIVE_HEADER_INVALID")
+                        numeric = chunk[["price", "quantity", "transact_time"]].apply(
+                            pd.to_numeric, errors="coerce"
+                        )
+                        maker = chunk["is_buyer_maker"].astype(str).str.lower()
+                        timestamps = numeric["transact_time"].to_numpy(dtype=np.float64)
+                        timestamps = np.where(timestamps >= 100_000_000_000_000, timestamps // 1000, timestamps)
+                        if (
+                            not np.isfinite(numeric.to_numpy()).all()
+                            or (numeric[["price", "quantity"]].to_numpy() <= 0.0).any()
+                            or (timestamps < 1_000_000_000_000).any()
+                            or (timestamps >= 10_000_000_000_000).any()
+                            or not maker.isin(("true", "false")).all()
+                        ):
+                            raise C2AContractError("AEGIS_C2A_AGG_ARCHIVE_ROW_INVALID")
+                        notional = numeric["price"] * numeric["quantity"]
+                        normalized = pd.DataFrame({
+                            "open_time_ms": (timestamps.astype(np.int64) // 60_000) * 60_000,
+                            "aggressive_buy_quote": np.where(maker.eq("false"), notional, 0.0),
+                            "aggressive_sell_quote": np.where(maker.eq("true"), notional, 0.0),
+                            "trade_count": 1,
+                        })
+                        grouped_parts.append(
+                            normalized.groupby("open_time_ms", as_index=False, sort=True).sum()
+                        )
+        except zipfile.BadZipFile as error:
+            raise C2AContractError("AEGIS_C2A_AGG_ARCHIVE_ZIP_INVALID") from error
+    combined = (
+        pd.concat(grouped_parts, ignore_index=True)
+        .groupby("open_time_ms", as_index=False, sort=True).sum()
+    )
+    return tuple(
+        FlowBucket(
+            symbol, int(row.open_time_ms), float(row.aggressive_buy_quote),
+            float(row.aggressive_sell_quote), int(row.trade_count),
+        )
+        for row in combined.itertuples(index=False)
+    )
 
 
 @dataclass(frozen=True)

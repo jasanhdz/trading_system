@@ -15,9 +15,9 @@ from aegis.config import CANONICAL_SYMBOLS
 from aegis.research.event_path_quality_c2a import (
     build_path_dataset,
     contracts_from_preregistration,
+    read_agg_trade_archives_chunked,
 )
 from aegis.research.market_event_fast_track_m1a import (
-    read_agg_trade_archive,
     read_kline_archive,
 )
 from aegis.utils import sha256_file
@@ -73,9 +73,7 @@ def main() -> int:
         bars = tuple(
             row for path in kline_paths for row in read_kline_archive(path, symbol)
         )
-        flow = tuple(
-            row for path in trade_paths for row in read_agg_trade_archive(path, symbol)
-        )
+        flow = read_agg_trade_archives_chunked(trade_paths, symbol)
         dataset = build_path_dataset(bars, flow, contracts)
         destination = output / f"{symbol}.parquet"
         dataset.to_parquet(destination, compression="zstd", index=False)

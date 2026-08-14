@@ -1,4 +1,5 @@
 import pandas as pd
+import zipfile
 
 from aegis.research.event_path_quality_c2a import (
     PathContract,
@@ -9,8 +10,11 @@ from aegis.research.event_path_quality_c2a import (
     detect_registered_events,
     deterministic_matched_control,
     economic_summary,
+    read_agg_trade_archives_chunked,
 )
-from aegis.research.market_event_fast_track_m1a import FlowBucket, MinuteBar
+from aegis.research.market_event_fast_track_m1a import (
+    FlowBucket, MinuteBar, read_agg_trade_archive,
+)
 
 
 def _frame(prices):
@@ -107,3 +111,18 @@ def test_economic_metrics_and_control_are_deterministic():
     assert summary["net_expectancy"] > 0
     interval = day_cluster_bootstrap(selected, "utility", repetitions=10)
     assert interval["expectancy_lower_95"] == interval["expectancy_upper_95"]
+
+
+def test_chunked_archive_reader_is_equivalent_to_canonical_reader(tmp_path):
+    path = tmp_path / "ADAUSDT-aggTrades-2026-07.zip"
+    payload = (
+        "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n"
+        "1,2,3,1,1,1800000000000,true\n"
+        "2,2,4,2,2,1800000001000,false\n"
+        "3,4,5,3,3,1800000060000,false\n"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("ADAUSDT-aggTrades-2026-07.csv", payload)
+    canonical = read_agg_trade_archive(path, "ADAUSDT")
+    chunked = read_agg_trade_archives_chunked((path,), "ADAUSDT", chunk_size=2)
+    assert chunked == canonical
