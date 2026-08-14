@@ -171,6 +171,16 @@ statistics:
   multiple_comparison_control: BENJAMINI_HOCHBERG_FDR_0_05
   report_distributions_not_only_means: true
 
+contract_selection:
+  unit: REGISTERED_LADDER_SIDE_ENTRY_VARIANT
+  partition: TRAIN_ONLY
+  minimum_train_events: 500
+  objective: MAXIMUM_NET_EXPECTANCY_AT_BASE_COST
+  tie_break: LEXICOGRAPHIC_CONTRACT_ID
+  validation_reselection: PROHIBITED
+  final_holdout_reselection: PROHIBITED
+  validation_hypothesis_count_maximum: 56
+
 controls:
   - NO_TRADE
   - MATCHED_RANDOM_SYMBOL_SIDE_MONTH
@@ -215,4 +225,3 @@ safety:
   pm2_changes: NONE
   live_changes: NONE
   shadow_changes: NONE
-

@@ -62,6 +62,13 @@ non-opposition and remaining space. No validation threshold search is allowed.
 Models are prohibited unless an interpretable registered family first shows
 standalone net edge.
 
+For each registered ladder, side and causal entry variant, exactly one ATR
+barrier/horizon contract is selected on TRAIN by maximum net expectancy among
+contracts with at least 500 events. Ties use the lexical contract identity.
+VALIDATION and the final holdout may not reselect the contract. This yields at
+most 56 preregistered validation hypotheses and their p-values are controlled
+jointly with Benjamini-Hochberg FDR 0.05.
+
 ## Gates
 
 W1 cannot proceed to modeling, Shadow or Live merely because a bin or one
