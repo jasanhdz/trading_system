@@ -69,6 +69,15 @@ histogram gradient boosting, random forest, and discrete-time logistic hazard.
 Calibration and policy threshold selection occur on TRAIN only. Probability
 thresholds are frozen at 0.50, 0.60, 0.70, 0.80, and 0.90.
 
+The interpretable score is also frozen before evaluation: giveback ratio at
+least 30% contributes 20 points; two bars without a peak 15; non-positive
+velocity 15; deteriorating taker imbalance 15; opposite body at least 60% 10;
+volume above 4x 10; structural deterioration 10; and opposing BTC 5. Its only
+thresholds are 50, 60, and 70. Model hyperparameters and the 80/20 temporal
+fit/calibration split are recorded in the YAML contract. Candidate selection
+first requires TRAIN net expectancy within 2 bps of the best baseline, then
+ranks Profit Capture Ratio and uses net expectancy only as a tie-breaker.
+
 ## Baselines
 
 W2 must beat fixed ATR TP, fixed ATR trailing, percentage giveback, time exits,

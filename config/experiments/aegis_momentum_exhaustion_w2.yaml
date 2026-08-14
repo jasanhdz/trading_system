@@ -135,6 +135,36 @@ models:
   probability_calibration: TRAIN_TEMPORAL_CALIBRATION_ONLY
   model_selection: TRAIN_ONLY
   policy_probability_thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  temporal_fit_fraction: 0.80
+  interpretable_score:
+    thresholds: [50, 60, 70]
+    weights:
+      giveback_ratio_gte_030: 20
+      bars_since_peak_gte_2: 15
+      directional_velocity_nonpositive: 15
+      taker_imbalance_decay_negative: 15
+      opposite_body_ratio_gte_060: 10
+      volume_ratio_over_4: 10
+      structure_deterioration: 10
+      btc_opposes_position: 5
+  logistic_l2:
+    C: 1.0
+    max_iter: 500
+  hist_gradient_boosting:
+    learning_rate: 0.05
+    max_iter: 200
+    max_depth: 3
+    l2_regularization: 1.0
+  random_forest:
+    n_estimators: 300
+    max_depth: 6
+    min_samples_leaf: 100
+    max_features: sqrt
+  training_row_weight: INVERSE_DECISION_ROWS_PER_EPISODE
+  selection_rule:
+    eligibility: NET_EXPECTANCY_WITHIN_2BPS_OF_BEST_TRAIN_BASELINE
+    primary_rank: MEDIAN_PROFIT_CAPTURE_RATIO
+    tie_breaker: NET_EXPECTANCY
   random_seeds: [182001]
   no_deep_learning: true
 
