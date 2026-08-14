@@ -43,14 +43,18 @@ def _build_symbol(
     minutes = _read_minutes(source_root / f"{symbol}.parquet")
     btc = _read_minutes(source_root / "BTCUSDT.parquet")
     features = build_causal_feature_frame(minutes, btc, config)
-    broad = build_wave_events(features, config, minimum_volume_ratio=0.0)
     minimum_volume = float(config["candidate_population"]["minimum_volume_ratio_20"])
     cooldown = int(config["candidate_population"]["cooldown_bars_by_symbol_side"])
     wave = collapse_event_cooldown(
-        broad.loc[broad["volume_ratio_20"].ge(minimum_volume)].copy(), cooldown
+        build_wave_events(features, config), cooldown
+    )
+    broad_controls = build_wave_events(
+        features, config, minimum_volume_ratio=0.0,
     )
     non_wave = collapse_event_cooldown(
-        broad.loc[broad["volume_ratio_20"].lt(minimum_volume)].copy(), cooldown
+        broad_controls.loc[
+            broad_controls["volume_ratio_20"].lt(minimum_volume)
+        ].copy(), cooldown
     )
     controls = deterministic_matched_controls(
         pd.concat([wave, non_wave], ignore_index=True), wave,
@@ -98,12 +102,19 @@ def main() -> int:
         default=Path("config/experiments/aegis_volume_wave_w1.yaml"),
     )
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--symbols", nargs="*", default=list(CANONICAL_SYMBOLS))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     source_root = args.source_root if args.source_root.is_absolute() else root / args.source_root
     output_root = args.output_root if args.output_root.is_absolute() else root / args.output_root
     config_path = args.config if args.config.is_absolute() else root / args.config
-    if args.workers < 1 or not (source_root / "manifest.json").is_file():
+    symbols = tuple(args.symbols)
+    if (
+        args.workers < 1 or not symbols
+        or not set(symbols).issubset(CANONICAL_SYMBOLS)
+        or len(set(symbols)) != len(symbols)
+        or not (source_root / "manifest.json").is_file()
+    ):
         raise RuntimeError("AEGIS_W1_BUILD_INPUT_INVALID")
     config = yaml.safe_load(config_path.read_text())
     source_manifest = json.loads((source_root / "manifest.json").read_text())
@@ -118,7 +129,7 @@ def main() -> int:
     ) as executor:
         futures = {
             executor.submit(_build_symbol, symbol, source_root, output_root, config): symbol
-            for symbol in CANONICAL_SYMBOLS
+            for symbol in symbols
         }
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
@@ -133,7 +144,7 @@ def main() -> int:
         "config_sha256": sha256_file(config_path),
         "source_manifest_sha256": sha256_file(source_root / "manifest.json"),
         "source_projection": [*SOURCE_COLUMNS, "side=LONG_identity_deduplication"],
-        "symbols": list(CANONICAL_SYMBOLS),
+        "symbols": list(symbols),
         "results": results,
         "total_rows": sum(item["rows"] for item in results),
         "wave_rows": sum(item["wave_rows"] for item in results),

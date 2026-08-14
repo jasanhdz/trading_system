@@ -98,7 +98,7 @@ def test_cooldown_is_independent_by_entry_variant():
     assert collapsed.groupby(["side", "entry_variant"]).size().max() == 1
 
 
-def test_matched_controls_are_deterministic_and_exclude_wave_volume():
+def test_matched_controls_are_deterministic_and_do_not_condition_on_volume():
     broad = build_wave_events(_event_frame(), _config(), minimum_volume_ratio=0.0)
     wave = broad.loc[broad.volume_ratio_20.ge(1.25)].copy()
     controls = broad.copy()
@@ -111,7 +111,7 @@ def test_matched_controls_are_deterministic_and_exclude_wave_volume():
         combined, wave, minimum_volume_ratio=1.25
     )
     assert first.event_timestamp_ms.tolist() == second.event_timestamp_ms.tolist()
-    assert first.volume_ratio_20.lt(1.25).all()
+    assert len(first) == len(wave)
     assert first.sample_source.eq("MATCHED_PRICE_ONLY_CONTROL").all()
 
 

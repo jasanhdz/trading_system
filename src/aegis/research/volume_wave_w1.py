@@ -242,6 +242,49 @@ def _variant_decision_index(
     return None
 
 
+def _variant_decision_indices(
+    frame: pd.DataFrame, indices: np.ndarray, side: str, variant: str
+) -> np.ndarray:
+    sign = 1.0 if side == "LONG" else -1.0
+    decision = np.full(len(indices), -1, dtype=np.int64)
+    if variant == "A_IMMEDIATE":
+        return indices.copy()
+    opens = frame["open"].to_numpy(dtype=np.float64)
+    closes = frame["close"].to_numpy(dtype=np.float64)
+    highs = frame["high"].to_numpy(dtype=np.float64)
+    lows = frame["low"].to_numpy(dtype=np.float64)
+    midpoint = (opens[indices] + closes[indices]) / 2.0
+    if variant == "B_ONE_BAR_CONFIRMATION":
+        valid = indices + 1 < len(frame)
+        candidates = indices[valid] + 1
+        accepted = (
+            sign * (closes[candidates] - closes[indices[valid]]) > 0.0
+        ) & (sign * (closes[candidates] - midpoint[valid]) > 0.0)
+        decision[np.flatnonzero(valid)[accepted]] = candidates[accepted]
+        return decision
+    if variant not in {"C_CAUSAL_PULLBACK", "D_EXTREME_BREAK_CONFIRMATION"}:
+        raise VolumeWaveContractError("AEGIS_W1_ENTRY_VARIANT_INVALID")
+    body = np.abs(closes[indices] - opens[indices])
+    for offset in (1, 2):
+        unresolved = decision < 0
+        valid = unresolved & (indices + offset < len(frame))
+        positions = np.flatnonzero(valid)
+        candidates = indices[positions] + offset
+        if variant == "C_CAUSAL_PULLBACK":
+            retracement = sign * (
+                closes[indices[positions]] - closes[candidates]
+            ) / body[positions]
+            accepted = (
+                (retracement >= 0.10) & (retracement <= 0.40)
+                & (sign * (closes[candidates] - midpoint[positions]) > 0.0)
+            )
+        else:
+            extreme = highs[indices[positions]] if side == "LONG" else lows[indices[positions]]
+            accepted = sign * (closes[candidates] - extreme) > 0.0
+        decision[positions[accepted]] = candidates[accepted]
+    return decision
+
+
 def _side_features(row: pd.Series, side: str) -> dict[str, float | bool]:
     sign = 1.0 if side == "LONG" else -1.0
     side_clv = float(row.clv) if side == "LONG" else 1.0 - float(row.clv)
@@ -293,6 +336,7 @@ def build_wave_events(
     *,
     maximum_future_bars: int = 6,
     minimum_volume_ratio: float | None = None,
+    candidate_indices: Sequence[int] | None = None,
 ) -> pd.DataFrame:
     """Create causal W1 events and keep future path strictly as label columns."""
 
@@ -317,62 +361,98 @@ def build_wave_events(
     if not math.isfinite(minimum_volume) or minimum_volume < 0.0:
         raise VolumeWaveContractError("AEGIS_W1_MINIMUM_VOLUME_INVALID")
     minimum_body = float(config["candidate_population"]["minimum_absolute_body_atr"])
-    feature_columns = [
-        column for column in frame.columns
-        if column not in {"symbol"} and pd.api.types.is_numeric_dtype(frame[column])
-    ]
-    for index, impulse in frame.iterrows():
-        if (
-            not math.isfinite(float(impulse.body_atr))
-            or float(impulse.body_atr) < minimum_body
-            or not math.isfinite(float(impulse.volume_ratio_20))
-            or float(impulse.volume_ratio_20) < minimum_volume
-            or float(impulse.body) == 0.0
-        ):
-            continue
-        side = "LONG" if float(impulse.body) > 0.0 else "SHORT"
-        side_values = _side_features(impulse, side)
+    allowed = np.arange(len(frame), dtype=np.int64)
+    if candidate_indices is not None:
+        allowed = np.asarray(candidate_indices, dtype=np.int64)
+        if len(allowed) and (allowed.min() < 0 or allowed.max() >= len(frame)):
+            raise VolumeWaveContractError("AEGIS_W1_CANDIDATE_INDEX_INVALID")
+    eligible = (
+        frame["body_atr"].ge(minimum_body)
+        & frame["volume_ratio_20"].ge(minimum_volume)
+        & frame["body"].ne(0.0)
+        & np.isfinite(frame["body_atr"])
+        & np.isfinite(frame["volume_ratio_20"])
+    ).to_numpy()
+    allowed = allowed[eligible[allowed]]
+    open_times = frame["open_time_ms"].to_numpy(dtype=np.int64)
+    output_frames = []
+    for side in SIDES:
+        sign = 1.0 if side == "LONG" else -1.0
+        side_indices = allowed[(sign * frame["body"].to_numpy()[allowed]) > 0.0]
         for variant in ENTRY_VARIANTS:
-            decision_index = _variant_decision_index(frame, index, side, variant)
-            if decision_index is None:
+            decisions = _variant_decision_indices(frame, side_indices, side, variant)
+            valid = decisions >= 0
+            impulses = side_indices[valid]
+            decisions = decisions[valid]
+            entries = decisions + 1
+            valid = entries + maximum_future_bars <= len(frame)
+            impulses, decisions, entries = impulses[valid], decisions[valid], entries[valid]
+            if not len(impulses):
                 continue
-            entry_index = decision_index + 1
-            if entry_index + maximum_future_bars > len(frame):
+            contiguous = (
+                open_times[entries + maximum_future_bars - 1] - open_times[entries]
+                == (maximum_future_bars - 1) * 300_000
+            )
+            impulses = impulses[contiguous]
+            decisions = decisions[contiguous]
+            entries = entries[contiguous]
+            decision_atr = frame["atr"].to_numpy(dtype=np.float64)[decisions]
+            finite = np.isfinite(decision_atr) & (decision_atr > 0.0)
+            impulses, decisions, entries = impulses[finite], decisions[finite], entries[finite]
+            decision_atr = decision_atr[finite]
+            if not len(impulses):
                 continue
-            path = frame.iloc[entry_index : entry_index + maximum_future_bars]
-            expected = int(frame.iloc[entry_index].open_time_ms) + np.arange(
-                maximum_future_bars
-            ) * 300_000
-            if not np.array_equal(path["open_time_ms"].to_numpy(dtype=np.int64), expected):
-                continue
-            decision = frame.iloc[decision_index]
-            if not math.isfinite(float(decision.atr)) or float(decision.atr) <= 0.0:
-                continue
-            record: dict[str, object] = {
-                "schema_version": SCHEMA_VERSION,
-                "symbol": str(impulse.symbol),
-                "side": side,
-                "entry_variant": variant,
-                "event_timestamp_ms": int(impulse.close_time_ms),
-                "decision_timestamp_ms": int(decision.close_time_ms),
-                "entry_timestamp_ms": int(path.iloc[0].open_time_ms),
-                "entry_price": float(path.iloc[0].open),
-                "entry_atr": float(decision.atr),
-                "confirmation_bars": decision_index - index,
-                **side_values,
-            }
-            for column in feature_columns:
-                value = impulse[column]
-                if isinstance(value, (bool, np.bool_)):
-                    record[column] = bool(value)
-                elif pd.notna(value):
-                    record[column] = float(value)
-            for offset, future in enumerate(path.itertuples(index=False), start=1):
-                record[f"future_high_{offset}"] = float(future.high)
-                record[f"future_low_{offset}"] = float(future.low)
-                record[f"future_close_{offset}"] = float(future.close)
-            records.append(record)
-    result = pd.DataFrame.from_records(records)
+            result = frame.iloc[impulses].copy().reset_index(drop=True)
+            result["schema_version"] = SCHEMA_VERSION
+            result["side"] = side
+            result["entry_variant"] = variant
+            result["event_timestamp_ms"] = result["close_time_ms"].astype(np.int64)
+            result["decision_timestamp_ms"] = frame["close_time_ms"].to_numpy()[decisions]
+            result["entry_timestamp_ms"] = open_times[entries]
+            result["entry_price"] = frame["open"].to_numpy(dtype=np.float64)[entries]
+            result["entry_atr"] = decision_atr
+            result["confirmation_bars"] = decisions - impulses
+            side_clv = result["clv"] if side == "LONG" else 1.0 - result["clv"]
+            result["side_clv"] = side_clv
+            result["side_taker_imbalance"] = sign * result["taker_imbalance"]
+            result["side_price_vs_ma25_atr"] = sign * result["price_vs_ma_25_atr"]
+            result["side_ma25_slope_atr"] = sign * result["ma_25_slope_atr"]
+            result["side_15m_return"] = sign * result["context_15m_return_1"]
+            result["side_15m_ma25_slope_atr"] = sign * result["context_15m_ma_25_slope_atr"]
+            result["side_btc_15m_return_atr"] = (
+                sign * result["btc_15m_return_1"]
+                / result["btc_15m_atr_fraction"].clip(lower=1e-12)
+            )
+            result["side_rsi_space"] = (
+                100.0 - result["rsi_6"] if side == "LONG" else result["rsi_6"]
+            )
+            result["side_extension_ma25_atr"] = sign * result["price_vs_ma_25_atr"]
+            result["side_directional_persistence_3"] = sign * result["directional_persistence_3"]
+            result["side_directional_persistence_6"] = sign * result["directional_persistence_6"]
+            ladder = pd.Series(True, index=result.index)
+            result["ladder_VOLUME_DIRECTION"] = ladder
+            ladder &= result["body_ratio"].ge(0.60) & side_clv.ge(0.70)
+            result["ladder_CLEAN_IMPULSE"] = ladder
+            ladder &= result["side_taker_imbalance"].ge(0.10)
+            result["ladder_FLOW_ALIGNED"] = ladder
+            ladder &= result["side_price_vs_ma25_atr"].gt(0.0) & result["side_ma25_slope_atr"].gt(0.0)
+            result["ladder_TREND_5M_ALIGNED"] = ladder
+            ladder &= result["side_15m_return"].gt(0.0) & result["side_15m_ma25_slope_atr"].gt(0.0)
+            result["ladder_TREND_15M_ALIGNED"] = ladder
+            ladder &= result["side_btc_15m_return_atr"].ge(-0.10)
+            result["ladder_BTC_NOT_OPPOSING"] = ladder
+            ladder &= result["side_rsi_space"].ge(25.0) & result["side_extension_ma25_atr"].le(2.0)
+            result["ladder_SPACE_REMAINING"] = ladder
+            highs = frame["high"].to_numpy(dtype=np.float64)
+            lows = frame["low"].to_numpy(dtype=np.float64)
+            closes = frame["close"].to_numpy(dtype=np.float64)
+            for offset in range(1, maximum_future_bars + 1):
+                future = entries + offset - 1
+                result[f"future_high_{offset}"] = highs[future]
+                result[f"future_low_{offset}"] = lows[future]
+                result[f"future_close_{offset}"] = closes[future]
+            output_frames.append(result)
+    result = pd.concat(output_frames, ignore_index=True) if output_frames else pd.DataFrame()
     if result.empty:
         return result
     result.sort_values(
@@ -409,9 +489,7 @@ def deterministic_matched_controls(
 
     if broad_events.empty or wave_events.empty or minimum_volume_ratio <= 0.0:
         raise VolumeWaveContractError("AEGIS_W1_MATCHED_CONTROL_INPUT_INVALID")
-    broad = broad_events.loc[
-        broad_events["volume_ratio_20"].lt(minimum_volume_ratio)
-    ].copy()
+    broad = broad_events.copy()
     selected = wave_events.copy()
     for values in (broad, selected):
         values["event_month"] = pd.to_datetime(
@@ -424,8 +502,8 @@ def deterministic_matched_controls(
         for column, value in zip(keys, identity, strict=True):
             mask &= broad[column].eq(value).to_numpy()
         candidates = broad.loc[mask].copy()
-        if candidates.empty:
-            continue
+        if len(candidates) < len(events):
+            raise VolumeWaveContractError("AEGIS_W1_MATCHED_CONTROL_INSUFFICIENT")
         stable_identity = (
             candidates["event_timestamp_ms"].astype(str) + ":"
             + candidates["symbol"] + ":" + candidates["side"] + ":"
