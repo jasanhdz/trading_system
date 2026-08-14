@@ -1,0 +1,54 @@
+{
+  "schema_version": "aegis-execution-timing-w4-verdict-v1",
+  "experiment_id": "aegis-execution-timing-adverse-selection-w4-01",
+  "status": "AEGIS_EXECUTION_TIMING_W4_BLOCKED_DATA_QUALITY",
+  "flags": {
+    "W4_DATA_QUALITY_SUFFICIENT": false,
+    "W4_EXECUTION_COST_PREDICTABLE": false,
+    "W4_EXECUTION_EDGE_FOUND": false,
+    "W4_MODELING_JUSTIFIED": false,
+    "W4_READY_FOR_SHADOW": false,
+    "W4_READY_FOR_LIVE": false
+  },
+  "current_execution_policy": "MARKET_NOW",
+  "primary_reference": "SYNCHRONIZED_MIDPRICE_AT_INTENT_TIMESTAMP",
+  "data": {
+    "symbols": 11,
+    "futures_aggtrade_archives": 132,
+    "aggtrade_coverage": ["2025-08", "2026-07"],
+    "sampled_aggtrade_rows": 1320000,
+    "historical_book_ticker_rows": 0,
+    "historical_sequenced_l2_rows": 0,
+    "c2_depth_rows": 0,
+    "legacy_isolated_depth_rows": 11,
+    "local_receive_timestamp_available": false,
+    "decision_bbo_fill_join_available": false
+  },
+  "blockers": [
+    "HISTORICAL_SYNCHRONIZED_BBO_MISSING",
+    "LOCAL_RECEIVE_TIMESTAMP_MISSING",
+    "AUTHORITATIVE_FEE_SCHEDULE_MISSING"
+  ],
+  "execution": {
+    "W4A": "NOT_EXECUTED_DATA_GATE_FAILED",
+    "W4B": "NOT_EXECUTED_W4A_PREREQUISITE_FAILED",
+    "final_holdout_state": "SEALED_UNPOPULATED",
+    "passive_fill_simulation": "PROHIBITED_NO_QUEUE_EVIDENCE"
+  },
+  "preregistered_minimum_execution_savings_bps": 2.0,
+  "artifact_sha256": {
+    "preregistration_config": "f98b0a9fea9ee92deca420823f129d33680e96b40f06e3ea72a857ca60f08328",
+    "private_data_audit": "e45dd1593817bdbff79656298a428c0f7e5e31b75f7bcc970def38e313c2ba18",
+    "research_module": "8e90054f370d3dae4b230eef70480d16673cde16534022cd3306a347f9f755c5",
+    "audit_script": "f90ae4bb2e78d1ece92bdd77380e524c9899e37ad64f73a31f4f29f12583a18b"
+  },
+  "safety": {
+    "authenticated_requests": 0,
+    "network_requests": 0,
+    "exchange_mutations": 0,
+    "production_changes": 0,
+    "typescript_changes": 0,
+    "websocket_changes": 0,
+    "pm2_changes": 0
+  }
+}
