@@ -5,6 +5,7 @@ import yaml
 from aegis.research.volume_wave_w1 import (
     SCHEMA_VERSION,
     aggregate_closed_bars,
+    attach_minute_label_paths,
     benjamini_hochberg,
     build_causal_feature_frame,
     build_wave_events,
@@ -135,6 +136,28 @@ def test_triple_barrier_is_side_aware_and_adverse_first_on_same_bar():
     assert result.favorable_before_adverse.tolist() == [False, False]
     assert (result.net_utility < 0.0).all()
     assert result.path_efficiency.between(0.0, 1.0).all()
+
+
+def test_minute_paths_resolve_barriers_before_five_minute_tie():
+    events = pd.DataFrame({
+        "entry_timestamp_ms": [1_900_000_000_000], "side": ["LONG"],
+        "entry_price": [100.0], "entry_atr": [1.0],
+        "future_high_1": [101.0],
+        "future_low_1": [99.0],
+        "future_close_1": [100.0],
+    })
+    minutes = pd.DataFrame({
+        "open_time_ms": [1_900_000_000_000 + index * 60_000 for index in range(5)],
+        "high": [100.6, 100.7, 100.2, 100.1, 100.1],
+        "low": [100.0, 99.4, 99.3, 99.2, 99.1],
+        "close": [100.5, 99.8, 99.7, 99.6, 99.5],
+    })
+    attached = attach_minute_label_paths(events, minutes, maximum_minutes=5)
+    result = path_outcomes(
+        attached, horizon_bars=1, favorable_atr=0.5, adverse_atr=0.5,
+        cost_bps=0.0,
+    )
+    assert result.favorable_before_adverse.tolist() == [True]
 
 
 def test_registered_contract_grid_is_unique_and_complete():

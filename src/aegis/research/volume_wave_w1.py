@@ -534,6 +534,39 @@ def deterministic_matched_controls(
     return result
 
 
+def attach_minute_label_paths(
+    events: pd.DataFrame, minutes: pd.DataFrame, *, maximum_minutes: int = 30
+) -> pd.DataFrame:
+    """Attach future 1m OHLC labels beginning at the already-fixed entry time."""
+
+    if events.empty or maximum_minutes < 1 or any(
+        column not in minutes for column in ("open_time_ms", "high", "low", "close")
+    ):
+        raise VolumeWaveContractError("AEGIS_W1_MINUTE_PATH_INPUT_INVALID")
+    source = minutes.sort_values("open_time_ms").reset_index(drop=True)
+    timestamps = source["open_time_ms"].to_numpy(dtype=np.int64)
+    entry = events["entry_timestamp_ms"].to_numpy(dtype=np.int64)
+    starts = np.searchsorted(timestamps, entry)
+    valid = (starts < len(source)) & (
+        timestamps[np.minimum(starts, len(source) - 1)] == entry
+    )
+    valid &= starts + maximum_minutes <= len(source)
+    candidate_positions = np.flatnonzero(valid)
+    if len(candidate_positions):
+        valid[candidate_positions] &= (
+            timestamps[starts[candidate_positions] + maximum_minutes - 1]
+            - timestamps[starts[candidate_positions]]
+            == (maximum_minutes - 1) * 60_000
+        )
+    result = events.loc[valid].copy().reset_index(drop=True)
+    starts = starts[valid]
+    for field in ("high", "low", "close"):
+        values = source[field].to_numpy(dtype=np.float64)
+        for offset in range(1, maximum_minutes + 1):
+            result[f"future_1m_{field}_{offset}"] = values[starts + offset - 1]
+    return result
+
+
 def path_outcomes(
     events: pd.DataFrame,
     *,
@@ -549,16 +582,29 @@ def path_outcomes(
         raise VolumeWaveContractError("AEGIS_W1_PATH_CONTRACT_INVALID")
     if favorable_atr <= 0.0 or adverse_atr <= 0.0:
         raise VolumeWaveContractError("AEGIS_W1_PATH_BARRIER_INVALID")
+    minute_resolution = f"future_1m_close_{horizon_bars * 5}" in events
+    steps = horizon_bars * 5 if minute_resolution else horizon_bars
+    prefix = "future_1m_" if minute_resolution else "future_"
     required = {"side", "entry_price", "entry_atr"}
-    required.update(f"future_{field}_{offset}" for field in ("high", "low", "close") for offset in range(1, horizon_bars + 1))
+    required.update(
+        f"{prefix}{field}_{offset}"
+        for field in ("high", "low", "close")
+        for offset in range(1, steps + 1)
+    )
     if not required.issubset(events.columns):
         raise VolumeWaveContractError("AEGIS_W1_PATH_COLUMN_MISSING")
     entry = events["entry_price"].to_numpy(dtype=np.float64)
     atr = events["entry_atr"].to_numpy(dtype=np.float64)
     sign = np.where(events["side"].eq("LONG"), 1.0, -1.0)
-    highs = events[[f"future_high_{index}" for index in range(1, horizon_bars + 1)]].to_numpy(dtype=np.float64)
-    lows = events[[f"future_low_{index}" for index in range(1, horizon_bars + 1)]].to_numpy(dtype=np.float64)
-    closes = events[[f"future_close_{index}" for index in range(1, horizon_bars + 1)]].to_numpy(dtype=np.float64)
+    highs = events[
+        [f"{prefix}high_{index}" for index in range(1, steps + 1)]
+    ].to_numpy(dtype=np.float64)
+    lows = events[
+        [f"{prefix}low_{index}" for index in range(1, steps + 1)]
+    ].to_numpy(dtype=np.float64)
+    closes = events[
+        [f"{prefix}close_{index}" for index in range(1, steps + 1)]
+    ].to_numpy(dtype=np.float64)
     favorable = np.where(sign[:, None] > 0.0, highs - entry[:, None], entry[:, None] - lows) / atr[:, None]
     adverse = np.where(sign[:, None] > 0.0, entry[:, None] - lows, highs - entry[:, None]) / atr[:, None]
     favorable_hit = favorable >= favorable_atr
@@ -593,6 +639,10 @@ def path_outcomes(
     time_to_positive = np.where(
         favorable_net_any, favorable_net.argmax(axis=1) + 1, 0
     )
+    time_scale_minutes = 1 if minute_resolution else 5
+    time_to_mfe_minutes = (favorable.argmax(axis=1) + 1) * time_scale_minutes
+    time_to_mae_minutes = (adverse.argmax(axis=1) + 1) * time_scale_minutes
+    time_to_positive_minutes = time_to_positive * time_scale_minutes
     return pd.DataFrame({
         "favorable_before_adverse": favorable_first,
         "adverse_before_or_same": adverse_first,
@@ -600,9 +650,14 @@ def path_outcomes(
         "mae_atr": adverse.max(axis=1),
         "mfe_fraction": favorable.max(axis=1) * atr / entry,
         "mae_fraction": adverse.max(axis=1) * atr / entry,
-        "time_to_mfe_bars": favorable.argmax(axis=1) + 1,
-        "time_to_mae_bars": adverse.argmax(axis=1) + 1,
-        "time_to_first_positive_net_bars": time_to_positive,
+        "time_to_mfe_minutes": time_to_mfe_minutes,
+        "time_to_mae_minutes": time_to_mae_minutes,
+        "time_to_first_positive_net_minutes": time_to_positive_minutes,
+        "time_to_mfe_bars": np.ceil(time_to_mfe_minutes / 5.0).astype(int),
+        "time_to_mae_bars": np.ceil(time_to_mae_minutes / 5.0).astype(int),
+        "time_to_first_positive_net_bars": np.ceil(
+            time_to_positive_minutes / 5.0
+        ).astype(int),
         "mfe_before_mae": favorable.argmax(axis=1) < adverse.argmax(axis=1),
         "directional_persistence": directional_persistence,
         "path_efficiency": path_efficiency,

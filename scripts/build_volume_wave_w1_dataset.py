@@ -17,6 +17,7 @@ import yaml
 from aegis.config import CANONICAL_SYMBOLS
 from aegis.research.volume_wave_w1 import (
     SOURCE_COLUMNS,
+    attach_minute_label_paths,
     build_causal_feature_frame,
     build_wave_events,
     collapse_event_cooldown,
@@ -62,6 +63,7 @@ def _build_symbol(
     )
     wave["sample_source"] = "WAVE_CANDIDATE"
     combined = pd.concat([wave, controls], ignore_index=True)
+    combined = attach_minute_label_paths(combined, minutes, maximum_minutes=30)
     combined.sort_values(
         ["event_timestamp_ms", "sample_source", "side", "entry_variant"],
         inplace=True,

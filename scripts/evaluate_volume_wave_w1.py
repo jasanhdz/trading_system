@@ -203,11 +203,26 @@ def _exhaustion_profile(validation: pd.DataFrame) -> dict[str, object]:
             giveback = np.divide(
                 peak - current, peak, out=np.zeros_like(peak), where=peak > 0.0
             )
+            meaningful_peak = (
+                peak
+                >= 0.05
+                * selected["entry_atr"].to_numpy(dtype=np.float64)
+                / entry
+            )
+            meaningful_giveback = giveback[meaningful_peak]
             profile.append({
                 "bar": offset,
                 "positive_close_rate": float((current > 0.0).mean()),
                 "mean_peak_mfe_fraction": float(peak.mean()),
-                "mean_giveback_ratio": float(giveback.mean()),
+                "meaningful_peak_events": int(meaningful_peak.sum()),
+                "median_giveback_ratio": float(np.median(meaningful_giveback))
+                if len(meaningful_giveback) else 0.0,
+                "giveback_over_50pct_rate": float(
+                    (meaningful_giveback > 0.50).mean()
+                ) if len(meaningful_giveback) else 0.0,
+                "giveback_over_100pct_rate": float(
+                    (meaningful_giveback > 1.0).mean()
+                ) if len(meaningful_giveback) else 0.0,
                 "mean_side_taker_imbalance": float(
                     (sign * selected[f"future_taker_imbalance_{offset}"]).mean()
                 ),
@@ -252,6 +267,11 @@ def main() -> int:
         *(f"future_{field}_{offset}" for field in (
             "high", "low", "close", "taker_imbalance", "velocity_atr_1"
         ) for offset in range(1, 7)),
+        *(
+            f"future_1m_{field}_{offset}"
+            for field in ("high", "low", "close")
+            for offset in range(1, 31)
+        ),
     }
     if not columns.issubset(available):
         raise RuntimeError("AEGIS_W1_EVALUATION_SCHEMA_MISMATCH")
