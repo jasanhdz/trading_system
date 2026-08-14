@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow.parquet as pq
 import yaml
 
 from aegis.config import CANONICAL_SYMBOLS
@@ -74,9 +75,20 @@ def main() -> int:
     events_by_partition: dict[str, list[pd.DataFrame]] = {name: [] for name in bounds}
     population_by_partition: dict[str, list[pd.DataFrame]] = {name: [] for name in bounds}
     dataset_hashes = {}
+    first_path = dataset_root / f"{CANONICAL_SYMBOLS[0]}.parquet"
+    available_columns = tuple(pq.read_schema(first_path).names)
+    utility_columns = tuple(
+        column for column in available_columns if column.endswith("_net_utility")
+    )
+    detector_columns = (
+        "event_timestamp_ms", "symbol", "side", "side_flow_z",
+        "trade_count_z", "side_flow_imbalance_3m",
+        "side_flow_persistence_5m", "side_price_response_1m",
+    )
+    projected_columns = (*detector_columns, *utility_columns)
     for symbol in CANONICAL_SYMBOLS:
         path = dataset_root / f"{symbol}.parquet"
-        frame = pd.read_parquet(path)
+        frame = pd.read_parquet(path, columns=projected_columns)
         dataset_hashes[symbol] = sha256_file(path)
         for name, (start, end) in bounds.items():
             population = frame.loc[
@@ -90,11 +102,9 @@ def main() -> int:
         print(json.dumps({"symbol": symbol, "state": "EVALUATED"}), flush=True)
 
     results = {}
-    contracts = sorted({
-        column.removesuffix("_net_utility")
-        for frame in population_by_partition["train"]
-        for column in frame.columns if column.endswith("_net_utility")
-    })
+    contracts = sorted(
+        column.removesuffix("_net_utility") for column in utility_columns
+    )
     for partition in bounds:
         population = pd.concat(population_by_partition[partition], ignore_index=True)
         events = pd.concat(events_by_partition[partition], ignore_index=True)
