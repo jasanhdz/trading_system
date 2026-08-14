@@ -5,9 +5,11 @@ import yaml
 from aegis.research.volume_wave_w1 import (
     SCHEMA_VERSION,
     aggregate_closed_bars,
+    benjamini_hochberg,
     build_causal_feature_frame,
     build_wave_events,
     collapse_event_cooldown,
+    clustered_economic_metrics,
     deterministic_matched_controls,
     path_outcomes,
     registered_contracts,
@@ -70,6 +72,8 @@ def _event_frame():
             "body_ratio": 0.8, "body_atr": abs(close - open_price), "clv": 0.9,
             "volume_ratio_20": 2.0 if index == 3 else 1.0,
             "taker_imbalance": 0.4, "rsi_6": 55.0,
+            "quote_volume": 1000.0, "velocity_atr_1": 0.1,
+            "delta_velocity": 0.05,
             "price_vs_ma_25_atr": 0.5, "ma_25_slope_atr": 0.1,
             "context_15m_return_1": 0.01, "context_15m_ma_25_slope_atr": 0.1,
             "btc_15m_return_1": 0.001, "btc_15m_atr_fraction": 0.01,
@@ -87,6 +91,7 @@ def test_events_enter_after_decision_and_keep_future_as_labels():
     assert immediate.entry_price == _event_frame().iloc[4].open
     assert immediate.ladder_SPACE_REMAINING
     assert immediate.future_close_1 == _event_frame().iloc[4].close
+    assert immediate.future_taker_imbalance_1 == 0.4
 
 
 def test_cooldown_is_independent_by_entry_variant():
@@ -129,9 +134,32 @@ def test_triple_barrier_is_side_aware_and_adverse_first_on_same_bar():
     assert result.adverse_before_or_same.tolist() == [True, True]
     assert result.favorable_before_adverse.tolist() == [False, False]
     assert (result.net_utility < 0.0).all()
+    assert result.path_efficiency.between(0.0, 1.0).all()
 
 
 def test_registered_contract_grid_is_unique_and_complete():
     contracts = registered_contracts(_config())
     assert len(contracts) == 30
     assert len({item[0] for item in contracts}) == 30
+
+
+def test_clustered_metrics_and_fdr_are_deterministic():
+    events = pd.DataFrame({
+        "event_timestamp_ms": [1_800_000_000_000 + index * 86_400_000 for index in range(6)],
+        "symbol": ["ADAUSDT"] * 3 + ["AVAXUSDT"] * 3,
+        "side": ["LONG"] * 6,
+    })
+    outcomes = pd.DataFrame({
+        "net_utility": [0.01, 0.02, -0.005, 0.01, 0.02, -0.005],
+        "favorable_before_adverse": [True, True, False, True, True, False],
+        "mfe_fraction": [0.02] * 6, "mae_fraction": [0.005] * 6,
+        "mfe_atr": [0.6] * 6, "mae_atr": [0.2] * 6,
+        "directional_persistence": [0.7] * 6, "path_efficiency": [0.8] * 6,
+        "mfe_before_mae": [True] * 6,
+    })
+    first = clustered_economic_metrics(events, outcomes, repetitions=100, seed=7)
+    second = clustered_economic_metrics(events, outcomes, repetitions=100, seed=7)
+    assert first == second
+    assert first["net_expectancy"] > 0.0
+    accepted = benjamini_hochberg({"a": 0.001, "b": 0.04, "c": 0.5})
+    assert accepted == {"a": True, "b": False, "c": False}

@@ -7,6 +7,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+from scipy.stats import beta as beta_distribution
 
 
 SCHEMA_VERSION = "aegis-volume-wave-w1-dataset-v1"
@@ -446,11 +447,21 @@ def build_wave_events(
             highs = frame["high"].to_numpy(dtype=np.float64)
             lows = frame["low"].to_numpy(dtype=np.float64)
             closes = frame["close"].to_numpy(dtype=np.float64)
+            future_fields = {
+                "taker_imbalance": frame["taker_imbalance"].to_numpy(dtype=np.float64),
+                "quote_volume": frame["quote_volume"].to_numpy(dtype=np.float64),
+                "velocity_atr_1": frame["velocity_atr_1"].to_numpy(dtype=np.float64),
+                "delta_velocity": frame["delta_velocity"].to_numpy(dtype=np.float64),
+                "ma25_slope_atr": frame["ma_25_slope_atr"].to_numpy(dtype=np.float64),
+                "rsi_6": frame["rsi_6"].to_numpy(dtype=np.float64),
+            }
             for offset in range(1, maximum_future_bars + 1):
                 future = entries + offset - 1
                 result[f"future_high_{offset}"] = highs[future]
                 result[f"future_low_{offset}"] = lows[future]
                 result[f"future_close_{offset}"] = closes[future]
+                for name, values in future_fields.items():
+                    result[f"future_{name}_{offset}"] = values[future]
             output_frames.append(result)
     result = pd.concat(output_frames, ignore_index=True) if output_frames else pd.DataFrame()
     if result.empty:
@@ -559,12 +570,28 @@ def path_outcomes(
     favorable_first = favorable_any & (~adverse_any | (favorable_time < adverse_time))
     adverse_first = adverse_any & (~favorable_any | (adverse_time <= favorable_time))
     terminal = sign * (closes[:, -1] - entry) / entry
+    close_path = np.column_stack([entry, closes])
+    path_length = np.abs(np.diff(close_path, axis=1)).sum(axis=1)
+    net_displacement = sign * (closes[:, -1] - entry)
+    directional_persistence = np.divide(
+        net_displacement, path_length,
+        out=np.zeros_like(net_displacement), where=path_length > 0.0,
+    )
+    path_efficiency = np.divide(
+        np.abs(net_displacement), path_length,
+        out=np.zeros_like(net_displacement), where=path_length > 0.0,
+    )
     favorable_fraction = favorable_atr * atr / entry
     adverse_fraction = adverse_atr * atr / entry
     cost = cost_bps / 10_000.0
     utility = np.where(
         favorable_first, favorable_fraction - cost,
         np.where(adverse_first, -adverse_fraction - cost, terminal - cost),
+    )
+    favorable_net = favorable * atr[:, None] / entry[:, None] > cost
+    favorable_net_any = favorable_net.any(axis=1)
+    time_to_positive = np.where(
+        favorable_net_any, favorable_net.argmax(axis=1) + 1, 0
     )
     return pd.DataFrame({
         "favorable_before_adverse": favorable_first,
@@ -574,6 +601,11 @@ def path_outcomes(
         "mfe_fraction": favorable.max(axis=1) * atr / entry,
         "mae_fraction": adverse.max(axis=1) * atr / entry,
         "time_to_mfe_bars": favorable.argmax(axis=1) + 1,
+        "time_to_mae_bars": adverse.argmax(axis=1) + 1,
+        "time_to_first_positive_net_bars": time_to_positive,
+        "mfe_before_mae": favorable.argmax(axis=1) < adverse.argmax(axis=1),
+        "directional_persistence": directional_persistence,
+        "path_efficiency": path_efficiency,
         "terminal_side_return": terminal,
         "net_utility": utility,
     }, index=events.index)
@@ -594,3 +626,112 @@ def registered_contracts(config: Mapping[str, object]) -> tuple[tuple[str, int, 
     if len({item[0] for item in contracts}) != len(contracts):
         raise VolumeWaveContractError("AEGIS_W1_CONTRACT_ID_DUPLICATE")
     return tuple(contracts)
+
+
+def clustered_economic_metrics(
+    events: pd.DataFrame,
+    outcomes: pd.DataFrame,
+    *,
+    repetitions: int = 10_000,
+    seed: int = 181401,
+) -> dict[str, object]:
+    if len(events) != len(outcomes) or events.empty or repetitions < 100:
+        raise VolumeWaveContractError("AEGIS_W1_METRICS_INPUT_INVALID")
+    utility = outcomes["net_utility"].to_numpy(dtype=np.float64)
+    if not np.isfinite(utility).all():
+        raise VolumeWaveContractError("AEGIS_W1_UTILITY_NON_FINITE")
+    day = pd.to_datetime(events["event_timestamp_ms"], unit="ms", utc=True).dt.floor("1D")
+    daily = pd.DataFrame({
+        "day": day, "utility": utility,
+        "gain": np.clip(utility, 0.0, None),
+        "loss": np.clip(-utility, 0.0, None),
+    }).groupby("day", sort=True).agg(
+        total=("utility", "sum"), count=("utility", "size"),
+        gain=("gain", "sum"), loss=("loss", "sum"),
+    )
+    random = np.random.default_rng(seed)
+    draws = random.integers(0, len(daily), size=(repetitions, len(daily)))
+    sampled_total = daily["total"].to_numpy()[draws].sum(axis=1)
+    sampled_count = daily["count"].to_numpy()[draws].sum(axis=1)
+    sampled_expectancy = sampled_total / sampled_count
+    sampled_gain = daily["gain"].to_numpy()[draws].sum(axis=1)
+    sampled_loss = daily["loss"].to_numpy()[draws].sum(axis=1)
+    sampled_pf = np.divide(
+        sampled_gain, sampled_loss,
+        out=np.full_like(sampled_gain, np.inf), where=sampled_loss > 0.0,
+    )
+    ordered_pf = np.sort(sampled_pf)
+    pf_lower = ordered_pf[int((repetitions - 1) * 0.025)]
+    pf_upper = ordered_pf[int((repetitions - 1) * 0.975)]
+    gains = utility[utility > 0.0].sum()
+    losses = -utility[utility < 0.0].sum()
+    ordered = events.assign(utility=utility).sort_values(
+        ["event_timestamp_ms", "symbol", "side"]
+    )
+    equity = ordered["utility"].cumsum().to_numpy()
+    drawdown = np.maximum.accumulate(np.maximum(equity, 0.0)) - equity
+    tail = max(1, math.ceil(len(utility) * 0.05))
+    wins = int(outcomes["favorable_before_adverse"].sum())
+    trials = int(len(outcomes))
+    posterior = beta_distribution(wins + 1, trials - wins + 1)
+    monthly = ordered.assign(
+        month=pd.to_datetime(ordered["event_timestamp_ms"], unit="ms", utc=True).dt.strftime("%Y-%m")
+    ).groupby("month", sort=True)["utility"].mean()
+    symbol_expectancy = ordered.groupby("symbol", sort=True)["utility"].mean()
+    symbol_share = ordered["symbol"].value_counts(normalize=True)
+    return {
+        "events": len(utility),
+        "net_expectancy": float(utility.mean()),
+        "expectancy_ci_95": [
+            float(np.quantile(sampled_expectancy, 0.025)),
+            float(np.quantile(sampled_expectancy, 0.975)),
+        ],
+        "bootstrap_probability_expectancy_le_zero": float(
+            (np.count_nonzero(sampled_expectancy <= 0.0) + 1) / (repetitions + 1)
+        ),
+        "profit_factor": float(gains / losses) if losses > 0.0 else "INF",
+        "profit_factor_ci_95": [
+            float(pf_lower), float(pf_upper),
+        ],
+        "win_rate_net": float((utility > 0.0).mean()),
+        "favorable_before_adverse_rate": wins / trials,
+        "continuation_posterior_mean": float(posterior.mean()),
+        "continuation_credible_interval_95": [
+            float(posterior.ppf(0.025)), float(posterior.ppf(0.975)),
+        ],
+        "mean_mfe_fraction": float(outcomes["mfe_fraction"].mean()),
+        "median_mfe_fraction": float(outcomes["mfe_fraction"].median()),
+        "mean_mae_fraction": float(outcomes["mae_fraction"].mean()),
+        "median_mae_fraction": float(outcomes["mae_fraction"].median()),
+        "mean_mfe_atr": float(outcomes["mfe_atr"].mean()),
+        "mean_mae_atr": float(outcomes["mae_atr"].mean()),
+        "mean_directional_persistence": float(outcomes["directional_persistence"].mean()),
+        "mean_path_efficiency": float(outcomes["path_efficiency"].mean()),
+        "mfe_before_mae_rate": float(outcomes["mfe_before_mae"].mean()),
+        "maximum_additive_drawdown": float(drawdown.max(initial=0.0)),
+        "cvar_05": float(np.sort(utility)[:tail].mean()),
+        "positive_months": int(monthly.gt(0.0).sum()),
+        "months": int(len(monthly)),
+        "positive_symbols": int(symbol_expectancy.gt(0.0).sum()),
+        "maximum_symbol_share": float(symbol_share.max()),
+        "symbol_expectancy": {
+            str(symbol): float(value) for symbol, value in symbol_expectancy.items()
+        },
+    }
+
+
+def benjamini_hochberg(
+    pvalues: Mapping[str, float], *, false_discovery_rate: float = 0.05
+) -> dict[str, bool]:
+    if (
+        not pvalues or not 0.0 < false_discovery_rate < 1.0
+        or any(not math.isfinite(value) or not 0.0 <= value <= 1.0 for value in pvalues.values())
+    ):
+        raise VolumeWaveContractError("AEGIS_W1_FDR_INPUT_INVALID")
+    ordered = sorted(pvalues.items(), key=lambda item: (item[1], item[0]))
+    maximum_rank = 0
+    for rank, (_, value) in enumerate(ordered, start=1):
+        if value <= false_discovery_rate * rank / len(ordered):
+            maximum_rank = rank
+    accepted = {key for key, _ in ordered[:maximum_rank]}
+    return {key: key in accepted for key in pvalues}
