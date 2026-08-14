@@ -115,13 +115,9 @@ def _actual_inventory(pattern: str) -> dict[str, Any]:
             {"OPEN", "CLOSED"}.issubset(statuses)
             for statuses in status_by_id.values()
         ),
-        "outcomes_read_by_builder": false_value(),
+        "outcomes_read_by_builder": False,
         "sources": source_hashes,
     }
-
-
-def false_value() -> bool:
-    return False
 
 
 def main() -> int:

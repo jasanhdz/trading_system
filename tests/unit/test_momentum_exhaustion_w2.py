@@ -10,6 +10,7 @@ from aegis.research.momentum_exhaustion_w2 import (
     build_episode_tables,
     next_complete_five_minute_open,
     select_nonoverlapping_candidates,
+    simulate_exit_at_bar,
     simulate_policy,
     stable_episode_id,
 )
@@ -150,3 +151,13 @@ def test_future_giveback_measures_additional_loss_not_past_giveback():
     )
     assert targets["target_giveback_025_atr_next_3"] is False
     assert targets["target_giveback_before_new_extreme"] is False
+
+
+def test_profit_capture_uses_common_full_episode_opportunity():
+    result = simulate_exit_at_bar({
+        "side": "LONG", "simulated_entry": 100.0,
+        "path_high": [100.5, 101.0], "path_low": [100.0, 100.4],
+        "path_close": [100.5, 100.8],
+    }, requested_exit_bar=1, cost_bps=0.0, reason="W2")
+    assert result.peak_mfe == 0.01
+    assert result.profit_capture_ratio == 0.5

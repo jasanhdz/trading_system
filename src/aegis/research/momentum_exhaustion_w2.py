@@ -430,6 +430,50 @@ class PolicyResult:
     exit_reason: str
 
 
+def simulate_exit_at_bar(
+    episode: Mapping[str, object],
+    *,
+    requested_exit_bar: int | None,
+    cost_bps: float,
+    reason: str,
+) -> PolicyResult:
+    """Exit at a requested close while preserving the common hard stop."""
+
+    side = str(episode["side"])
+    sign = 1.0 if side == "LONG" else -1.0
+    entry = float(episode["simulated_entry"])
+    highs = np.asarray(episode["path_high"], dtype=float)
+    lows = np.asarray(episode["path_low"], dtype=float)
+    closes = np.asarray(episode["path_close"], dtype=float)
+    favorable = highs - entry if side == "LONG" else entry - lows
+    adverse = entry - lows if side == "LONG" else highs - entry
+    maximum_index = len(closes) - 1 if requested_exit_bar is None else min(
+        len(closes) - 1, max(0, int(requested_exit_bar) - 1)
+    )
+    stop_hits = np.flatnonzero(adverse[:maximum_index + 1] >= 0.02 * entry)
+    if len(stop_hits):
+        exit_index = int(stop_hits[0])
+        exit_price = entry - sign * 0.02 * entry
+        exit_reason = "COMMON_HARD_STOP"
+    else:
+        exit_index = maximum_index
+        exit_price = float(closes[exit_index])
+        exit_reason = reason if requested_exit_bar is not None else "BOUNDED_HOLD"
+    gross = sign * (exit_price - entry) / entry
+    available = max(0.0, float(favorable.max(initial=0.0)) / entry)
+    return PolicyResult(
+        exit_bar=exit_index + 1,
+        exit_price=exit_price,
+        gross_return=gross,
+        net_return=gross - cost_bps / 10_000.0,
+        peak_mfe=available,
+        mae=float(adverse[:exit_index + 1].max(initial=0.0) / entry),
+        profit_capture_ratio=max(0.0, gross) / available if available > 0 else 0.0,
+        final_giveback=max(0.0, available - gross),
+        exit_reason=exit_reason,
+    )
+
+
 def simulate_policy(
     episode: Mapping[str, object],
     *,
@@ -512,7 +556,7 @@ def simulate_policy(
                     break
     gross = sign * (exit_price - entry) / entry
     net = gross - cost_bps / 10_000.0
-    available = max(0.0, float(peak[:exit_bar + 1].max(initial=0.0)) / entry)
+    available = max(0.0, float(peak.max(initial=0.0)) / entry)
     capture = max(0.0, gross) / available if available > 0 else 0.0
     return PolicyResult(
         exit_bar=exit_bar + 1,
