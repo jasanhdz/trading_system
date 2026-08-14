@@ -1,0 +1,199 @@
+schema_version: aegis-intrabar-wave-w3-preregistration-v1
+experiment_id: aegis-intrabar-wave-state-timing-w3-01
+registered_at_utc: '2026-08-14T12:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+integrity:
+  w1_artifacts_immutable: true
+  w2_artifacts_immutable: true
+  w1_holdout_access: PROHIBITED
+  w2_holdout_access: PROHIBITED
+  prior_validation_threshold_reuse: PROHIBITED
+  refutation_first: true
+
+data:
+  source: data/market_event_fast_track_m1a/full_run_01/cache
+  source_kind: BINANCE_USDM_CLOSED_1M_KLINES
+  minimum_source_coverage: ['2024-01-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  kline_taker_buy_quote_available: true
+  aggregate_trade_tick_history:
+    available: true
+    coverage: ['2025-08-01T00:00:00Z', '2026-08-01T00:00:00Z']
+    use_in_w3_selection: false
+    reason: OVERLAPS_W1_SELECTION_AND_SEALED_HOLDOUT_WINDOWS
+  order_book_history: NOT_AVAILABLE
+  synthetic_microstructure: PROHIBITED
+  closed_minutes_only: true
+  missing_minute_policy: DROP_EPISODE
+  forward_fill_policy: PROHIBITED
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  venue: BINANCE_USDM_PERPETUAL
+  context_intervals_minutes: [1, 5, 15]
+  btc_context_symbol: BTCUSDT
+
+partitions:
+  train: ['2024-01-08T00:00:00Z', '2024-07-01T00:00:00Z']
+  validation: ['2024-07-01T00:00:00Z', '2024-10-01T00:00:00Z']
+  final_holdout: ['2024-10-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 180
+  final_holdout_state: SEALED
+  final_holdout_outcomes_read: false
+  rationale: >-
+    TRAIN and VALIDATION use only the former W2 development population. W2
+    VALIDATION and both prior final holdouts remain outside W3 selection.
+
+anchor:
+  identity: W3-SHA256-SYMBOL-SIDE-IMPULSE-CLOSE
+  closed_5m_only: true
+  direction: FIVE_MINUTE_BODY_SIGN
+  minimum_volume_ratio_20: 1.25
+  minimum_absolute_body_atr: 0.10
+  atr_period_5m: 14
+  cooldown_minutes_symbol_side: 30
+  observation_offsets_minutes: [0, 1, 2, 3, 5, 8, 10]
+  role: WAVE_OBSERVATION_WINDOW_ONLY
+
+features:
+  causal_cutoff: CURRENT_CLOSED_1M_BAR
+  normalizer_fit: TRAIN_ONLY
+  groups:
+    - IMPULSE_STATE
+    - CURRENT_1M_PRICE_VOLUME_FLOW
+    - PULLBACK_STATE
+    - VELOCITY_AND_ACCELERATION
+    - TAKER_FLOW_RECOVERY
+    - MICROSTRUCTURE_1M
+    - FIVE_MINUTE_CONTEXT
+    - FIFTEEN_MINUTE_CONTEXT
+    - STRUCTURAL_DISTANCE
+    - BTC_CONTEXT
+  structure_lookback_minutes: 20
+  volume_lookback_minutes: 30
+  atr_context_minutes: 70
+  feature_schema: aegis-intrabar-wave-w3-features-v1
+
+economics:
+  base_round_trip_cost_bps: 14
+  stress_round_trip_cost_bps: [20, 30]
+  latency_sensitivity: NOT_IDENTIFIABLE_FROM_CLOSED_1M_DATA
+  execution_delay_minutes: 1
+  same_bar_barrier_order: ADVERSE_FIRST
+  leverage_in_objective: false
+  reentry: PROHIBITED
+  funding: ZERO_FOR_MAXIMUM_30_MINUTE_EPISODE_WITH_LIMITATION_RECORDED
+
+w3a_entry:
+  primary_contract:
+    favorable_atr: 0.50
+    adverse_atr: 0.25
+    horizon_minutes: 10
+  secondary_contracts:
+    - {favorable_atr: 0.40, adverse_atr: 0.25, horizon_minutes: 5}
+    - {favorable_atr: 0.60, adverse_atr: 0.40, horizon_minutes: 15}
+  decisions: [ENTER, WAIT, ABANDON]
+  baselines:
+    - IMPULSE_CLOSE
+    - WAIT_1_MINUTE
+    - IMPULSE_EXTREME_BREAK
+    - PULLBACK_025_TO_050
+    - NO_TRADE
+  model_families: [LOGISTIC_L2, HIST_GRADIENT_BOOSTING]
+  probability_thresholds: [0.55, 0.60, 0.65, 0.70]
+  selection: TRAIN_ONLY_MAX_NET_EXPECTANCY_THEN_LOWEST_MAE
+  validation_hypotheses: SIDE_X_SELECTED_POLICY
+
+w3b_exit:
+  entry_population: W3_ANCHOR_IMMEDIATE_NEXT_1M_OPEN
+  maximum_episode_minutes: 30
+  activation_peak_mfe_atr: 0.50
+  primary_target: GIVEBACK_025_ATR_BEFORE_NEW_MFE_025_ATR_WITHIN_3_MINUTES
+  decisions: [HOLD, EXIT]
+  baselines:
+    - BOUNDED_HOLD
+    - FIXED_TRAILING_025_ATR
+    - FIXED_TRAILING_050_ATR
+    - GIVEBACK_030
+    - GIVEBACK_050
+    - TIME_EXIT_3
+    - TIME_EXIT_5
+    - TIME_EXIT_10
+  model_families: [LOGISTIC_L2, HIST_GRADIENT_BOOSTING, DISCRETE_TIME_HAZARD_LOGISTIC]
+  probability_thresholds: [0.55, 0.60, 0.65, 0.70, 0.80]
+  regret_weights: {early_exit: 1.0, hold_too_long: 1.0}
+  selection: TRAIN_ONLY_MAX_NET_EXPECTANCY_THEN_CAPTURE
+  validation_hypotheses: SIDE_X_SELECTED_POLICY
+
+models:
+  logistic_l2: {C: 1.0, max_iter: 500}
+  hist_gradient_boosting:
+    learning_rate: 0.05
+    max_iter: 150
+    max_depth: 3
+    l2_regularization: 1.0
+  calibration: TRAIN_TEMPORAL_CALIBRATION_ONLY
+  temporal_fit_fraction: 0.80
+  random_seed: 318001
+  deep_learning: PROHIBITED
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: WAVE_EPISODE_BLOCKED_BY_UTC_DAY
+  bayesian_repetitions: 10000
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+  temporal_validation_folds: 4
+  minimum_validation_episodes_per_side: 1000
+  minimum_validation_episodes_per_symbol_side: 50
+
+w3a_gate:
+  minimum_net_expectancy_bps: 2.0
+  minimum_improvement_over_best_baseline_bps: 2.0
+  bootstrap_net_expectancy_lower_95_gt_bps: 0.0
+  bootstrap_improvement_lower_95_gt_bps: 0.0
+  minimum_profit_factor: 1.10
+  maximum_mean_mae_atr: 0.40
+  minimum_positive_symbols: 7
+  minimum_positive_temporal_folds: 3
+  require_20bps_cost_survival: true
+  maximum_symbol_share: 0.20
+
+w3b_gate:
+  minimum_net_improvement_over_best_baseline_bps: 2.0
+  minimum_median_capture_improvement: 0.05
+  bootstrap_net_improvement_lower_95_gt_bps: 0.0
+  bootstrap_capture_improvement_lower_95_gt: 0.0
+  minimum_positive_symbols: 7
+  minimum_positive_temporal_folds: 3
+  require_20bps_cost_survival: true
+  maximum_symbol_share: 0.20
+
+holdout_open_condition:
+  W3A: ALL_W3A_TRAIN_VALIDATION_GATES_PASS
+  W3B: ALL_W3B_TRAIN_VALIDATION_GATES_PASS
+
+gates:
+  W3A_ENTRY_EDGE_FOUND: false
+  W3A_MODELING_JUSTIFIED: false
+  W3A_READY_FOR_SHADOW: false
+  W3A_READY_FOR_LIVE: false
+  W3B_EXIT_EDGE_FOUND: false
+  W3B_MODELING_JUSTIFIED: false
+  W3B_READY_FOR_SHADOW: false
+  W3B_READY_FOR_LIVE: false
+  W3_INTRABAR_WAVE_EDGE_FOUND: false
+  W3_READY_FOR_SHADOW: false
+  W3_READY_FOR_LIVE: false
+
+safety:
+  authenticated_requests: 0
+  exchange_mutations: 0
+  production_changes: NONE
+  typescript_changes: NONE
+  websocket_changes: NONE
+  pm2_changes: NONE
