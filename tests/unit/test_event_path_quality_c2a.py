@@ -113,6 +113,28 @@ def test_economic_metrics_and_control_are_deterministic():
     assert interval["expectancy_lower_95"] == interval["expectancy_upper_95"]
 
 
+def test_symbol_local_matching_equals_pooled_matching():
+    population = pd.DataFrame({
+        "event_timestamp_ms": [
+            1_000_000 + index * 60_000 for index in range(20)
+        ] * 2,
+        "symbol": ["ADAUSDT"] * 20 + ["AVAXUSDT"] * 20,
+        "side": ["LONG"] * 40,
+        "utility": list(range(20)) * 2,
+    })
+    selected = population.iloc[[1, 5, 21, 25]].copy()
+    pooled = deterministic_matched_control(population, selected)
+    local = pd.concat([
+        deterministic_matched_control(
+            population.loc[population.symbol.eq(symbol)],
+            selected.loc[selected.symbol.eq(symbol)],
+        )
+        for symbol in ("ADAUSDT", "AVAXUSDT")
+    ], ignore_index=True)
+    columns = ["symbol", "side", "event_timestamp_ms"]
+    assert pooled[columns].to_dict("records") == local[columns].to_dict("records")
+
+
 def test_chunked_archive_reader_is_equivalent_to_canonical_reader(tmp_path):
     path = tmp_path / "ADAUSDT-aggTrades-2026-07.zip"
     payload = (

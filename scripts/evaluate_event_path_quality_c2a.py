@@ -4,13 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import ctypes
+import gc
 import json
 import math
+import multiprocessing
 import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
 
@@ -39,6 +45,17 @@ def _timestamp(value: str) -> int:
     return int(pd.Timestamp(value).timestamp() * 1_000)
 
 
+def _release_native_memory() -> None:
+    """Return Arrow/libc caches between large, independent symbol scans."""
+
+    gc.collect()
+    pa.default_memory_pool().release_unused()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (AttributeError, OSError):
+        pass
+
+
 def _partition_bounds(config: dict[str, Any], open_holdout: bool) -> dict[str, tuple[int, int]]:
     result = {}
     for name in ("train", "validation", "final_holdout"):
@@ -47,6 +64,38 @@ def _partition_bounds(config: dict[str, Any], open_holdout: bool) -> dict[str, t
         start, end = config["partitions"][name]
         result[name] = (_timestamp(start), _timestamp(end))
     return result
+
+
+def _write_symbol_fragments(
+    symbol: str,
+    dataset_root: Path,
+    config: dict[str, Any],
+    bounds: dict[str, tuple[int, int]],
+    cooldown: int,
+    projected_columns: tuple[str, ...],
+    temp_root: Path,
+) -> None:
+    path = dataset_root / f"{symbol}.parquet"
+    frame = pd.read_parquet(path, columns=projected_columns)
+    for name, (start, end) in bounds.items():
+        population = frame.loc[
+            frame.event_timestamp_ms.ge(start) & frame.event_timestamp_ms.lt(end)
+        ].copy()
+        events = collapse_registered_events(
+            detect_registered_events(population, config), cooldown
+        )
+        if not events.empty:
+            events.to_parquet(temp_root / f"{name}-{symbol}-events.parquet", index=False)
+            controls = pd.concat([
+                deterministic_matched_control(population, selected).assign(
+                    event_family=family
+                )
+                for family, selected in events.groupby("event_family", sort=True)
+            ], ignore_index=True)
+            controls.to_parquet(
+                temp_root / f"{name}-{symbol}-controls.parquet", index=False
+            )
+    print(json.dumps({"symbol": symbol, "state": "EVALUATED"}), flush=True)
 
 
 def main() -> int:
@@ -72,8 +121,6 @@ def main() -> int:
     config = yaml.safe_load(config_path.read_text())
     bounds = _partition_bounds(config, args.open_final_holdout)
     cooldown = int(config["evidence_gate"]["event_cooldown_minutes"])
-    events_by_partition: dict[str, list[pd.DataFrame]] = {name: [] for name in bounds}
-    population_by_partition: dict[str, list[pd.DataFrame]] = {name: [] for name in bounds}
     dataset_hashes = {}
     first_path = dataset_root / f"{CANONICAL_SYMBOLS[0]}.parquet"
     available_columns = tuple(pq.read_schema(first_path).names)
@@ -86,48 +133,84 @@ def main() -> int:
         "side_flow_persistence_5m", "side_price_response_1m",
     )
     projected_columns = (*detector_columns, *utility_columns)
-    for symbol in CANONICAL_SYMBOLS:
-        path = dataset_root / f"{symbol}.parquet"
-        frame = pd.read_parquet(path, columns=projected_columns)
-        dataset_hashes[symbol] = sha256_file(path)
-        for name, (start, end) in bounds.items():
-            population = frame.loc[
-                frame.event_timestamp_ms.ge(start) & frame.event_timestamp_ms.lt(end)
-            ].copy()
-            population_by_partition[name].append(population)
-            events = collapse_registered_events(
-                detect_registered_events(population, config), cooldown
-            )
-            events_by_partition[name].append(events)
-        print(json.dumps({"symbol": symbol, "state": "EVALUATED"}), flush=True)
-
-    results = {}
     contracts = sorted(
         column.removesuffix("_net_utility") for column in utility_columns
     )
-    for partition in bounds:
-        population = pd.concat(population_by_partition[partition], ignore_index=True)
-        events = pd.concat(events_by_partition[partition], ignore_index=True)
-        partition_result = {}
-        for (family, side), selected in events.groupby(["event_family", "side"], sort=True):
-            group_result = {}
-            matched = deterministic_matched_control(population, selected)
-            for contract in contracts:
-                utility = f"{contract}_net_utility"
-                event_summary = economic_summary(selected, utility)
-                control_summary = economic_summary(matched, utility)
-                interval = day_cluster_bootstrap(selected, utility)
-                group_result[contract] = {
-                    "selected": event_summary,
-                    "matched_random": control_summary,
-                    "bootstrap": interval,
-                    "outperforms_matched_random": (
-                        float(event_summary["net_expectancy"])
-                        > float(control_summary["net_expectancy"])
-                    ),
-                }
-            partition_result[f"{family}:{side}"] = group_result
-        results[partition] = partition_result
+    families = tuple(config["event_detectors"])
+    sides = ("LONG", "SHORT")
+    results = {}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="c2a-evaluation-", dir=output.parent) as temp:
+        temp_root = Path(temp)
+        fragments: dict[str, dict[str, list[Path]]] = {
+            name: {"events": [], "controls": []} for name in bounds
+        }
+        process_context = multiprocessing.get_context("spawn")
+        for symbol in CANONICAL_SYMBOLS:
+            path = dataset_root / f"{symbol}.parquet"
+            dataset_hashes[symbol] = sha256_file(path)
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=3, mp_context=process_context
+        ) as executor:
+            futures = {
+                executor.submit(
+                    _write_symbol_fragments, symbol, dataset_root, config,
+                    bounds, cooldown, projected_columns, temp_root,
+                ): symbol
+                for symbol in CANONICAL_SYMBOLS
+            }
+            for future in concurrent.futures.as_completed(futures):
+                symbol = futures[future]
+                try:
+                    future.result()
+                except Exception as error:
+                    raise RuntimeError(
+                        f"AEGIS_C2A_SYMBOL_EVALUATION_FAILED:{symbol}"
+                    ) from error
+
+        for partition in bounds:
+            fragments[partition]["events"] = sorted(
+                temp_root.glob(f"{partition}-*-events.parquet")
+            )
+            fragments[partition]["controls"] = sorted(
+                temp_root.glob(f"{partition}-*-controls.parquet")
+            )
+
+        metric_columns = ["event_timestamp_ms", "event_family", "side", *utility_columns]
+        for partition in bounds:
+            partition_result = {}
+            for family in families:
+                for side in sides:
+                    filters = [("event_family", "==", family), ("side", "==", side)]
+                    selected = pd.read_parquet(
+                        fragments[partition]["events"], columns=metric_columns,
+                        filters=filters,
+                    )
+                    if selected.empty:
+                        continue
+                    matched = pd.read_parquet(
+                        fragments[partition]["controls"], columns=metric_columns,
+                        filters=filters,
+                    )
+                    group_result = {}
+                    for contract in contracts:
+                        utility = f"{contract}_net_utility"
+                        event_summary = economic_summary(selected, utility)
+                        control_summary = economic_summary(matched, utility)
+                        interval = day_cluster_bootstrap(selected, utility)
+                        group_result[contract] = {
+                            "selected": event_summary,
+                            "matched_random": control_summary,
+                            "bootstrap": interval,
+                            "outperforms_matched_random": (
+                                float(event_summary["net_expectancy"])
+                                > float(control_summary["net_expectancy"])
+                            ),
+                        }
+                    partition_result[f"{family}:{side}"] = group_result
+                    del selected, matched
+                    _release_native_memory()
+            results[partition] = partition_result
 
     validation = results.get("validation", {})
     validation_pass = bool(validation) and any(
