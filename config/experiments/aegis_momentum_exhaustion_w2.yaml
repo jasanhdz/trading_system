@@ -1,0 +1,185 @@
+schema_version: aegis-momentum-exhaustion-w2-preregistration-v1
+experiment_id: aegis-momentum-exhaustion-profit-retention-w2-01
+registered_at_utc: '2026-08-14T07:30:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+hypothesis:
+  statement: >-
+    After a position has reached a material favorable excursion, causal decay
+    in velocity, favorable-extreme formation, taker flow, volume, structure,
+    multi-timeframe context and retracement predicts economically significant
+    additional giveback well enough to improve profit retention over frozen
+    simple and current-mechanical exit baselines.
+  primary_question: IS_EXPECTED_HOLD_VALUE_GREATER_THAN_EXIT_NOW_VALUE
+  forbidden_interpretations:
+    - W1_ENTRY_EDGE
+    - FULL_REVERSAL_PREDICTION
+    - CLASSIFICATION_ACCURACY_IS_ECONOMIC_EDGE
+
+populations:
+  actual:
+    source: AEGIS_TURBO_HISTORY_TRADE_ID_EPISODES
+    outcome_source: ACTUAL
+    role: AUDIT_ONLY_SEALED_OUTCOME_POPULATION
+    discovered_complete_episodes: 706
+    manual_intervention_possible: true
+    training_allowed: false
+  simulated:
+    source: MARKET_EVENT_FAST_TRACK_M1A_INDEPENDENT_CANDIDATES
+    outcome_source: SIMULATED
+    role: PRIMARY_RESEARCH_POPULATION
+    entry: NEXT_COMPLETE_1M_OPEN
+    maximum_episode_minutes: 480
+    non_overlap_cooldown_minutes_by_symbol_side: 480
+    one_position_one_final_exit: true
+  shadow:
+    outcome_source: SHADOW
+    role: FUTURE_ONLY_IF_GATE_PASSES
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  venue: BINANCE_USDM_PERPETUAL
+  decision_interval_minutes: 5
+
+data:
+  minute_source: data/market_event_fast_track_m1a/full_run_01/cache
+  candidate_source: data/market_event_fast_track_m1a/full_run_01/independent_candidates.parquet
+  actual_trade_source: binance-futures-bot-ts/logs/aegis/turbo_trades_*.jsonl
+  closed_data_only: true
+  future_fill: PROHIBITED
+  synthetic_zero: PROHIBITED
+  outcome_source_required: true
+  episode_identity: W2-SHA256-SYMBOL-SIDE-ENTRY_TIMESTAMP
+
+partitions:
+  train: ['2024-01-08T00:00:00Z', '2024-10-01T00:00:00Z']
+  validation: ['2024-10-01T00:00:00Z', '2025-04-01T00:00:00Z']
+  final_holdout: ['2025-04-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 480
+  final_holdout_state: SEALED
+  repeated_holdout_selection: PROHIBITED
+
+profit_activation_gates_atr: [0.25, 0.50, 0.75, 1.00]
+
+targets:
+  horizon_bars_5m: [1, 2, 3]
+  absolute_giveback_atr: 0.25
+  percentage_giveback_levels: [0.25, 0.40, 0.60]
+  new_favorable_extreme_atr: 0.25
+  outputs:
+    - GIVEBACK_NEXT_HORIZON
+    - PERCENTAGE_GIVEBACK_BEFORE_NEW_EXTREME
+    - NEW_EXTREME_BEFORE_ABSOLUTE_GIVEBACK
+    - EXPECTED_ADDITIONAL_MFE
+    - EXPECTED_FUTURE_GIVEBACK
+  primary_target: GIVEBACK_025_ATR_BEFORE_NEW_MFE_025_ATR_WITHIN_3_BARS
+  same_bar_order: GIVEBACK_FIRST
+
+features:
+  groups:
+    - PEAK_MFE_STATE
+    - TIME_SINCE_PEAK
+    - NEW_EXTREME_FAILURE
+    - VELOCITY_AND_ACCELERATION
+    - VOLUME_BEHAVIOR
+    - DIRECTIONAL_TAKER_FLOW
+    - OPPOSITE_CANDLE_PRESSURE
+    - RETRACEMENT
+    - MARKET_STRUCTURE
+    - MOVING_AVERAGE_CONTEXT
+    - RSI_CONTEXT
+    - ATR_REGIME
+    - FIVE_MINUTE_CONTEXT
+    - FIFTEEN_MINUTE_CONTEXT
+    - BTC_CONTEXT
+  volume_ratio_over_4_diagnostic_only: true
+  sar: NOT_AVAILABLE_IN_FROZEN_SOURCE_V1
+  aggregate_trade_delta: TAKER_QUOTE_PROXY_ONLY
+  one_hour_context: DEFERRED_W2_1
+
+baselines:
+  A_ACTUAL_EXISTING_EXIT:
+    population: ACTUAL_ONLY
+    exactness: OBSERVED_NOT_REPLAYED
+  B_FIXED_TP_ATR: [0.25, 0.50, 0.75, 1.00, 1.50]
+  C_FIXED_TRAILING_ATR: [0.15, 0.25, 0.40, 0.60, 1.00]
+  D_PEAK_GIVEBACK_FRACTION: [0.20, 0.30, 0.40, 0.50, 0.60]
+  E_TIME_EXIT_BARS_AFTER_GATE: [1, 2, 3, 4, 6, 8, 12]
+  F_CURRENT_ATR_TRAILING:
+    activation_roe: 0.15
+    leverage: 20
+    atr_multiplier: 1.5
+    source: TradingService_and_ProfitGuardian
+  G_CURRENT_BREAK_EVEN_PROTECTION:
+    break_even_trigger_roe: 0.08
+    break_even_offset_underlying_fraction: 0.003
+    protect_peak_roe: 0.08
+    protect_giveback_roe: 0.05
+    minimum_locked_roe: 0.01
+    leverage: 20
+    source: regime_config.live.yaml_and_TradingService
+  common_hard_stop_underlying_fraction: 0.02
+  bounded_hold_minutes: 480
+
+models:
+  families:
+    - INTERPRETABLE_SCORE
+    - LOGISTIC_L2
+    - HIST_GRADIENT_BOOSTING
+    - RANDOM_FOREST
+    - DISCRETE_TIME_HAZARD_LOGISTIC
+  probability_calibration: TRAIN_TEMPORAL_CALIBRATION_ONLY
+  model_selection: TRAIN_ONLY
+  policy_probability_thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  random_seeds: [182001]
+  no_deep_learning: true
+
+economics:
+  base_round_trip_cost_bps: 14
+  stress_round_trip_cost_bps: [20, 30]
+  funding: INCLUDE_WHEN_AVAILABLE_ELSE_ZERO_WITH_EXPLICIT_FLAG
+  reentry: NOT_MODELED
+  leverage_in_objective: false
+  primary_objective: NET_RETURN_AND_PROFIT_CAPTURE_RATIO
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: POSITION_EPISODE_BLOCKED_BY_ENTRY_DAY
+  bayesian_repetitions: 10000
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+  minimum_validation_episodes_per_side: 1000
+  minimum_validation_episodes_per_symbol_side: 50
+
+gate:
+  minimum_median_profit_capture_improvement: 0.10
+  maximum_net_expectancy_noninferiority_bps: 2.0
+  minimum_positive_symbols: 7
+  minimum_positive_walk_forward_folds: 3
+  required_walk_forward_folds: 4
+  require_capture_improvement_ci_lower_positive: true
+  require_net_noninferiority_ci_lower: true
+  require_20bps_cost_survival: true
+  require_outperform_best_simple_baseline: true
+  require_outperform_current_mechanical_baselines: true
+  maximum_symbol_share: 0.20
+  holdout_open_condition: ALL_TRAIN_VALIDATION_GATES_PASS
+
+gates:
+  W2_DATA_READY: false
+  W2_RULE_EDGE_FOUND: false
+  W2_MODELING_JUSTIFIED: false
+  W2_READY_FOR_SHADOW: false
+  W2_READY_FOR_LIVE: false
+
+safety:
+  authenticated_requests: 0
+  exchange_mutations: 0
+  credentials_loaded: false
+  websocket_changes: NONE
+  pm2_changes: NONE
+  production_changes: NONE
