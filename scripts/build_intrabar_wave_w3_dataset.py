@@ -370,6 +370,11 @@ def _build_symbol(symbol: str, source_root: Path, output_root: Path, config: dic
             continue
         for path_index in range(int(gate_indices[0]), 29):
             decision_index = anchor_index + 1 + path_index
+            execution_open = float(minutes.iloc[decision_index + 1].open)
+            execution_return = (
+                execution_open / entry_price - 1.0
+                if direction > 0 else 1.0 - execution_open / entry_price
+            )
             features = _state_features(minutes, btc, decision_index, anchor_index, anchor, direction, c5, c15)
             if not all(np.isfinite(features[name]) for name in W3_FEATURE_COLUMNS):
                 continue
@@ -390,6 +395,7 @@ def _build_symbol(symbol: str, source_root: Path, output_root: Path, config: dic
                 "episode_minute": path_index + 1,
                 "entry_price": entry_price,
                 "current_favorable_return": current,
+                "exit_execution_return": execution_return,
                 "peak_mfe": peak_now,
                 "giveback": max(0.0, peak_now - current),
                 "giveback_ratio": safe_ratio(max(0.0, peak_now - current), peak_now),
