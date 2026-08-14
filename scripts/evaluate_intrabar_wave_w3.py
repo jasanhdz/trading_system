@@ -344,6 +344,7 @@ def _evaluate_study_side(
         train_baselines.items(), key=lambda item: (summarize_returns(item[1])["net_expectancy"], item[0])
     )
     candidates = []
+    candidate_registry = []
     validation_probabilities = {}
     for model_name, model in models.items():
         select_probability = model.predict(selection_rows)
@@ -353,6 +354,9 @@ def _evaluate_study_side(
             train_policy = policy(selection_rows, selection_episodes, pd.Series(select_probability >= threshold, index=selection_rows.index), cost)
             metrics = summarize_returns(train_policy)
             candidates.append((metrics["net_expectancy"], -metrics["mean_mae_atr"], model_name, float(threshold), train_policy, metrics))
+            candidate_registry.append({
+                "model": model_name, "threshold": float(threshold), "metrics": metrics,
+            })
     _, _, selected_model_name, selected_threshold, selected_train, selected_train_metrics = max(candidates)
     selected_model = models[selected_model_name]
     selected_probability = validation_probabilities[selected_model_name]
@@ -400,6 +404,17 @@ def _evaluate_study_side(
     ])
     blockers.extend(reason for passed, reason in checks if not passed)
     validation_calibration = _calibration_metrics(validation.target_binary.to_numpy(dtype=int), selected_probability)
+    validation_baseline_summary = {
+        name: summarize_returns(frame) for name, frame in validation_baselines.items()
+    }
+    offset_summary = None
+    if study == "W3A":
+        offset_summary = {
+            str(offset): summarize_returns(_entry_policy(
+                validation, validation["offset_minutes"].eq(offset), cost
+            ))
+            for offset in config["anchor"]["observation_offsets_minutes"]
+        }
     return ({
         "study": study, "side": side,
         "train_decision_rows": len(train), "selection_decision_rows": len(selection_rows),
@@ -407,6 +422,9 @@ def _evaluate_study_side(
         "selected_model": selected_model_name, "selected_threshold": selected_threshold,
         "best_train_baseline": baseline_name,
         "selected_train_metrics": selected_train_metrics,
+        "train_candidate_registry": candidate_registry,
+        "validation_baseline_summary": validation_baseline_summary,
+        "validation_offset_diagnostic_not_for_selection": offset_summary,
         "validation_metrics": selected_metrics, "validation_baseline_metrics": baseline_metrics,
         "net_improvement_bps": improvement_bps,
         "bootstrap": bootstrap, "temporal_validation": temporal,
