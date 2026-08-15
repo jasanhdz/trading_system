@@ -1,0 +1,125 @@
+schema_version: aegis-entry-safety-gate-w11-v1
+experiment_id: AEGIS_W11_ENTRY_SAFETY_GATE_CONFIRMATION_TIMING
+scope: PYTHON_OFFLINE_HISTORICAL_RESEARCH_ONLY
+seed: 20260815
+
+sources:
+  entry_csv: reports/governance/aegis_prospective_validation/live/live_entry_quality_audit_20260815/live_entry_classification.csv
+  logs_dir: binance-futures-bot-ts/logs/aegis
+  candle_dir: data/live_entry_quality_audit_20260815/candles_1m
+  timeframes_minutes: [1, 5, 15, 60]
+
+splits:
+  train_end_exclusive: 2026-07-01T00:00:00Z
+  validation_end_exclusive: 2026-08-01T00:00:00Z
+  final_holdout_start: 2026-08-01T00:00:00Z
+  final_holdout_status: SEALED_NOT_OPENED
+
+counterfactual:
+  delays_minutes: [0, 1, 2, 3]
+  primary_horizon_minutes: 60
+  diagnostic_horizons_minutes: [15, 30, 60]
+  favorable_barrier_bps: 30.0
+  adverse_barrier_bps: 20.0
+  secondary_barriers_bps:
+    - [25.0, 20.0]
+    - [50.0, 30.0]
+  same_bar_resolution: ADVERSE_FIRST
+  delayed_fill: OPEN_AT_OR_AFTER_DECISION_BOUNDARY
+  baseline_fill: RECORDED_LIVE_ENTRY_PRICE
+  baseline_cost_bps: 14.0
+  stress_cost_bps: 20.0
+  minimum_material_improvement_bps_per_signal: 2.0
+
+features:
+  exhaustion:
+    suffixes:
+      - prior_move_6_atr
+      - ema25_extension_atr
+      - ema99_extension_atr
+      - trend_age
+      - rsi6_extension
+      - rsi12_extension
+      - rsi24_extension
+      - volume_ratio20
+      - volume_z50
+  opposition:
+    suffixes:
+      - return_1_bps
+      - return_3_bps
+      - return_6_bps
+      - taker_imbalance
+      - ema7_slope_atr
+      - ema25_slope_atr
+      - directional_clv
+      - aligned_breakout
+      - opposed_breakout
+  space:
+    suffixes:
+      - favorable_space_atr
+      - adverse_space_atr
+      - range_48_atr
+  volatility:
+    suffixes:
+      - atr_pct_bps
+      - atr_percentile_96
+      - body_ratio
+      - volume_ratio20
+      - volume_z50
+      - path_efficiency_6
+  confirmation_extra:
+    - confirmation_directional_move_bps
+    - confirmation_taker_change
+    - confirmation_atr_change
+    - confirmation_volume_change
+
+models:
+  specialized_type: REGULARIZED_LOGISTIC
+  timing_type: RIDGE_REGRESSION
+  logistic_c: 0.25
+  ridge_alpha: 10.0
+  risk_threshold_grid: [0.55, 0.65, 0.75, 0.85]
+  minimum_train_executed: 75
+  minimum_train_skipped: 25
+
+policy:
+  reason_priority:
+    - SKIP_OPPOSED
+    - SKIP_EXHAUSTED
+    - SKIP_NO_SPACE
+    - SKIP_VOLATILITY_SHOCK
+  actions:
+    - ENTER_NOW
+    - WAIT_1M
+    - WAIT_2M
+    - WAIT_3M
+    - SKIP
+  minimum_predicted_net_bps: 2.0
+
+validation_gates:
+  minimum_episodes: 100
+  minimum_executed: 35
+  minimum_execution_coverage: 0.15
+  maximum_execution_coverage: 0.90
+  minimum_net_expectancy_bps_per_signal: 0.0
+  minimum_improvement_bps_per_signal: 2.0
+  minimum_bad_avoidance: 0.20
+  minimum_good_retention: 0.50
+  minimum_symbols_executed: 4
+  maximum_single_symbol_trade_fraction: 0.60
+  bootstrap_samples: 10000
+  confidence_level: 0.95
+  require_improvement_ci_lower_above_zero: true
+  require_positive_stress_expectancy: true
+
+restrictions:
+  production_modified: false
+  typescript_modified: false
+  brain_modified: false
+  guards_modified: false
+  leverage_modified: false
+  pm2_modified: false
+  authenticated_api_used: false
+  orders_sent: false
+  shadow_enabled: false
+  live_enabled: false

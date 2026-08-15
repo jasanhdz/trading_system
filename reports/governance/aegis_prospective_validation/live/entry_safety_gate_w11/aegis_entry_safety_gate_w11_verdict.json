@@ -1,0 +1,994 @@
+{
+  "dataset": {
+    "candidate_rows": 2452,
+    "train_episodes": 437,
+    "validation_episodes": 176
+  },
+  "feature_family_counts": {
+    "confirmation": 284,
+    "exhaustion": 104,
+    "opposition": 120,
+    "space": 24,
+    "volatility": 48
+  },
+  "flags": {
+    "W11_CONFIRMATION_TIMING_VALUE_FOUND": false,
+    "W11_ENTRY_SAFETY_EDGE_FOUND": false,
+    "W11_EXHAUSTION_FILTER_VALUE_FOUND": false,
+    "W11_MODELING_JUSTIFIED": false,
+    "W11_OPPOSITION_FILTER_VALUE_FOUND": false,
+    "W11_PATH_ORDER_RECONSTRUCTION_VALID": true,
+    "W11_READY_FOR_LIVE": false,
+    "W11_READY_FOR_PROSPECTIVE_OBSERVATION": false,
+    "W11_READY_FOR_SHADOW": false,
+    "W11_SPACE_FILTER_VALUE_FOUND": false,
+    "W11_VOLATILITY_FILTER_VALUE_FOUND": false
+  },
+  "frozen_risk_thresholds": {
+    "exhaustion": 0.55,
+    "opposition": 0.55,
+    "space": 0.55,
+    "volatility": 0.55
+  },
+  "holdout": {
+    "opened": false,
+    "reason": "validation_gate_failed",
+    "status": "SEALED_NOT_OPENED"
+  },
+  "limitations": [
+    "W11 VALIDATION contains 176 SHORT and zero LONG signals, so directional transfer to LONG is untested.",
+    "Diagnostic reason attribution is model-generated and is not a proven causal taxonomy.",
+    "Only closed 1m/5m/15m/1h candles are available; sub-minute confirmation cannot be reconstructed."
+  ],
+  "path_order_train_validation": [
+    {
+      "adverse_first_rate": 0.78125,
+      "entry_class": "BAD_ENTRY",
+      "episodes": 128,
+      "favorable_first_rate": 0.1875,
+      "mae_before_mfe_rate": 0.2421875,
+      "median_mae_bps": 90.78037835251462,
+      "median_mfe_bps": 18.99189323806727,
+      "median_net_60m_bps": -61.14052946562575,
+      "mfe_before_mae_rate": 0.7578125,
+      "neither_rate": 0.03125
+    },
+    {
+      "adverse_first_rate": 0.3492063492063492,
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 315,
+      "favorable_first_rate": 0.5968253968253968,
+      "mae_before_mfe_rate": 0.7428571428571429,
+      "median_mae_bps": 18.40739774473299,
+      "median_mfe_bps": 58.02146794313789,
+      "median_net_60m_bps": 14.74743326488516,
+      "mfe_before_mae_rate": 0.2571428571428571,
+      "neither_rate": 0.05396825396825397
+    },
+    {
+      "adverse_first_rate": 0.7470588235294118,
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 170,
+      "favorable_first_rate": 0.16470588235294117,
+      "mae_before_mfe_rate": 0.3941176470588235,
+      "median_mae_bps": 51.241156250032006,
+      "median_mfe_bps": 24.144916857429813,
+      "median_net_60m_bps": -29.319505552063852,
+      "mfe_before_mae_rate": 0.6058823529411764,
+      "neither_rate": 0.08823529411764706
+    }
+  ],
+  "restrictions_verified": {
+    "authenticated_api_used": false,
+    "brain_modified": false,
+    "guards_modified": false,
+    "leverage_modified": false,
+    "live_enabled": false,
+    "orders_sent": false,
+    "pm2_modified": false,
+    "production_modified": false,
+    "shadow_enabled": false,
+    "typescript_modified": false
+  },
+  "schema_version": "aegis-entry-safety-gate-w11-verdict-v1",
+  "status": "AEGIS_W11_NO_ROBUST_ENTRY_SAFETY_EDGE",
+  "train_detector_audits": {
+    "exhaustion": {
+      "actions": {
+        "ENTER_NOW": 230,
+        "SKIP_EXHAUSTED": 207
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.5652173913043478,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 230,
+      "execution_coverage": 0.5263157894736842,
+      "good_retention": 0.6351931330472103,
+      "gross_bps_per_signal": 10.619049043267417,
+      "gross_bps_per_trade": 20.176193182208095,
+      "historical_bad_improved_to_positive": 0.08695652173913043,
+      "improvement_bps_per_signal": 15.97171189227754,
+      "long_executed": 117,
+      "maximum_single_symbol_trade_fraction": 0.14782608695652175,
+      "median_mae_bps": 21.328457968672332,
+      "median_mfe_bps": 49.55903698213526,
+      "median_mfe_mae_ratio": 2.713518099547384,
+      "missed_or_delayed_gross_bps_per_signal": 9.340132944909119,
+      "mixed_retention": 0.375,
+      "net_bps_per_signal": 3.25062799063584,
+      "net_bps_per_trade": 6.176193182208095,
+      "profit_factor": 1.280133673251333,
+      "reasons": {
+        "SKIP_EXHAUSTED": 207
+      },
+      "short_executed": 113,
+      "skipped": 207,
+      "symbols_executed": 11,
+      "win_rate": 0.5869565217391305
+    },
+    "opposition": {
+      "actions": {
+        "ENTER_NOW": 210,
+        "SKIP_OPPOSED": 227
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.6413043478260869,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 210,
+      "execution_coverage": 0.4805491990846682,
+      "good_retention": 0.5836909871244635,
+      "gross_bps_per_signal": 10.707452082849242,
+      "gross_bps_per_trade": 22.28169790573866,
+      "historical_bad_improved_to_positive": 0.07608695652173914,
+      "improvement_bps_per_signal": 16.70084719730559,
+      "long_executed": 97,
+      "maximum_single_symbol_trade_fraction": 0.16666666666666666,
+      "median_mae_bps": 19.872298270080524,
+      "median_mfe_bps": 49.01340759840167,
+      "median_mfe_mae_ratio": 2.6624649859943323,
+      "missed_or_delayed_gross_bps_per_signal": 9.428535984490942,
+      "mixed_retention": 0.36607142857142855,
+      "net_bps_per_signal": 3.9797632956638873,
+      "net_bps_per_trade": 8.281697905738662,
+      "profit_factor": 1.4215019734089,
+      "reasons": {
+        "SKIP_OPPOSED": 227
+      },
+      "short_executed": 113,
+      "skipped": 227,
+      "symbols_executed": 11,
+      "win_rate": 0.5857142857142857
+    },
+    "space": {
+      "actions": {
+        "ENTER_NOW": 287,
+        "SKIP_NO_SPACE": 150
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.391304347826087,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 287,
+      "execution_coverage": 0.6567505720823799,
+      "good_retention": 0.7081545064377682,
+      "gross_bps_per_signal": 2.2476556064249418,
+      "gross_bps_per_trade": 3.422388501768989,
+      "historical_bad_improved_to_positive": 0.08695652173913043,
+      "improvement_bps_per_signal": 5.774231498913324,
+      "long_executed": 134,
+      "maximum_single_symbol_trade_fraction": 0.14982578397212543,
+      "median_mae_bps": 34.174014079693116,
+      "median_mfe_bps": 44.347685857120126,
+      "median_mfe_mae_ratio": 1.4651162790697834,
+      "missed_or_delayed_gross_bps_per_signal": 0.9687395080666422,
+      "mixed_retention": 0.5892857142857143,
+      "net_bps_per_signal": -6.946852402728377,
+      "net_bps_per_trade": -10.577611498231011,
+      "profit_factor": 0.6753540233110186,
+      "reasons": {
+        "SKIP_NO_SPACE": 150
+      },
+      "short_executed": 153,
+      "skipped": 150,
+      "symbols_executed": 11,
+      "win_rate": 0.47735191637630664
+    },
+    "volatility": {
+      "actions": {
+        "ENTER_NOW": 232,
+        "SKIP_VOLATILITY_SHOCK": 205
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.6630434782608695,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 232,
+      "execution_coverage": 0.5308924485125858,
+      "good_retention": 0.6223175965665236,
+      "gross_bps_per_signal": 9.15334746955209,
+      "gross_bps_per_trade": 17.24143467325113,
+      "historical_bad_improved_to_positive": 0.07608695652173914,
+      "improvement_bps_per_signal": 14.441937092017588,
+      "long_executed": 107,
+      "maximum_single_symbol_trade_fraction": 0.13793103448275862,
+      "median_mae_bps": 19.970784663250196,
+      "median_mfe_bps": 40.88111151889062,
+      "median_mfe_mae_ratio": 2.0550691244240538,
+      "missed_or_delayed_gross_bps_per_signal": 7.874431371193789,
+      "mixed_retention": 0.5,
+      "net_bps_per_signal": 1.7208531903758875,
+      "net_bps_per_trade": 3.241434673251133,
+      "profit_factor": 1.1511409059266702,
+      "reasons": {
+        "SKIP_VOLATILITY_SHOCK": 205
+      },
+      "short_executed": 125,
+      "skipped": 205,
+      "symbols_executed": 11,
+      "win_rate": 0.5129310344827587
+    }
+  },
+  "train_metrics": {
+    "baseline": {
+      "actions": {
+        "ENTER_NOW": 437
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.0,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 437,
+      "execution_coverage": 1.0,
+      "good_retention": 1.0,
+      "gross_bps_per_signal": 1.2789160983582988,
+      "gross_bps_per_trade": 1.2789160983582988,
+      "historical_bad_improved_to_positive": 0.13043478260869565,
+      "improvement_bps_per_signal": 0.0,
+      "long_executed": 188,
+      "maximum_single_symbol_trade_fraction": 0.15102974828375287,
+      "median_mae_bps": 31.809145129224614,
+      "median_mfe_bps": 37.55767786243203,
+      "median_mfe_mae_ratio": 1.2428571428571409,
+      "missed_or_delayed_gross_bps_per_signal": 0.0,
+      "mixed_retention": 1.0,
+      "net_bps_per_signal": -12.721083901641702,
+      "net_bps_per_trade": -12.721083901641702,
+      "profit_factor": 0.6099943113280124,
+      "reasons": {},
+      "short_executed": 249,
+      "skipped": 0,
+      "symbols_executed": 11,
+      "win_rate": 0.4233409610983982
+    },
+    "combined": {
+      "actions": {
+        "ENTER_NOW": 15,
+        "SKIP_EXHAUSTED": 63,
+        "SKIP_LOW_EXPECTED_VALUE": 15,
+        "SKIP_NO_SPACE": 31,
+        "SKIP_OPPOSED": 216,
+        "SKIP_VOLATILITY_SHOCK": 21,
+        "WAIT_1M": 25,
+        "WAIT_2M": 24,
+        "WAIT_3M": 27
+      },
+      "average_confirmation_delay_minutes": 1.6923076923076923,
+      "bad_avoidance": 0.967391304347826,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 91,
+      "execution_coverage": 0.20823798627002288,
+      "good_retention": 0.3218884120171674,
+      "gross_bps_per_signal": 11.715912993114717,
+      "gross_bps_per_trade": 56.26213162627618,
+      "historical_bad_improved_to_positive": 0.03260869565217391,
+      "improvement_bps_per_signal": 21.521665086976103,
+      "long_executed": 46,
+      "maximum_single_symbol_trade_fraction": 0.14285714285714285,
+      "median_mae_bps": 11.378721790250568,
+      "median_mfe_bps": 79.09240569751508,
+      "median_mfe_mae_ratio": 7.416666666666708,
+      "missed_or_delayed_gross_bps_per_signal": 10.43699689475642,
+      "mixed_retention": 0.11607142857142858,
+      "net_bps_per_signal": 8.800581185334398,
+      "net_bps_per_trade": 42.26213162627618,
+      "profit_factor": 9.593750354802141,
+      "reasons": {
+        "SKIP_EXHAUSTED": 63,
+        "SKIP_LOW_EXPECTED_VALUE": 15,
+        "SKIP_NO_SPACE": 31,
+        "SKIP_OPPOSED": 216,
+        "SKIP_VOLATILITY_SHOCK": 21
+      },
+      "short_executed": 45,
+      "skipped": 346,
+      "symbols_executed": 11,
+      "win_rate": 0.8791208791208791
+    },
+    "combined_stress_20bps": {
+      "actions": {
+        "ENTER_NOW": 15,
+        "SKIP_EXHAUSTED": 63,
+        "SKIP_LOW_EXPECTED_VALUE": 15,
+        "SKIP_NO_SPACE": 31,
+        "SKIP_OPPOSED": 216,
+        "SKIP_VOLATILITY_SHOCK": 21,
+        "WAIT_1M": 25,
+        "WAIT_2M": 24,
+        "WAIT_3M": 27
+      },
+      "average_confirmation_delay_minutes": 1.6923076923076923,
+      "bad_avoidance": 0.967391304347826,
+      "baseline_net_bps_per_signal": -18.721083901641702,
+      "episodes": 437,
+      "executed": 91,
+      "execution_coverage": 0.20823798627002288,
+      "good_retention": 0.3218884120171674,
+      "gross_bps_per_signal": 11.715912993114717,
+      "gross_bps_per_trade": 56.26213162627618,
+      "historical_bad_improved_to_positive": 0.021739130434782608,
+      "improvement_bps_per_signal": 26.27223716935596,
+      "long_executed": 46,
+      "maximum_single_symbol_trade_fraction": 0.14285714285714285,
+      "median_mae_bps": 11.378721790250568,
+      "median_mfe_bps": 79.09240569751508,
+      "median_mfe_mae_ratio": 7.416666666666708,
+      "missed_or_delayed_gross_bps_per_signal": 10.43699689475642,
+      "mixed_retention": 0.11607142857142858,
+      "net_bps_per_signal": 7.551153267714261,
+      "net_bps_per_trade": 36.26213162627618,
+      "profit_factor": 7.176220401638576,
+      "reasons": {
+        "SKIP_EXHAUSTED": 63,
+        "SKIP_LOW_EXPECTED_VALUE": 15,
+        "SKIP_NO_SPACE": 31,
+        "SKIP_OPPOSED": 216,
+        "SKIP_VOLATILITY_SHOCK": 21
+      },
+      "short_executed": 45,
+      "skipped": 346,
+      "symbols_executed": 11,
+      "win_rate": 0.8241758241758241
+    },
+    "confirmation": {
+      "actions": {
+        "ENTER_NOW": 72,
+        "SKIP_LOW_EXPECTED_VALUE": 186,
+        "WAIT_1M": 56,
+        "WAIT_2M": 56,
+        "WAIT_3M": 67
+      },
+      "average_confirmation_delay_minutes": 1.4701195219123506,
+      "bad_avoidance": 0.7282608695652174,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 251,
+      "execution_coverage": 0.5743707093821511,
+      "good_retention": 0.7424892703862661,
+      "gross_bps_per_signal": 23.344743043482527,
+      "gross_bps_per_trade": 40.64403470120265,
+      "historical_bad_improved_to_positive": 0.08695652173913043,
+      "improvement_bps_per_signal": 28.024637013774115,
+      "long_executed": 116,
+      "maximum_single_symbol_trade_fraction": 0.14342629482071714,
+      "median_mae_bps": 18.7521309239691,
+      "median_mfe_bps": 55.34741144414102,
+      "median_mfe_mae_ratio": 3.199999999999921,
+      "missed_or_delayed_gross_bps_per_signal": 22.06582694512423,
+      "mixed_retention": 0.4732142857142857,
+      "net_bps_per_signal": 15.303553112132414,
+      "net_bps_per_trade": 26.644034701202653,
+      "profit_factor": 4.217360659262337,
+      "reasons": {
+        "SKIP_LOW_EXPECTED_VALUE": 186
+      },
+      "short_executed": 135,
+      "skipped": 186,
+      "symbols_executed": 11,
+      "win_rate": 0.6573705179282868
+    },
+    "exhaustion": {
+      "actions": {
+        "ENTER_NOW": 230,
+        "SKIP_EXHAUSTED": 207
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.5652173913043478,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 230,
+      "execution_coverage": 0.5263157894736842,
+      "good_retention": 0.6351931330472103,
+      "gross_bps_per_signal": 10.619049043267417,
+      "gross_bps_per_trade": 20.176193182208095,
+      "historical_bad_improved_to_positive": 0.08695652173913043,
+      "improvement_bps_per_signal": 15.97171189227754,
+      "long_executed": 117,
+      "maximum_single_symbol_trade_fraction": 0.14782608695652175,
+      "median_mae_bps": 21.328457968672332,
+      "median_mfe_bps": 49.55903698213526,
+      "median_mfe_mae_ratio": 2.713518099547384,
+      "missed_or_delayed_gross_bps_per_signal": 9.340132944909119,
+      "mixed_retention": 0.375,
+      "net_bps_per_signal": 3.25062799063584,
+      "net_bps_per_trade": 6.176193182208095,
+      "profit_factor": 1.280133673251333,
+      "reasons": {
+        "SKIP_EXHAUSTED": 207
+      },
+      "short_executed": 113,
+      "skipped": 207,
+      "symbols_executed": 11,
+      "win_rate": 0.5869565217391305
+    },
+    "opposition": {
+      "actions": {
+        "ENTER_NOW": 210,
+        "SKIP_OPPOSED": 227
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.6413043478260869,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 210,
+      "execution_coverage": 0.4805491990846682,
+      "good_retention": 0.5836909871244635,
+      "gross_bps_per_signal": 10.707452082849242,
+      "gross_bps_per_trade": 22.28169790573866,
+      "historical_bad_improved_to_positive": 0.07608695652173914,
+      "improvement_bps_per_signal": 16.70084719730559,
+      "long_executed": 97,
+      "maximum_single_symbol_trade_fraction": 0.16666666666666666,
+      "median_mae_bps": 19.872298270080524,
+      "median_mfe_bps": 49.01340759840167,
+      "median_mfe_mae_ratio": 2.6624649859943323,
+      "missed_or_delayed_gross_bps_per_signal": 9.428535984490942,
+      "mixed_retention": 0.36607142857142855,
+      "net_bps_per_signal": 3.9797632956638873,
+      "net_bps_per_trade": 8.281697905738662,
+      "profit_factor": 1.4215019734089,
+      "reasons": {
+        "SKIP_OPPOSED": 227
+      },
+      "short_executed": 113,
+      "skipped": 227,
+      "symbols_executed": 11,
+      "win_rate": 0.5857142857142857
+    },
+    "space": {
+      "actions": {
+        "ENTER_NOW": 287,
+        "SKIP_NO_SPACE": 150
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.391304347826087,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 287,
+      "execution_coverage": 0.6567505720823799,
+      "good_retention": 0.7081545064377682,
+      "gross_bps_per_signal": 2.2476556064249418,
+      "gross_bps_per_trade": 3.422388501768989,
+      "historical_bad_improved_to_positive": 0.08695652173913043,
+      "improvement_bps_per_signal": 5.774231498913324,
+      "long_executed": 134,
+      "maximum_single_symbol_trade_fraction": 0.14982578397212543,
+      "median_mae_bps": 34.174014079693116,
+      "median_mfe_bps": 44.347685857120126,
+      "median_mfe_mae_ratio": 1.4651162790697834,
+      "missed_or_delayed_gross_bps_per_signal": 0.9687395080666422,
+      "mixed_retention": 0.5892857142857143,
+      "net_bps_per_signal": -6.946852402728377,
+      "net_bps_per_trade": -10.577611498231011,
+      "profit_factor": 0.6753540233110186,
+      "reasons": {
+        "SKIP_NO_SPACE": 150
+      },
+      "short_executed": 153,
+      "skipped": 150,
+      "symbols_executed": 11,
+      "win_rate": 0.47735191637630664
+    },
+    "volatility": {
+      "actions": {
+        "ENTER_NOW": 232,
+        "SKIP_VOLATILITY_SHOCK": 205
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.6630434782608695,
+      "baseline_net_bps_per_signal": -12.721083901641702,
+      "episodes": 437,
+      "executed": 232,
+      "execution_coverage": 0.5308924485125858,
+      "good_retention": 0.6223175965665236,
+      "gross_bps_per_signal": 9.15334746955209,
+      "gross_bps_per_trade": 17.24143467325113,
+      "historical_bad_improved_to_positive": 0.07608695652173914,
+      "improvement_bps_per_signal": 14.441937092017588,
+      "long_executed": 107,
+      "maximum_single_symbol_trade_fraction": 0.13793103448275862,
+      "median_mae_bps": 19.970784663250196,
+      "median_mfe_bps": 40.88111151889062,
+      "median_mfe_mae_ratio": 2.0550691244240538,
+      "missed_or_delayed_gross_bps_per_signal": 7.874431371193789,
+      "mixed_retention": 0.5,
+      "net_bps_per_signal": 1.7208531903758875,
+      "net_bps_per_trade": 3.241434673251133,
+      "profit_factor": 1.1511409059266702,
+      "reasons": {
+        "SKIP_VOLATILITY_SHOCK": 205
+      },
+      "short_executed": 125,
+      "skipped": 205,
+      "symbols_executed": 11,
+      "win_rate": 0.5129310344827587
+    }
+  },
+  "validation_bootstrap": {
+    "ci95": [
+      8.633166816049462,
+      25.486027221461484
+    ],
+    "mean_improvement_bps_per_signal": 16.986608825869062,
+    "probability_improvement_positive": 1.0,
+    "temporal_block_ci95": [
+      3.3908325452842227,
+      31.40434887303485
+    ],
+    "temporal_block_probability_positive": 0.9961
+  },
+  "validation_diagnostic_attribution": [
+    {
+      "diagnostic_entry_state": "CLEAN_NOW",
+      "entry_class": "BAD_ENTRY",
+      "episodes": 4
+    },
+    {
+      "diagnostic_entry_state": "PREMATURE",
+      "entry_class": "BAD_ENTRY",
+      "episodes": 3
+    },
+    {
+      "diagnostic_entry_state": "SKIP_EXHAUSTED",
+      "entry_class": "BAD_ENTRY",
+      "episodes": 9
+    },
+    {
+      "diagnostic_entry_state": "SKIP_NO_SPACE",
+      "entry_class": "BAD_ENTRY",
+      "episodes": 2
+    },
+    {
+      "diagnostic_entry_state": "SKIP_OPPOSED",
+      "entry_class": "BAD_ENTRY",
+      "episodes": 18
+    },
+    {
+      "diagnostic_entry_state": "CLEAN_NOW",
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 6
+    },
+    {
+      "diagnostic_entry_state": "PREMATURE",
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 10
+    },
+    {
+      "diagnostic_entry_state": "SKIP_EXHAUSTED",
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 12
+    },
+    {
+      "diagnostic_entry_state": "SKIP_LOW_EXPECTED_VALUE",
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 2
+    },
+    {
+      "diagnostic_entry_state": "SKIP_NO_SPACE",
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 5
+    },
+    {
+      "diagnostic_entry_state": "SKIP_OPPOSED",
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 42
+    },
+    {
+      "diagnostic_entry_state": "SKIP_VOLATILITY_SHOCK",
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 5
+    },
+    {
+      "diagnostic_entry_state": "CLEAN_NOW",
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 9
+    },
+    {
+      "diagnostic_entry_state": "PREMATURE",
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 5
+    },
+    {
+      "diagnostic_entry_state": "SKIP_EXHAUSTED",
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 9
+    },
+    {
+      "diagnostic_entry_state": "SKIP_LOW_EXPECTED_VALUE",
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 2
+    },
+    {
+      "diagnostic_entry_state": "SKIP_NO_SPACE",
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 4
+    },
+    {
+      "diagnostic_entry_state": "SKIP_OPPOSED",
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 27
+    },
+    {
+      "diagnostic_entry_state": "SKIP_VOLATILITY_SHOCK",
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 2
+    }
+  ],
+  "validation_fixed_delay_diagnostics": [
+    {
+      "adverse_first_rate": 0.5795454545454546,
+      "delay_minutes": 0,
+      "episodes": 176,
+      "favorable_first_rate": 0.375,
+      "improvement_vs_now_bps": 0.0,
+      "mean_net_bps_per_signal": -21.424269815653137,
+      "median_mae_bps": 32.7716189669891,
+      "median_mfe_bps": 31.21118773389997,
+      "positive_after_cost_rate": 0.3806818181818182
+    },
+    {
+      "adverse_first_rate": 0.5795454545454546,
+      "delay_minutes": 1,
+      "episodes": 176,
+      "favorable_first_rate": 0.3806818181818182,
+      "improvement_vs_now_bps": 1.2540565889207298,
+      "mean_net_bps_per_signal": -20.170213226732407,
+      "median_mae_bps": 31.99799763806577,
+      "median_mfe_bps": 30.27009026108196,
+      "positive_after_cost_rate": 0.38636363636363635
+    },
+    {
+      "adverse_first_rate": 0.5568181818181818,
+      "delay_minutes": 2,
+      "episodes": 176,
+      "favorable_first_rate": 0.3977272727272727,
+      "improvement_vs_now_bps": 3.6030573774615533,
+      "mean_net_bps_per_signal": -17.821212438191584,
+      "median_mae_bps": 34.652753212214286,
+      "median_mfe_bps": 30.464364765023234,
+      "positive_after_cost_rate": 0.4375
+    },
+    {
+      "adverse_first_rate": 0.6022727272727273,
+      "delay_minutes": 3,
+      "episodes": 176,
+      "favorable_first_rate": 0.3522727272727273,
+      "improvement_vs_now_bps": 1.9950383804733656,
+      "mean_net_bps_per_signal": -19.429231435179773,
+      "median_mae_bps": 37.337275408011465,
+      "median_mfe_bps": 33.87319303968961,
+      "positive_after_cost_rate": 0.4147727272727273
+    }
+  ],
+  "validation_gates": {
+    "bad_avoidance": true,
+    "bootstrap_ci": true,
+    "concentration": true,
+    "coverage": true,
+    "good_retention": false,
+    "material_improvement": true,
+    "minimum_episodes": true,
+    "minimum_executed": true,
+    "positive_net_expectancy": false,
+    "stress_cost": false,
+    "symbol_breadth": true
+  },
+  "validation_metrics": {
+    "baseline": {
+      "actions": {
+        "ENTER_NOW": 176
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.0,
+      "baseline_net_bps_per_signal": -21.424269815653137,
+      "episodes": 176,
+      "executed": 176,
+      "execution_coverage": 1.0,
+      "good_retention": 1.0,
+      "gross_bps_per_signal": -7.424269815653139,
+      "gross_bps_per_trade": -7.424269815653139,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 0.0,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.1534090909090909,
+      "median_mae_bps": 32.7716189669891,
+      "median_mfe_bps": 31.21118773389997,
+      "median_mfe_mae_ratio": 0.8360441767068726,
+      "missed_or_delayed_gross_bps_per_signal": 0.0,
+      "mixed_retention": 1.0,
+      "net_bps_per_signal": -21.424269815653137,
+      "net_bps_per_trade": -21.424269815653137,
+      "profit_factor": 0.3915061879866266,
+      "reasons": {},
+      "short_executed": 176,
+      "skipped": 0,
+      "symbols_executed": 11,
+      "win_rate": 0.3806818181818182
+    },
+    "combined": {
+      "actions": {
+        "ENTER_NOW": 19,
+        "SKIP_EXHAUSTED": 30,
+        "SKIP_LOW_EXPECTED_VALUE": 4,
+        "SKIP_NO_SPACE": 11,
+        "SKIP_OPPOSED": 87,
+        "SKIP_VOLATILITY_SHOCK": 7,
+        "WAIT_1M": 9,
+        "WAIT_2M": 4,
+        "WAIT_3M": 5
+      },
+      "average_confirmation_delay_minutes": 0.8648648648648649,
+      "bad_avoidance": 0.8055555555555556,
+      "baseline_net_bps_per_signal": -21.424269815653137,
+      "episodes": 176,
+      "executed": 37,
+      "execution_coverage": 0.21022727272727273,
+      "good_retention": 0.1951219512195122,
+      "gross_bps_per_signal": -1.4944791716022605,
+      "gross_bps_per_trade": -7.108873897351296,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 16.986608825869062,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.24324324324324326,
+      "median_mae_bps": 37.99392097264543,
+      "median_mfe_bps": 36.131774707758304,
+      "median_mfe_mae_ratio": 1.0,
+      "missed_or_delayed_gross_bps_per_signal": 5.929790644050877,
+      "mixed_retention": 0.2413793103448276,
+      "net_bps_per_signal": -4.437660989784079,
+      "net_bps_per_trade": -21.108873897351298,
+      "profit_factor": 0.42878443311259123,
+      "reasons": {
+        "SKIP_EXHAUSTED": 30,
+        "SKIP_LOW_EXPECTED_VALUE": 4,
+        "SKIP_NO_SPACE": 11,
+        "SKIP_OPPOSED": 87,
+        "SKIP_VOLATILITY_SHOCK": 7
+      },
+      "short_executed": 37,
+      "skipped": 139,
+      "symbols_executed": 9,
+      "win_rate": 0.40540540540540543
+    },
+    "combined_stress_20bps": {
+      "actions": {
+        "ENTER_NOW": 19,
+        "SKIP_EXHAUSTED": 30,
+        "SKIP_LOW_EXPECTED_VALUE": 4,
+        "SKIP_NO_SPACE": 11,
+        "SKIP_OPPOSED": 87,
+        "SKIP_VOLATILITY_SHOCK": 7,
+        "WAIT_1M": 9,
+        "WAIT_2M": 4,
+        "WAIT_3M": 5
+      },
+      "average_confirmation_delay_minutes": 0.8648648648648649,
+      "bad_avoidance": 0.8055555555555556,
+      "baseline_net_bps_per_signal": -27.424269815653137,
+      "episodes": 176,
+      "executed": 37,
+      "execution_coverage": 0.21022727272727273,
+      "good_retention": 0.1951219512195122,
+      "gross_bps_per_signal": -1.4944791716022605,
+      "gross_bps_per_trade": -7.108873897351296,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 21.725245189505422,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.24324324324324326,
+      "median_mae_bps": 37.99392097264543,
+      "median_mfe_bps": 36.131774707758304,
+      "median_mfe_mae_ratio": 1.0,
+      "missed_or_delayed_gross_bps_per_signal": 5.929790644050877,
+      "mixed_retention": 0.2413793103448276,
+      "net_bps_per_signal": -5.699024626147715,
+      "net_bps_per_trade": -27.108873897351298,
+      "profit_factor": 0.3335632413536213,
+      "reasons": {
+        "SKIP_EXHAUSTED": 30,
+        "SKIP_LOW_EXPECTED_VALUE": 4,
+        "SKIP_NO_SPACE": 11,
+        "SKIP_OPPOSED": 87,
+        "SKIP_VOLATILITY_SHOCK": 7
+      },
+      "short_executed": 37,
+      "skipped": 139,
+      "symbols_executed": 9,
+      "win_rate": 0.3783783783783784
+    },
+    "confirmation": {
+      "actions": {
+        "ENTER_NOW": 52,
+        "SKIP_LOW_EXPECTED_VALUE": 56,
+        "WAIT_1M": 28,
+        "WAIT_2M": 26,
+        "WAIT_3M": 14
+      },
+      "average_confirmation_delay_minutes": 1.0166666666666666,
+      "bad_avoidance": 0.2777777777777778,
+      "baseline_net_bps_per_signal": -21.424269815653137,
+      "episodes": 176,
+      "executed": 120,
+      "execution_coverage": 0.6818181818181818,
+      "good_retention": 0.6707317073170732,
+      "gross_bps_per_signal": -6.16911561995089,
+      "gross_bps_per_trade": -9.04803624259464,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 5.709699650247702,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.15833333333333333,
+      "median_mae_bps": 37.13818292561899,
+      "median_mfe_bps": 30.464364765023234,
+      "median_mfe_mae_ratio": 0.7913043478260294,
+      "missed_or_delayed_gross_bps_per_signal": 1.255154195702248,
+      "mixed_retention": 0.6724137931034483,
+      "net_bps_per_signal": -15.714570165405435,
+      "net_bps_per_trade": -23.04803624259464,
+      "profit_factor": 0.3847871370647459,
+      "reasons": {
+        "SKIP_LOW_EXPECTED_VALUE": 56
+      },
+      "short_executed": 120,
+      "skipped": 56,
+      "symbols_executed": 11,
+      "win_rate": 0.4166666666666667
+    },
+    "exhaustion": {
+      "actions": {
+        "ENTER_NOW": 97,
+        "SKIP_EXHAUSTED": 79
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.5833333333333334,
+      "baseline_net_bps_per_signal": -21.424269815653137,
+      "episodes": 176,
+      "executed": 97,
+      "execution_coverage": 0.5511363636363636,
+      "good_retention": 0.6097560975609756,
+      "gross_bps_per_signal": -0.7667612082863591,
+      "gross_bps_per_trade": -1.3912368315298895,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 12.94159951645769,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.18556701030927836,
+      "median_mae_bps": 29.062727052553416,
+      "median_mfe_bps": 36.131774707758304,
+      "median_mfe_mae_ratio": 1.0,
+      "missed_or_delayed_gross_bps_per_signal": 6.657508607366779,
+      "mixed_retention": 0.5517241379310345,
+      "net_bps_per_signal": -8.48267029919545,
+      "net_bps_per_trade": -15.39123683152989,
+      "profit_factor": 0.4915223659497494,
+      "reasons": {
+        "SKIP_EXHAUSTED": 79
+      },
+      "short_executed": 97,
+      "skipped": 79,
+      "symbols_executed": 11,
+      "win_rate": 0.44329896907216493
+    },
+    "opposition": {
+      "actions": {
+        "ENTER_NOW": 87,
+        "SKIP_OPPOSED": 89
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.5,
+      "baseline_net_bps_per_signal": -21.424269815653137,
+      "episodes": 176,
+      "executed": 87,
+      "execution_coverage": 0.4943181818181818,
+      "good_retention": 0.47560975609756095,
+      "gross_bps_per_signal": -4.682638211069025,
+      "gross_bps_per_trade": -9.472923277564925,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 9.821177059129566,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.1724137931034483,
+      "median_mae_bps": 33.26679973386426,
+      "median_mfe_bps": 26.95102685624007,
+      "median_mfe_mae_ratio": 0.7500000000000323,
+      "missed_or_delayed_gross_bps_per_signal": 2.7416316045841134,
+      "mixed_retention": 0.5172413793103449,
+      "net_bps_per_signal": -11.603092756523571,
+      "net_bps_per_trade": -23.472923277564924,
+      "profit_factor": 0.3693608061305873,
+      "reasons": {
+        "SKIP_OPPOSED": 89
+      },
+      "short_executed": 87,
+      "skipped": 89,
+      "symbols_executed": 11,
+      "win_rate": 0.3563218390804598
+    },
+    "space": {
+      "actions": {
+        "ENTER_NOW": 111,
+        "SKIP_NO_SPACE": 65
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.5277777777777778,
+      "baseline_net_bps_per_signal": -21.424269815653137,
+      "episodes": 176,
+      "executed": 111,
+      "execution_coverage": 0.6306818181818182,
+      "good_retention": 0.6829268292682927,
+      "gross_bps_per_signal": -0.03373584337614039,
+      "gross_bps_per_trade": -0.053491066974779976,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 12.560988517731543,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.16216216216216217,
+      "median_mae_bps": 32.00189640867768,
+      "median_mfe_bps": 31.50598613736566,
+      "median_mfe_mae_ratio": 0.9259259259259109,
+      "missed_or_delayed_gross_bps_per_signal": 7.390533972276997,
+      "mixed_retention": 0.6551724137931034,
+      "net_bps_per_signal": -8.863281297921594,
+      "net_bps_per_trade": -14.05349106697478,
+      "profit_factor": 0.5279556203610491,
+      "reasons": {
+        "SKIP_NO_SPACE": 65
+      },
+      "short_executed": 111,
+      "skipped": 65,
+      "symbols_executed": 11,
+      "win_rate": 0.42342342342342343
+    },
+    "volatility": {
+      "actions": {
+        "ENTER_NOW": 110,
+        "SKIP_VOLATILITY_SHOCK": 66
+      },
+      "average_confirmation_delay_minutes": 0.0,
+      "bad_avoidance": 0.2777777777777778,
+      "baseline_net_bps_per_signal": -21.424269815653137,
+      "episodes": 176,
+      "executed": 110,
+      "execution_coverage": 0.625,
+      "good_retention": 0.5853658536585366,
+      "gross_bps_per_signal": -7.821998220457294,
+      "gross_bps_per_trade": -12.515197152731666,
+      "historical_bad_improved_to_positive": 0.0,
+      "improvement_bps_per_signal": 4.8522715951958455,
+      "long_executed": 0,
+      "maximum_single_symbol_trade_fraction": 0.16363636363636364,
+      "median_mae_bps": 35.04242543315716,
+      "median_mfe_bps": 31.010566239833558,
+      "median_mfe_mae_ratio": 0.7817460317461007,
+      "missed_or_delayed_gross_bps_per_signal": -0.39772840480415456,
+      "mixed_retention": 0.6206896551724138,
+      "net_bps_per_signal": -16.571998220457292,
+      "net_bps_per_trade": -26.51519715273167,
+      "profit_factor": 0.32416884824944875,
+      "reasons": {
+        "SKIP_VOLATILITY_SHOCK": 66
+      },
+      "short_executed": 110,
+      "skipped": 66,
+      "symbols_executed": 11,
+      "win_rate": 0.37272727272727274
+    }
+  }
+}
