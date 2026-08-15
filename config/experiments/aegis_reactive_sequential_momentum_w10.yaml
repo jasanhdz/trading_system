@@ -1,0 +1,145 @@
+schema_version: aegis-reactive-sequential-momentum-w10-preregistration-v1
+experiment_id: aegis-reactive-sequential-momentum-w10-01
+registered_at_utc: '2026-08-14T23:10:00Z'
+mode: OFFLINE_HISTORICAL_RESEARCH_ONLY
+runtime_effect: NONE
+
+authority:
+  prior_holdouts: SEALED_W1_THROUGH_W9_1
+  w9_1_retuning: PROHIBITED
+  w7_opportunity_identity: H60:LOGISTIC_L2:P_GTE_0.7
+  w7_retuning: PROHIBITED
+  production_changes: PROHIBITED
+
+data:
+  source: data/historical_orderbook_direction_w9_1/raw
+  provider: TARDIS_FREE_FIRST_DAY_SAMPLES
+  exchange: binance-futures
+  types: [incremental_book_L2, quotes, trades]
+  symbols: [ADAUSDT, BNBUSDT, BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT]
+  synthetic_microstructure: PROHIBITED
+
+partitions:
+  train_months: ['2024-09', '2025-03', '2025-09']
+  validation_months: ['2025-12', '2026-03']
+  final_holdout:
+    identity: FUTURE_INDEPENDENT_W10_EVIDENCE
+    state: SEALED_NOT_OPENED
+
+episodes:
+  anchor_schedule: FIXED_UTC_GRID
+  first_anchor_seconds_after_midnight: 300
+  anchor_spacing_seconds: 300
+  duration_seconds: 120
+  decision_interval_seconds: 5
+  causal_warmup_seconds: 30
+  unit: momentum_episode_id
+  overlap: PROHIBITED
+  maximum_entries_per_episode: 2
+
+features:
+  lookback_seconds: [5, 10, 20]
+  groups:
+    PRICE_MOMENTUM: [returns, velocity, acceleration, persistence, excursion, path_efficiency]
+    STATIC_BOOK: [spread, microprice, OBI_L1, OBI_L5, OBI_L10, OBI_L20, depth]
+    BOOK_DYNAMICS: [depletion, replenishment, depth_velocity, OBI_velocity, microprice_velocity]
+    TRADE_FLOW: [aggressive_buy, aggressive_sell, signed_delta, flow_velocity, trade_rate, trade_size]
+    PRESSURE_RESPONSE: [price_impact, flow_without_response, favorable_response_decay]
+    ABSORPTION: [sell_pressure_bid_replenishment, buy_pressure_ask_replenishment]
+  all_features_causal_at_decision_time: true
+
+learning_target:
+  type: FIRST_BARRIER_FROM_EACH_STATE
+  primary: {barrier_bps: 20, horizon_seconds: 60}
+  diagnostic: [{barrier_bps: 15, horizon_seconds: 30}, {barrier_bps: 30, horizon_seconds: 60}]
+  classes: [UP_FIRST, DOWN_FIRST, NEITHER]
+  same_timestamp_resolution: CAPTURE_ORDER
+
+models:
+  families: [MULTINOMIAL_LOGISTIC_L2, SHALLOW_TREE_DEPTH3, HIST_GRADIENT_BOOSTING]
+  ablations: [PRICE_ONLY, PRICE_FLOW, PRICE_BOOK_FLOW, FULL]
+  random_seed: 1010001
+  deep_learning: PROHIBITED
+
+policy_search_train_only:
+  entry_thresholds: [0.65, 0.75, 0.85]
+  entry_confirmations: [2, 3]
+  hold_thresholds: [0.45, 0.55, 0.65]
+  exit_confirmations: [2, 3]
+  cooldown_seconds: [20, 40]
+  max_entries_per_episode: [1, 2]
+  constraints:
+    enter_threshold_strictly_above_hold: true
+    direct_long_short_flip: PROHIBITED
+    direct_short_long_flip: PROHIBITED
+    forced_exit_at_episode_end: true
+
+baselines:
+  - NO_TRADE
+  - MOMENTUM_10BPS_FIXED_30S
+  - MOMENTUM_10BPS_FIXED_60S
+  - MOMENTUM_10BPS_TRAILING_10BPS
+  - MOMENTUM_10BPS_GIVEBACK_40PCT
+
+opportunity_conditioning:
+  all_episodes_primary: true
+  frozen_w7_diagnostic_only: true
+  minimum_train_episodes: 300
+  minimum_validation_episodes: 200
+  action_if_insufficient: REPORT_NOT_TESTABLE_NO_REFIT
+
+execution:
+  latency_ms: [0, 100, 250, 500, 1000]
+  required_latency_ms: 250
+  baseline_round_trip_cost_bps: 14.0
+  stress_round_trip_cost_bps: 20.0
+  leverage: PROHIBITED
+
+data_gate:
+  minimum_train_episodes: 5000
+  minimum_validation_episodes: 3000
+  minimum_symbols: 6
+  minimum_train_dates: 3
+  minimum_validation_dates: 2
+  require_all_reconstructions_valid: true
+  require_unique_episode_ids: true
+  require_finite_features: true
+
+anti_churn_gate:
+  maximum_trades_per_hour: 3.0
+  maximum_reentries_per_episode: 0.15
+  maximum_entries_per_episode_observed: 2
+  required_direct_flips: 0
+  minimum_median_holding_seconds: 15.0
+  maximum_cost_to_positive_gross_ratio: 0.65
+
+economic_gate:
+  minimum_validation_trades: 300
+  minimum_net_bps_per_trade: 2.0
+  minimum_net_bps_per_episode: 0.5
+  minimum_profit_factor: 1.10
+  require_bootstrap_ci_lower_positive: true
+  minimum_positive_symbols: 4
+  minimum_positive_validation_dates: 2
+  require_all_baselines_beaten: true
+  require_20bps_cost_positive: true
+  require_250ms_latency_positive: true
+  maximum_single_symbol_trade_share: 0.35
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: SYMBOL_UTC_DAY
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+
+deployment:
+  python_research_only: true
+  typescript: PROHIBITED
+  aegis_brain: PROHIBITED
+  guards: PROHIBITED
+  leverage: PROHIBITED
+  pm2: PROHIBITED
+  shadow: PROHIBITED
+  live: PROHIBITED
+  authenticated_requests: 0
+  exchange_mutations: 0

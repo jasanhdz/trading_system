@@ -1,0 +1,769 @@
+{
+  "BAD_ENTRIES_CAUSALLY_AVOIDABLE": false,
+  "PRODUCTION_CHANGE_JUSTIFIED": false,
+  "by_side": [
+    {
+      "bad_rate": 0.2393617021276596,
+      "episodes": 188,
+      "good_rate": 0.4734042553191489,
+      "median_mae_bps": 47.5735101055331,
+      "median_mfe_bps": 61.430194434019654,
+      "pnl_usdt_secondary": -375.8485137607754,
+      "side": "LONG",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.21451104100946372,
+      "episodes": 317,
+      "good_rate": 0.5488958990536278,
+      "median_mae_bps": 43.89153118533783,
+      "median_mfe_bps": 66.01401472253707,
+      "pnl_usdt_secondary": -80.81558028994891,
+      "side": "SHORT",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.15,
+      "episodes": 40,
+      "good_rate": 0.525,
+      "median_mae_bps": 40.26238419121988,
+      "median_mfe_bps": 56.374166173237455,
+      "pnl_usdt_secondary": 14.82267680593704,
+      "side": "LONG",
+      "split": "VALIDATION"
+    },
+    {
+      "bad_rate": 0.1791907514450867,
+      "episodes": 173,
+      "good_rate": 0.4624277456647399,
+      "median_mae_bps": 55.81743203808988,
+      "median_mfe_bps": 75.71359805166793,
+      "pnl_usdt_secondary": 16.143428965671376,
+      "side": "SHORT",
+      "split": "VALIDATION"
+    }
+  ],
+  "by_symbol": [
+    {
+      "bad_rate": 0.265625,
+      "episodes": 64,
+      "good_rate": 0.4375,
+      "median_mae_bps": 55.975047746091974,
+      "median_mfe_bps": 59.29993792681348,
+      "pnl_usdt_secondary": -137.04842796096244,
+      "split": "DISCOVERY",
+      "symbol": "ADAUSDT"
+    },
+    {
+      "bad_rate": 0.23684210526315788,
+      "episodes": 76,
+      "good_rate": 0.5657894736842105,
+      "median_mae_bps": 43.559289382618665,
+      "median_mfe_bps": 63.27874297667094,
+      "pnl_usdt_secondary": -16.46651566473824,
+      "split": "DISCOVERY",
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "bad_rate": 0.125,
+      "episodes": 24,
+      "good_rate": 0.6666666666666666,
+      "median_mae_bps": 31.2002063171564,
+      "median_mfe_bps": 68.90192886996564,
+      "pnl_usdt_secondary": 20.793751680449652,
+      "split": "DISCOVERY",
+      "symbol": "BNBUSDT"
+    },
+    {
+      "bad_rate": 0.25,
+      "episodes": 24,
+      "good_rate": 0.5416666666666666,
+      "median_mae_bps": 35.139697653000624,
+      "median_mfe_bps": 43.92950448728454,
+      "pnl_usdt_secondary": -44.79722309547927,
+      "split": "DISCOVERY",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "bad_rate": 0.13043478260869565,
+      "episodes": 46,
+      "good_rate": 0.5,
+      "median_mae_bps": 50.721008073507,
+      "median_mfe_bps": 77.5938673916109,
+      "pnl_usdt_secondary": 62.44939197784767,
+      "split": "DISCOVERY",
+      "symbol": "DOGEUSDT"
+    },
+    {
+      "bad_rate": 0.2631578947368421,
+      "episodes": 38,
+      "good_rate": 0.5789473684210527,
+      "median_mae_bps": 41.11153902674404,
+      "median_mfe_bps": 62.50662279493336,
+      "pnl_usdt_secondary": -46.06426095004784,
+      "split": "DISCOVERY",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "bad_rate": 0.25925925925925924,
+      "episodes": 27,
+      "good_rate": 0.5555555555555556,
+      "median_mae_bps": 40.61201360030154,
+      "median_mfe_bps": 71.69459124690242,
+      "pnl_usdt_secondary": -156.44242632656338,
+      "split": "DISCOVERY",
+      "symbol": "LINKUSDT"
+    },
+    {
+      "bad_rate": 0.21428571428571427,
+      "episodes": 28,
+      "good_rate": 0.5357142857142857,
+      "median_mae_bps": 46.51294634699702,
+      "median_mfe_bps": 66.5774888466097,
+      "pnl_usdt_secondary": -32.0664955814743,
+      "split": "DISCOVERY",
+      "symbol": "LTCUSDT"
+    },
+    {
+      "bad_rate": 0.2631578947368421,
+      "episodes": 57,
+      "good_rate": 0.43859649122807015,
+      "median_mae_bps": 48.489369638193004,
+      "median_mfe_bps": 51.56022754137148,
+      "pnl_usdt_secondary": -26.312810431697393,
+      "split": "DISCOVERY",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "bad_rate": 0.2923076923076923,
+      "episodes": 65,
+      "good_rate": 0.4307692307692308,
+      "median_mae_bps": 82.5205401563611,
+      "median_mfe_bps": 76.75906183368814,
+      "pnl_usdt_secondary": -97.38424459715705,
+      "split": "DISCOVERY",
+      "symbol": "SUIUSDT"
+    },
+    {
+      "bad_rate": 0.10714285714285714,
+      "episodes": 56,
+      "good_rate": 0.625,
+      "median_mae_bps": 34.71938966628071,
+      "median_mfe_bps": 72.49763873170765,
+      "pnl_usdt_secondary": 16.675166899098244,
+      "split": "DISCOVERY",
+      "symbol": "XRPUSDT"
+    },
+    {
+      "bad_rate": 0.16666666666666666,
+      "episodes": 24,
+      "good_rate": 0.3333333333333333,
+      "median_mae_bps": 97.17978777271267,
+      "median_mfe_bps": 99.61529203165891,
+      "pnl_usdt_secondary": 66.63310682903474,
+      "split": "VALIDATION",
+      "symbol": "ADAUSDT"
+    },
+    {
+      "bad_rate": 0.125,
+      "episodes": 32,
+      "good_rate": 0.4375,
+      "median_mae_bps": 74.92015318013044,
+      "median_mfe_bps": 60.37990915111364,
+      "pnl_usdt_secondary": 4.581931079386624,
+      "split": "VALIDATION",
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "bad_rate": 0.125,
+      "episodes": 8,
+      "good_rate": 0.375,
+      "median_mae_bps": 66.74094673139399,
+      "median_mfe_bps": 81.47220694780378,
+      "pnl_usdt_secondary": 4.231537961462871,
+      "split": "VALIDATION",
+      "symbol": "BNBUSDT"
+    },
+    {
+      "bad_rate": 0.3333333333333333,
+      "episodes": 3,
+      "good_rate": 0.6666666666666666,
+      "median_mae_bps": 25.04943578950813,
+      "median_mfe_bps": 66.17214284946003,
+      "pnl_usdt_secondary": 10.925226748530193,
+      "split": "VALIDATION",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "bad_rate": 0.05263157894736842,
+      "episodes": 19,
+      "good_rate": 0.5263157894736842,
+      "median_mae_bps": 34.186742694224925,
+      "median_mfe_bps": 63.873899460380606,
+      "pnl_usdt_secondary": 37.541685691715394,
+      "split": "VALIDATION",
+      "symbol": "DOGEUSDT"
+    },
+    {
+      "bad_rate": 0.1875,
+      "episodes": 16,
+      "good_rate": 0.5,
+      "median_mae_bps": 57.01429305149392,
+      "median_mfe_bps": 92.15802896152864,
+      "pnl_usdt_secondary": 25.03970532988152,
+      "split": "VALIDATION",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "bad_rate": 0.3181818181818182,
+      "episodes": 22,
+      "good_rate": 0.5454545454545454,
+      "median_mae_bps": 43.31134634114298,
+      "median_mfe_bps": 64.85865071430517,
+      "pnl_usdt_secondary": -33.94994630875053,
+      "split": "VALIDATION",
+      "symbol": "LINKUSDT"
+    },
+    {
+      "bad_rate": 0.3333333333333333,
+      "episodes": 21,
+      "good_rate": 0.47619047619047616,
+      "median_mae_bps": 52.436672432432914,
+      "median_mfe_bps": 63.33651243243201,
+      "pnl_usdt_secondary": -86.72278865050491,
+      "split": "VALIDATION",
+      "symbol": "LTCUSDT"
+    },
+    {
+      "bad_rate": 0.11538461538461539,
+      "episodes": 26,
+      "good_rate": 0.5,
+      "median_mae_bps": 48.17968828829497,
+      "median_mfe_bps": 64.41100079585225,
+      "pnl_usdt_secondary": -71.7725285501259,
+      "split": "VALIDATION",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "bad_rate": 0.15384615384615385,
+      "episodes": 26,
+      "good_rate": 0.5,
+      "median_mae_bps": 62.0778129428634,
+      "median_mfe_bps": 76.5463811549092,
+      "pnl_usdt_secondary": 43.331163134163084,
+      "split": "VALIDATION",
+      "symbol": "SUIUSDT"
+    },
+    {
+      "bad_rate": 0.125,
+      "episodes": 16,
+      "good_rate": 0.5,
+      "median_mae_bps": 38.31339519242675,
+      "median_mfe_bps": 50.86002359213261,
+      "pnl_usdt_secondary": 31.127012506815305,
+      "split": "VALIDATION",
+      "symbol": "XRPUSDT"
+    }
+  ],
+  "class_summary": [
+    {
+      "entry_class": "BAD_ENTRY",
+      "episodes": 113,
+      "median_mae_bps": 195.98236158745644,
+      "median_mfe_bps": 25.938991492010793,
+      "median_mfe_mae_ratio": 0.14103224598930658,
+      "pnl_usdt_secondary": -1265.3125509751264,
+      "split": "DISCOVERY"
+    },
+    {
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 263,
+      "median_mae_bps": 15.40954788069066,
+      "median_mfe_bps": 86.49367930805211,
+      "median_mfe_mae_ratio": 5.060274606824563,
+      "pnl_usdt_secondary": 639.1432259971223,
+      "split": "DISCOVERY"
+    },
+    {
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 129,
+      "median_mae_bps": 84.00536647118062,
+      "median_mfe_bps": 55.809262732649096,
+      "median_mfe_mae_ratio": 0.7368421052631697,
+      "pnl_usdt_secondary": 169.5052309272803,
+      "split": "DISCOVERY"
+    },
+    {
+      "entry_class": "BAD_ENTRY",
+      "episodes": 37,
+      "median_mae_bps": 258.6391499999996,
+      "median_mfe_bps": 14.925373134326712,
+      "median_mfe_mae_ratio": 0.078781337549554,
+      "pnl_usdt_secondary": -633.341369458096,
+      "split": "VALIDATION"
+    },
+    {
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 101,
+      "median_mae_bps": 22.18987525384211,
+      "median_mfe_bps": 106.46915866219248,
+      "median_mfe_mae_ratio": 4.9213333333338705,
+      "pnl_usdt_secondary": 447.57405788714493,
+      "split": "VALIDATION"
+    },
+    {
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 75,
+      "median_mae_bps": 105.19845786896782,
+      "median_mfe_bps": 52.3119658119664,
+      "median_mfe_mae_ratio": 0.6801891630106137,
+      "pnl_usdt_secondary": 216.73341734255948,
+      "split": "VALIDATION"
+    }
+  ],
+  "date_range": [
+    "2026-05-07T09:31:20.773000+00:00",
+    "2026-08-15T03:54:32.547Z"
+  ],
+  "entry_quality_reason_evidence": [
+    {
+      "bad_rate": 0.16666666666666666,
+      "episodes": 6,
+      "good_rate": 0.3333333333333333,
+      "pnl_usdt_secondary": -0.2913136150165192,
+      "reason": "entry_quality_passed",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.2631578947368421,
+      "episodes": 19,
+      "good_rate": 0.42105263157894735,
+      "pnl_usdt_secondary": -14.073009486170772,
+      "reason": "flagged_symbol_requires_3of3",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.2647058823529412,
+      "episodes": 34,
+      "good_rate": 0.5882352941176471,
+      "pnl_usdt_secondary": -54.769378633472975,
+      "reason": "insufficient_data",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.2682926829268293,
+      "episodes": 41,
+      "good_rate": 0.5365853658536586,
+      "pnl_usdt_secondary": -32.47429025377496,
+      "reason": "momentum_not_confirmed",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.2,
+      "episodes": 10,
+      "good_rate": 0.5,
+      "pnl_usdt_secondary": -16.955035404632177,
+      "reason": "overextended_short",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.17857142857142858,
+      "episodes": 168,
+      "good_rate": 0.5773809523809523,
+      "pnl_usdt_secondary": 22.120023601070656,
+      "reason": "score_below_entry_quality_threshold",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.0,
+      "episodes": 3,
+      "good_rate": 0.6666666666666666,
+      "pnl_usdt_secondary": 3.4823857102172227,
+      "reason": "volatility_too_high",
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.24553571428571427,
+      "episodes": 224,
+      "good_rate": 0.47767857142857145,
+      "pnl_usdt_secondary": -363.70347596894476,
+      "reason": null,
+      "split": "DISCOVERY"
+    },
+    {
+      "bad_rate": 0.0,
+      "episodes": 5,
+      "good_rate": 0.4,
+      "pnl_usdt_secondary": 15.54038469627044,
+      "reason": "entry_quality_passed",
+      "split": "VALIDATION"
+    },
+    {
+      "bad_rate": 0.14516129032258066,
+      "episodes": 62,
+      "good_rate": 0.5806451612903226,
+      "pnl_usdt_secondary": 158.8641156747864,
+      "reason": "insufficient_data",
+      "split": "VALIDATION"
+    },
+    {
+      "bad_rate": 0.11764705882352941,
+      "episodes": 34,
+      "good_rate": 0.38235294117647056,
+      "pnl_usdt_secondary": 73.2963253736616,
+      "reason": "momentum_not_confirmed",
+      "split": "VALIDATION"
+    },
+    {
+      "bad_rate": 0.3333333333333333,
+      "episodes": 6,
+      "good_rate": 0.3333333333333333,
+      "pnl_usdt_secondary": -39.41802544005728,
+      "reason": "overextended_short",
+      "split": "VALIDATION"
+    },
+    {
+      "bad_rate": 0.1875,
+      "episodes": 96,
+      "good_rate": 0.46875,
+      "pnl_usdt_secondary": -104.41330665798006,
+      "reason": "score_below_entry_quality_threshold",
+      "split": "VALIDATION"
+    },
+    {
+      "bad_rate": 0.4,
+      "episodes": 10,
+      "good_rate": 0.3,
+      "pnl_usdt_secondary": -72.90338787507271,
+      "reason": "volatility_too_high",
+      "split": "VALIDATION"
+    }
+  ],
+  "episodes": 718,
+  "experiment_id": "AEGIS_LIVE_ENTRY_QUALITY_AUDIT_20260815",
+  "feature_availability": {
+    "DISCOVERY": {
+      "adx": 0.3168316831683168,
+      "atr_pct": 0.3168316831683168,
+      "atr_percentile": 0.3168316831683168,
+      "chop_risk": 0.5544554455445545,
+      "choppiness": 0.3168316831683168,
+      "close_location": 0.5346534653465347,
+      "entry_quality_score": 0.5663366336633664,
+      "exhaustion_risk": 0.5544554455445545,
+      "regime_confidence": 0.5544554455445545,
+      "return30m": 0.3168316831683168,
+      "return60m": 0.3168316831683168,
+      "tail_risk_score": 0.5663366336633664,
+      "turbo_score": 1.0,
+      "volume_ratio": 0.3168316831683168
+    },
+    "VALIDATION": {
+      "adx": 0.5211267605633803,
+      "atr_pct": 0.5211267605633803,
+      "atr_percentile": 0.5211267605633803,
+      "chop_risk": 1.0,
+      "choppiness": 0.5211267605633803,
+      "close_location": 0.892018779342723,
+      "entry_quality_score": 1.0,
+      "exhaustion_risk": 1.0,
+      "regime_confidence": 1.0,
+      "return30m": 0.5211267605633803,
+      "return60m": 0.5211267605633803,
+      "tail_risk_score": 1.0,
+      "turbo_score": 1.0,
+      "volume_ratio": 0.5211267605633803
+    }
+  },
+  "guard_evidence": [
+    {
+      "allowed": 264,
+      "allowed_bad_rate": 0.24621212121212122,
+      "allowed_pnl_usdt_secondary": -418.7641682174343,
+      "bad_capture_rate": 0.4247787610619469,
+      "baseline_bad_rate": 0.22376237623762377,
+      "blocked": 241,
+      "good_retention_rate": 0.49049429657794674,
+      "guard": "entry_quality",
+      "split": "DISCOVERY"
+    },
+    {
+      "allowed": 228,
+      "allowed_bad_rate": 0.25,
+      "allowed_pnl_usdt_secondary": -408.8625169675379,
+      "bad_capture_rate": 0.49557522123893805,
+      "baseline_bad_rate": 0.22376237623762377,
+      "blocked": 277,
+      "good_retention_rate": 0.4144486692015209,
+      "guard": "event_risk",
+      "split": "DISCOVERY"
+    },
+    {
+      "allowed": 246,
+      "allowed_bad_rate": 0.25609756097560976,
+      "allowed_pnl_usdt_secondary": -427.66895616086913,
+      "bad_capture_rate": 0.4424778761061947,
+      "baseline_bad_rate": 0.22376237623762377,
+      "blocked": 259,
+      "good_retention_rate": 0.4524714828897338,
+      "guard": "decision_brain",
+      "split": "DISCOVERY"
+    },
+    {
+      "allowed": 228,
+      "allowed_bad_rate": 0.25,
+      "allowed_pnl_usdt_secondary": -408.8625169675379,
+      "bad_capture_rate": 0.49557522123893805,
+      "baseline_bad_rate": 0.22376237623762377,
+      "blocked": 277,
+      "good_retention_rate": 0.4144486692015209,
+      "guard": "clean_entry",
+      "split": "DISCOVERY"
+    },
+    {
+      "allowed": 225,
+      "allowed_bad_rate": 0.24444444444444444,
+      "allowed_pnl_usdt_secondary": -360.75736628295226,
+      "bad_capture_rate": 0.5132743362831859,
+      "baseline_bad_rate": 0.22376237623762377,
+      "blocked": 280,
+      "good_retention_rate": 0.41064638783269963,
+      "guard": "regime",
+      "split": "DISCOVERY"
+    },
+    {
+      "allowed": 505,
+      "allowed_bad_rate": 0.22376237623762377,
+      "allowed_pnl_usdt_secondary": -456.6640940507244,
+      "bad_capture_rate": 0.0,
+      "baseline_bad_rate": 0.22376237623762377,
+      "blocked": 0,
+      "good_retention_rate": 1.0,
+      "guard": "probe_mode",
+      "split": "DISCOVERY"
+    },
+    {
+      "allowed": 67,
+      "allowed_bad_rate": 0.13432835820895522,
+      "allowed_pnl_usdt_secondary": 174.40450037105686,
+      "bad_capture_rate": 0.7567567567567568,
+      "baseline_bad_rate": 0.17370892018779344,
+      "blocked": 146,
+      "good_retention_rate": 0.37623762376237624,
+      "guard": "entry_quality",
+      "split": "VALIDATION"
+    },
+    {
+      "allowed": 0,
+      "allowed_bad_rate": null,
+      "allowed_pnl_usdt_secondary": 0.0,
+      "bad_capture_rate": 1.0,
+      "baseline_bad_rate": 0.17370892018779344,
+      "blocked": 213,
+      "good_retention_rate": 0.0,
+      "guard": "event_risk",
+      "split": "VALIDATION"
+    },
+    {
+      "allowed": 41,
+      "allowed_bad_rate": 0.24390243902439024,
+      "allowed_pnl_usdt_secondary": -68.78643962482609,
+      "bad_capture_rate": 0.7297297297297297,
+      "baseline_bad_rate": 0.17370892018779344,
+      "blocked": 172,
+      "good_retention_rate": 0.19801980198019803,
+      "guard": "decision_brain",
+      "split": "VALIDATION"
+    },
+    {
+      "allowed": 0,
+      "allowed_bad_rate": null,
+      "allowed_pnl_usdt_secondary": 0.0,
+      "bad_capture_rate": 1.0,
+      "baseline_bad_rate": 0.17370892018779344,
+      "blocked": 213,
+      "good_retention_rate": 0.0,
+      "guard": "clean_entry",
+      "split": "VALIDATION"
+    },
+    {
+      "allowed": 0,
+      "allowed_bad_rate": null,
+      "allowed_pnl_usdt_secondary": 0.0,
+      "bad_capture_rate": 1.0,
+      "baseline_bad_rate": 0.17370892018779344,
+      "blocked": 213,
+      "good_retention_rate": 0.0,
+      "guard": "regime",
+      "split": "VALIDATION"
+    },
+    {
+      "allowed": 0,
+      "allowed_bad_rate": null,
+      "allowed_pnl_usdt_secondary": 0.0,
+      "bad_capture_rate": 1.0,
+      "baseline_bad_rate": 0.17370892018779344,
+      "blocked": 213,
+      "good_retention_rate": 0.0,
+      "guard": "probe_mode",
+      "split": "VALIDATION"
+    }
+  ],
+  "limitations": [
+    "PnL is secondary because users manually resized some positions after entry.",
+    "MFE and MAE are complete-trade extrema and do not preserve which excursion occurred first.",
+    "The Live policy and logging schema changed during the sample.",
+    "A passed retrospective validation would justify a frozen prospective observer, not immediate enforcement."
+  ],
+  "model_evidence": {
+    "bootstrap_bad_rate_reduction_ci95": [
+      -0.23670182850870694,
+      0.04214484017719712
+    ],
+    "coefficients": [
+      {
+        "coefficient": 0.6543050271062106,
+        "feature": "missingindicator_close_location"
+      },
+      {
+        "coefficient": -0.2839821588294276,
+        "feature": "exhaustion_risk"
+      },
+      {
+        "coefficient": 0.2802348269517591,
+        "feature": "close_location"
+      },
+      {
+        "coefficient": -0.16041400825884267,
+        "feature": "regime_confidence"
+      },
+      {
+        "coefficient": 0.134883082401937,
+        "feature": "atr_pct"
+      },
+      {
+        "coefficient": 0.13084684494001475,
+        "feature": "choppiness"
+      },
+      {
+        "coefficient": 0.11847598851504705,
+        "feature": "atr_percentile"
+      },
+      {
+        "coefficient": -0.11262381374630881,
+        "feature": "missingindicator_regime_confidence"
+      },
+      {
+        "coefficient": -0.11262381374630881,
+        "feature": "missingindicator_chop_risk"
+      },
+      {
+        "coefficient": -0.11262381374630881,
+        "feature": "missingindicator_exhaustion_risk"
+      },
+      {
+        "coefficient": 0.09872331559398387,
+        "feature": "turbo_score"
+      },
+      {
+        "coefficient": 0.08328442467316774,
+        "feature": "chop_risk"
+      },
+      {
+        "coefficient": -0.08302302162583305,
+        "feature": "entry_quality_score"
+      },
+      {
+        "coefficient": -0.06896979084585668,
+        "feature": "missingindicator_atr_percentile"
+      },
+      {
+        "coefficient": -0.06896979084585668,
+        "feature": "missingindicator_atr_pct"
+      },
+      {
+        "coefficient": -0.06896979084585668,
+        "feature": "missingindicator_adx"
+      },
+      {
+        "coefficient": -0.06896979084585668,
+        "feature": "missingindicator_choppiness"
+      },
+      {
+        "coefficient": -0.06896979084585668,
+        "feature": "missingindicator_return30m"
+      },
+      {
+        "coefficient": -0.06896979084585557,
+        "feature": "missingindicator_return60m"
+      },
+      {
+        "coefficient": -0.06896979084585557,
+        "feature": "missingindicator_volume_ratio"
+      },
+      {
+        "coefficient": 0.06496174799778255,
+        "feature": "tail_risk_score"
+      },
+      {
+        "coefficient": -0.05937975602054121,
+        "feature": "volume_ratio"
+      },
+      {
+        "coefficient": 0.0420715461952718,
+        "feature": "return60m"
+      },
+      {
+        "coefficient": 0.023864787057102564,
+        "feature": "return30m"
+      },
+      {
+        "coefficient": 0.01658656321526237,
+        "feature": "missingindicator_entry_quality_score"
+      },
+      {
+        "coefficient": 0.01658656321526237,
+        "feature": "missingindicator_tail_risk_score"
+      },
+      {
+        "coefficient": 0.0,
+        "feature": "adx"
+      }
+    ],
+    "discovery": {
+      "allowed": 454,
+      "allowed_bad_rate": 0.2026431718061674,
+      "allowed_pnl_usdt_secondary": -344.23443827703414,
+      "bad_capture_rate": 0.18584070796460178,
+      "baseline_bad_rate": 0.22376237623762377,
+      "baseline_pnl_usdt_secondary": -456.6640940507244,
+      "blocked": 51,
+      "episodes": 505,
+      "good_retention_rate": 0.9239543726235742,
+      "relative_bad_rate_reduction": 0.09438228529102184
+    },
+    "gate_passed": false,
+    "threshold": 0.6,
+    "validation": {
+      "allowed": 167,
+      "allowed_bad_rate": 0.19161676646706588,
+      "allowed_pnl_usdt_secondary": 14.123548439958313,
+      "bad_capture_rate": 0.13513513513513514,
+      "baseline_bad_rate": 0.17370892018779344,
+      "baseline_pnl_usdt_secondary": 30.966105771608397,
+      "blocked": 46,
+      "episodes": 213,
+      "good_retention_rate": 0.7821782178217822,
+      "relative_bad_rate_reduction": -0.10309111506716298
+    }
+  },
+  "schema_version": "aegis-live-entry-quality-audit-v1",
+  "source_audit": {
+    "files": 62,
+    "invalid_json": 0,
+    "paired": 718,
+    "unique_closes": 724,
+    "unique_opens": 769,
+    "unpaired": 6
+  }
+}

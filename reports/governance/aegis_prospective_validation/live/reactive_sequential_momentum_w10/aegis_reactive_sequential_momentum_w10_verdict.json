@@ -1,0 +1,31 @@
+{
+  "final_holdout": "SEALED_NOT_OPENED",
+  "flags": {
+    "W10_ANTI_CHURN_GATE_PASSED": false,
+    "W10_COST_GATE_PASSED": false,
+    "W10_DECAY_INFORMATION_FOUND": true,
+    "W10_LATENCY_GATE_PASSED": false,
+    "W10_MODELING_JUSTIFIED": false,
+    "W10_MOMENTUM_DETECTION_FOUND": true,
+    "W10_MOMENTUM_PERSISTENCE_FOUND": true,
+    "W10_READY_FOR_LIVE": false,
+    "W10_READY_FOR_SHADOW": false,
+    "W10_SEQUENTIAL_POLICY_EDGE_FOUND": false
+  },
+  "gate_checks": {
+    "anti_churn": false,
+    "beats_all_baselines": false,
+    "bootstrap_ci": false,
+    "cost_20bps": false,
+    "latency_250ms": false,
+    "minimum_net_per_episode": false,
+    "minimum_net_per_trade": false,
+    "minimum_trades": false,
+    "positive_dates": false,
+    "positive_symbols": false,
+    "profit_factor": false,
+    "single_symbol_concentration": false
+  },
+  "schema_version": "aegis-reactive-sequential-momentum-w10-verdict-v1",
+  "status": "AEGIS_W10_NO_ROBUST_SEQUENTIAL_MOMENTUM_EDGE"
+}
