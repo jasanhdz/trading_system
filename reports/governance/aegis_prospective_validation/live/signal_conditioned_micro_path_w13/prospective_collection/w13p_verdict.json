@@ -1,0 +1,18 @@
+{
+  "schema_id": "aegis-w13p-collection-verdict-v1",
+  "verdict": "AEGIS_W13P_PASSIVE_COLLECTION_IMPLEMENTED",
+  "W13P_COLLECTOR_IMPLEMENTED": true,
+  "W13P_SIGNAL_SNAPSHOT_VALID": true,
+  "W13P_L2_RECONSTRUCTION_VALID": true,
+  "W13P_NON_BLOCKING_VALID": true,
+  "W13P_FINANCIAL_MUTATION_CAPABILITY": false,
+  "W13P_AUTHENTICATED_EXCHANGE_ACCESS": false,
+  "W13P_SAFE_TO_COLLECT": true,
+  "W13P_COLLECTION_ACTIVE": true,
+  "W13P_READY_FOR_W13_RESEARCH": false,
+  "W13_READY_FOR_SHADOW": false,
+  "W13_READY_FOR_LIVE": false,
+  "train_minimum": 1000,
+  "validation_minimum": 500,
+  "W13_FINAL_HOLDOUT": "SEALED_NOT_OPENED"
+}
