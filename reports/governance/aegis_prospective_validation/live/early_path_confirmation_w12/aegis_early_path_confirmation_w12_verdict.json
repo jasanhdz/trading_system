@@ -1,0 +1,829 @@
+{
+  "ablation_bootstrap": {
+    "FULL_W12": {
+      "episode_ci95": [
+        11.068465569677358,
+        30.963682501528563
+      ],
+      "mean_bps": 20.744684285791838,
+      "probability_positive": 0.9936,
+      "temporal_block_ci95": [
+        3.6176324575392518,
+        36.31877010708178
+      ]
+    },
+    "PRICE_PATH_FLOW_CONTEXT": {
+      "episode_ci95": [
+        9.201679631583987,
+        29.893306765093712
+      ],
+      "mean_bps": 19.42420566142326,
+      "probability_positive": 0.9951,
+      "temporal_block_ci95": [
+        5.0947495023623075,
+        30.56132268989256
+      ]
+    },
+    "PRICE_PATH_FLOW_CONTEXT_SPACE": {
+      "episode_ci95": [
+        12.445324197415944,
+        32.738124817340974
+      ],
+      "mean_bps": 22.465876065880835,
+      "probability_positive": 0.9976,
+      "temporal_block_ci95": [
+        5.377477559995226,
+        37.33820361954507
+      ]
+    },
+    "PRICE_PATH_ONLY": {
+      "episode_ci95": [
+        17.362345991864434,
+        42.29359552395668
+      ],
+      "mean_bps": 29.6889755006073,
+      "probability_positive": 0.9953,
+      "temporal_block_ci95": [
+        6.601647783230714,
+        47.20797126701905
+      ]
+    },
+    "PRICE_PATH_PLUS_FLOW": {
+      "episode_ci95": [
+        17.213969658122096,
+        42.23113139675763
+      ],
+      "mean_bps": 29.537709936481736,
+      "probability_positive": 0.9948,
+      "temporal_block_ci95": [
+        6.487153179130015,
+        46.981717328573986
+      ]
+    }
+  },
+  "ablation_metrics": {
+    "FULL_W12": {
+      "actions": {
+        "CANCEL_EARLY_INVALIDATION": 57,
+        "CANCEL_NO_CONFIRMATION": 31,
+        "ENTER_AT_STATE_1": 20,
+        "ENTER_AT_STATE_2": 6
+      },
+      "bad_avoidance": 0.6774193548387096,
+      "cancellation_rate": 0.7719298245614035,
+      "cancelled": 88,
+      "confirmation_too_late_rate": 0.07692307692307693,
+      "episodes": 114,
+      "executed": 26,
+      "execution_rate": 0.22807017543859648,
+      "good_retention": 0.23529411764705882,
+      "gross_bps_per_executed_trade": -25.290343178151655,
+      "gross_bps_per_original_signal": -5.767973005543361,
+      "improvement_vs_enter_now_bps": 20.744684285791838,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.23076923076923078,
+      "median_confirmation_seconds": 93.195,
+      "median_entry_price_improvement_bps": 0.714489854243272,
+      "median_mae_bps": 41.262901381783344,
+      "median_mae_reduction_vs_enter_now": -0.21160949584554595,
+      "median_mfe_bps": 31.80970263700067,
+      "median_missed_mfe_bps": 2.491678964599009,
+      "mixed_retention": 0.125,
+      "net_bps_per_executed_trade": -39.29034317815165,
+      "net_bps_per_original_signal": -8.960955461683712,
+      "profit_factor": 0.2677502118589764,
+      "short_executed": 26,
+      "symbols_executed": 10,
+      "win_rate": 0.38461538461538464
+    },
+    "PRICE_PATH_FLOW_CONTEXT": {
+      "actions": {
+        "CANCEL_EARLY_INVALIDATION": 26,
+        "CANCEL_NO_CONFIRMATION": 66,
+        "ENTER_AT_STATE_1": 16,
+        "ENTER_AT_STATE_2": 6
+      },
+      "bad_avoidance": 0.6774193548387096,
+      "cancellation_rate": 0.8070175438596491,
+      "cancelled": 92,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 22,
+      "execution_rate": 0.19298245614035087,
+      "good_retention": 0.17647058823529413,
+      "gross_bps_per_executed_trade": -39.27652208227096,
+      "gross_bps_per_original_signal": -7.579679700087378,
+      "improvement_vs_enter_now_bps": 19.42420566142326,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.22727272727272727,
+      "median_confirmation_seconds": 101.943,
+      "median_entry_price_improvement_bps": 4.9106303884982605,
+      "median_mae_bps": 61.92540096635613,
+      "median_mae_reduction_vs_enter_now": -0.8183259376424715,
+      "median_mfe_bps": 32.08813574762659,
+      "median_missed_mfe_bps": 1.1102230246251565e-12,
+      "mixed_retention": 0.09375,
+      "net_bps_per_executed_trade": -53.27652208227096,
+      "net_bps_per_original_signal": -10.28143408605229,
+      "profit_factor": 0.12235034294785017,
+      "short_executed": 22,
+      "symbols_executed": 9,
+      "win_rate": 0.22727272727272727
+    },
+    "PRICE_PATH_FLOW_CONTEXT_SPACE": {
+      "actions": {
+        "CANCEL_EARLY_INVALIDATION": 35,
+        "CANCEL_NO_CONFIRMATION": 55,
+        "ENTER_AT_STATE_1": 14,
+        "ENTER_AT_STATE_2": 10
+      },
+      "bad_avoidance": 0.7741935483870968,
+      "cancellation_rate": 0.7894736842105263,
+      "cancelled": 90,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 24,
+      "execution_rate": 0.21052631578947367,
+      "good_retention": 0.19607843137254902,
+      "gross_bps_per_executed_trade": -20.3888774875749,
+      "gross_bps_per_original_signal": -4.292395260542083,
+      "improvement_vs_enter_now_bps": 22.465876065880835,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.25,
+      "median_confirmation_seconds": 107.42699999999999,
+      "median_entry_price_improvement_bps": 2.257422666698261,
+      "median_mae_bps": 46.262165991012296,
+      "median_mae_reduction_vs_enter_now": -0.35840374128027125,
+      "median_mfe_bps": 30.28777898773427,
+      "median_missed_mfe_bps": 1.153199965789331,
+      "mixed_retention": 0.21875,
+      "net_bps_per_executed_trade": -34.388877487574895,
+      "net_bps_per_original_signal": -7.239763681594714,
+      "profit_factor": 0.3046651105586052,
+      "short_executed": 24,
+      "symbols_executed": 9,
+      "win_rate": 0.4166666666666667
+    },
+    "PRICE_PATH_ONLY": {
+      "actions": {
+        "CANCEL_NO_CONFIRMATION": 112,
+        "ENTER_AT_STATE_2": 2
+      },
+      "bad_avoidance": 1.0,
+      "cancellation_rate": 0.9824561403508771,
+      "cancelled": 112,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 2,
+      "execution_rate": 0.017543859649122806,
+      "good_retention": 0.0392156862745098,
+      "gross_bps_per_executed_trade": 13.05013792850973,
+      "gross_bps_per_original_signal": 0.22894978821946896,
+      "improvement_vs_enter_now_bps": 29.6889755006073,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.5,
+      "median_confirmation_seconds": 151.76850000000002,
+      "median_entry_price_improvement_bps": 2.367453353252502,
+      "median_mae_bps": 8.311801512886907,
+      "median_mae_reduction_vs_enter_now": 0.7559391777272568,
+      "median_mfe_bps": 45.52478024022755,
+      "median_missed_mfe_bps": 2.0236979546112144,
+      "mixed_retention": 0.0,
+      "net_bps_per_executed_trade": -0.9498620714902692,
+      "net_bps_per_original_signal": -0.016664246868250337,
+      "profit_factor": 0.9197226288630902,
+      "short_executed": 2,
+      "symbols_executed": 2,
+      "win_rate": 0.5
+    },
+    "PRICE_PATH_PLUS_FLOW": {
+      "actions": {
+        "CANCEL_EARLY_INVALIDATION": 2,
+        "CANCEL_NO_CONFIRMATION": 109,
+        "ENTER_AT_STATE_1": 1,
+        "ENTER_AT_STATE_2": 2
+      },
+      "bad_avoidance": 0.967741935483871,
+      "cancellation_rate": 0.9736842105263158,
+      "cancelled": 111,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 3,
+      "execution_rate": 0.02631578947368421,
+      "good_retention": 0.0196078431372549,
+      "gross_bps_per_executed_trade": 7.618667182234991,
+      "gross_bps_per_original_signal": 0.20049124163776294,
+      "improvement_vs_enter_now_bps": 29.537709936481736,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.3333333333333333,
+      "median_confirmation_seconds": 141.845,
+      "median_entry_price_improvement_bps": 13.953488372091538,
+      "median_mae_bps": 13.934045517882687,
+      "median_mae_reduction_vs_enter_now": 0.590852283778958,
+      "median_mfe_bps": 15.48227279764669,
+      "median_missed_mfe_bps": 1.285727861722874,
+      "mixed_retention": 0.03125,
+      "net_bps_per_executed_trade": -6.381332817765009,
+      "net_bps_per_original_signal": -0.16792981099381601,
+      "profit_factor": 0.532032013574363,
+      "short_executed": 3,
+      "symbols_executed": 3,
+      "win_rate": 0.3333333333333333
+    }
+  },
+  "baseline_metrics": {
+    "ENTER_NOW": {
+      "actions": {
+        "ENTER_NOW": 114
+      },
+      "bad_avoidance": 0.0,
+      "cancellation_rate": 0.0,
+      "cancelled": 0,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 114,
+      "execution_rate": 1.0,
+      "good_retention": 1.0,
+      "gross_bps_per_executed_trade": -15.70563974747555,
+      "gross_bps_per_original_signal": -15.70563974747555,
+      "improvement_vs_enter_now_bps": 0.0,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.19298245614035087,
+      "median_confirmation_seconds": 0.0,
+      "median_entry_price_improvement_bps": null,
+      "median_mae_bps": 34.05627103721831,
+      "median_mae_reduction_vs_enter_now": 0.0,
+      "median_mfe_bps": 35.32710714674481,
+      "median_missed_mfe_bps": null,
+      "mixed_retention": 1.0,
+      "net_bps_per_executed_trade": -29.705639747475555,
+      "net_bps_per_original_signal": -29.705639747475555,
+      "profit_factor": 0.2715832860383449,
+      "short_executed": 114,
+      "symbols_executed": 11,
+      "win_rate": 0.3508771929824561
+    },
+    "W11_FROZEN": {
+      "actions": {
+        "ENTER_NOW": 11,
+        "SKIP_EXHAUSTED": 20,
+        "SKIP_LOW_EXPECTED_VALUE": 4,
+        "SKIP_NO_SPACE": 9,
+        "SKIP_OPPOSED": 54,
+        "SKIP_VOLATILITY_SHOCK": 4,
+        "WAIT_1M": 6,
+        "WAIT_2M": 2,
+        "WAIT_3M": 4
+      },
+      "bad_avoidance": 0.7741935483870968,
+      "cancellation_rate": 0.7982456140350878,
+      "cancelled": 91,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 23,
+      "execution_rate": 0.20175438596491227,
+      "good_retention": 0.17647058823529413,
+      "gross_bps_per_executed_trade": -24.935537399508508,
+      "gross_bps_per_original_signal": -5.0308540367429435,
+      "improvement_vs_enter_now_bps": 21.850224307223833,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.2608695652173913,
+      "median_confirmation_seconds": 60.0,
+      "median_entry_price_improvement_bps": null,
+      "median_mae_bps": 39.18613413715022,
+      "median_mae_reduction_vs_enter_now": -0.1506290308274136,
+      "median_mfe_bps": 36.131774707758304,
+      "median_missed_mfe_bps": null,
+      "mixed_retention": 0.21875,
+      "net_bps_per_executed_trade": -38.935537399508505,
+      "net_bps_per_original_signal": -7.855415440251716,
+      "profit_factor": 0.22595538948840058,
+      "short_executed": 23,
+      "symbols_executed": 7,
+      "win_rate": 0.34782608695652173
+    },
+    "WAIT_1M_FIXED": {
+      "actions": {
+        "WAIT_1M_FIXED": 114
+      },
+      "bad_avoidance": 0.0,
+      "cancellation_rate": 0.0,
+      "cancelled": 0,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 114,
+      "execution_rate": 1.0,
+      "good_retention": 1.0,
+      "gross_bps_per_executed_trade": -15.200224074963701,
+      "gross_bps_per_original_signal": -15.200224074963701,
+      "improvement_vs_enter_now_bps": 0.5054156725118508,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.19298245614035087,
+      "median_confirmation_seconds": 60.0,
+      "median_entry_price_improvement_bps": null,
+      "median_mae_bps": 35.92645538071037,
+      "median_mae_reduction_vs_enter_now": -0.05491453663403833,
+      "median_mfe_bps": 30.27009026108196,
+      "median_missed_mfe_bps": null,
+      "mixed_retention": 1.0,
+      "net_bps_per_executed_trade": -29.2002240749637,
+      "net_bps_per_original_signal": -29.2002240749637,
+      "profit_factor": 0.28295866182575147,
+      "short_executed": 114,
+      "symbols_executed": 11,
+      "win_rate": 0.37719298245614036
+    },
+    "WAIT_2M_FIXED": {
+      "actions": {
+        "WAIT_2M_FIXED": 114
+      },
+      "bad_avoidance": 0.0,
+      "cancellation_rate": 0.0,
+      "cancelled": 0,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 114,
+      "execution_rate": 1.0,
+      "good_retention": 1.0,
+      "gross_bps_per_executed_trade": -13.326620228544561,
+      "gross_bps_per_original_signal": -13.326620228544561,
+      "improvement_vs_enter_now_bps": 2.379019518930988,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.19298245614035087,
+      "median_confirmation_seconds": 120.0,
+      "median_entry_price_improvement_bps": null,
+      "median_mae_bps": 38.84028691459762,
+      "median_mae_reduction_vs_enter_now": -0.14047386080969085,
+      "median_mfe_bps": 30.311553900914667,
+      "median_missed_mfe_bps": null,
+      "mixed_retention": 1.0,
+      "net_bps_per_executed_trade": -27.326620228544563,
+      "net_bps_per_original_signal": -27.326620228544563,
+      "profit_factor": 0.303206101604308,
+      "short_executed": 114,
+      "symbols_executed": 11,
+      "win_rate": 0.41228070175438597
+    },
+    "WAIT_3M_FIXED": {
+      "actions": {
+        "WAIT_3M_FIXED": 114
+      },
+      "bad_avoidance": 0.0,
+      "cancellation_rate": 0.0,
+      "cancelled": 0,
+      "confirmation_too_late_rate": 0.0,
+      "episodes": 114,
+      "executed": 114,
+      "execution_rate": 1.0,
+      "good_retention": 1.0,
+      "gross_bps_per_executed_trade": -15.417208528900861,
+      "gross_bps_per_original_signal": -15.417208528900861,
+      "improvement_vs_enter_now_bps": 0.2884312185746915,
+      "long_executed": 0,
+      "maximum_single_symbol_fraction": 0.19298245614035087,
+      "median_confirmation_seconds": 180.0,
+      "median_entry_price_improvement_bps": null,
+      "median_mae_bps": 39.235144763905,
+      "median_mae_reduction_vs_enter_now": -0.15206813808320266,
+      "median_mfe_bps": 32.648044889240225,
+      "median_missed_mfe_bps": null,
+      "mixed_retention": 1.0,
+      "net_bps_per_executed_trade": -29.41720852890086,
+      "net_bps_per_original_signal": -29.41720852890086,
+      "profit_factor": 0.2809427151524978,
+      "short_executed": 114,
+      "symbols_executed": 11,
+      "win_rate": 0.38596491228070173
+    }
+  },
+  "bootstrap": {
+    "ENTER_NOW": {
+      "episode_ci95": [
+        11.068465569677358,
+        30.963682501528563
+      ],
+      "mean_bps": 20.744684285791838,
+      "probability_positive": 0.9936,
+      "temporal_block_ci95": [
+        3.6176324575392518,
+        36.31877010708178
+      ]
+    },
+    "W11_FROZEN": {
+      "episode_ci95": [
+        -7.657212908002352,
+        4.7826568364253195
+      ],
+      "mean_bps": -1.1055400214319957,
+      "probability_positive": 0.1206,
+      "temporal_block_ci95": [
+        -3.0514664522737838,
+        0.7185412384047244
+      ]
+    },
+    "WAIT_2M_FIXED": {
+      "episode_ci95": [
+        8.879251881555755,
+        28.10489161866924
+      ],
+      "mean_bps": 18.36566476686085,
+      "probability_positive": 0.9778,
+      "temporal_block_ci95": [
+        0.531413698542834,
+        34.43484922775409
+      ]
+    }
+  },
+  "confirmation_time_seconds": {
+    "median": 93.195,
+    "q25": 82.68725,
+    "q75": 108.65474999999999
+  },
+  "dataset": {
+    "states": 1102,
+    "train_episodes": 437,
+    "validation_episodes": 114
+  },
+  "early_path_class_diagnostics": [
+    {
+      "entry_class": "BAD_ENTRY",
+      "episodes": 31,
+      "median_adverse_excursion_bps": 9.135200974419444,
+      "median_directional_return_bps": -2.2547914317927464,
+      "median_directional_taker_imbalance": -0.09782710062482508,
+      "median_favorable_excursion_bps": 2.220446049250313e-12,
+      "median_path_efficiency": 1.0,
+      "positive_remaining_rate": 0.0,
+      "state_index": 1
+    },
+    {
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 51,
+      "median_adverse_excursion_bps": 2.761668047501775,
+      "median_directional_return_bps": 1.748098942402354,
+      "median_directional_taker_imbalance": 0.03491265853074904,
+      "median_favorable_excursion_bps": 3.5932446999631384,
+      "median_path_efficiency": 1.0,
+      "positive_remaining_rate": 0.47058823529411764,
+      "state_index": 1
+    },
+    {
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 32,
+      "median_adverse_excursion_bps": 5.667827263829972,
+      "median_directional_return_bps": 5.551115123125783e-13,
+      "median_directional_taker_imbalance": -0.004528107689799624,
+      "median_favorable_excursion_bps": 3.051476491807703,
+      "median_path_efficiency": 1.0,
+      "positive_remaining_rate": 0.1875,
+      "state_index": 1
+    },
+    {
+      "entry_class": "BAD_ENTRY",
+      "episodes": 31,
+      "median_adverse_excursion_bps": 10.472770795930675,
+      "median_directional_return_bps": -4.21585160202298,
+      "median_directional_taker_imbalance": -0.08642973109017302,
+      "median_favorable_excursion_bps": 5.274261603376296,
+      "median_path_efficiency": 1.0,
+      "positive_remaining_rate": 0.0,
+      "state_index": 2
+    },
+    {
+      "entry_class": "GOOD_CLEAN_ENTRY",
+      "episodes": 51,
+      "median_adverse_excursion_bps": 3.9888312724345454,
+      "median_directional_return_bps": 1.3296104241466988,
+      "median_directional_taker_imbalance": 0.017879503396367073,
+      "median_favorable_excursion_bps": 7.965561656837483,
+      "median_path_efficiency": 1.0,
+      "positive_remaining_rate": 0.49019607843137253,
+      "state_index": 2
+    },
+    {
+      "entry_class": "MIXED_OR_EXIT_DEPENDENT",
+      "episodes": 32,
+      "median_adverse_excursion_bps": 6.402659488992102,
+      "median_directional_return_bps": -2.5056029831016513,
+      "median_directional_taker_imbalance": -0.04980681996184677,
+      "median_favorable_excursion_bps": 3.459363510418534,
+      "median_path_efficiency": 1.0,
+      "positive_remaining_rate": 0.28125,
+      "state_index": 2
+    }
+  ],
+  "feature_counts": {
+    "FULL_W12": 256,
+    "PRICE_PATH_FLOW_CONTEXT": 104,
+    "PRICE_PATH_FLOW_CONTEXT_SPACE": 176,
+    "PRICE_PATH_ONLY": 16,
+    "PRICE_PATH_PLUS_FLOW": 24
+  },
+  "flags": {
+    "W12_COST_GATE_PASSED": false,
+    "W12_DYNAMIC_CONFIRMATION_VALUE_FOUND": true,
+    "W12_EARLY_PATH_INFORMATION_FOUND": true,
+    "W12_EXECUTED_TRADE_EDGE_FOUND": false,
+    "W12_MODELING_JUSTIFIED": false,
+    "W12_PER_SIGNAL_EDGE_FOUND": false,
+    "W12_READY_FOR_LIVE": false,
+    "W12_READY_FOR_PROSPECTIVE_OBSERVATION": false,
+    "W12_READY_FOR_SHADOW": false,
+    "W12_REMAINING_EDGE_FOUND": false,
+    "W12_SHORT_ONLY_EVIDENCE": true
+  },
+  "holdouts": {
+    "W11_AUGUST_HOLDOUT": "SEALED_NOT_OPENED",
+    "W12_FINAL_HOLDOUT": "SEALED_NOT_OPENED",
+    "opened": false
+  },
+  "limitations": [
+    "No sub-minute data overlap exists for the Live signals; 15s/30s/90s states were not fabricated.",
+    "W12 validation contains only SHORT signals, so LONG transfer is untested.",
+    "The W12 and W11 holdouts remain sealed because validation is the only promotion gate used here."
+  ],
+  "model_metrics": {
+    "FULL_W12": {
+      "balanced_accuracy": 0.4923780487804878,
+      "brier_score": 0.3242499625460384,
+      "log_loss": 1.0417973271830563,
+      "positive_label_rate": 0.2807017543859649
+    },
+    "PRICE_PATH_FLOW_CONTEXT": {
+      "balanced_accuracy": 0.46875,
+      "brier_score": 0.29556988327205186,
+      "log_loss": 0.803167582074822,
+      "positive_label_rate": 0.2807017543859649
+    },
+    "PRICE_PATH_FLOW_CONTEXT_SPACE": {
+      "balanced_accuracy": 0.4975228658536585,
+      "brier_score": 0.28775116111445803,
+      "log_loss": 0.7972268865573366,
+      "positive_label_rate": 0.2807017543859649
+    },
+    "PRICE_PATH_ONLY": {
+      "balanced_accuracy": 0.6179496951219512,
+      "brier_score": 0.2377956574700704,
+      "log_loss": 0.6685018381734197,
+      "positive_label_rate": 0.2807017543859649
+    },
+    "PRICE_PATH_PLUS_FLOW": {
+      "balanced_accuracy": 0.6312881097560976,
+      "brier_score": 0.23932662221886652,
+      "log_loss": 0.6724935939578547,
+      "positive_label_rate": 0.2807017543859649
+    }
+  },
+  "multiple_comparisons": {
+    "adjusted_p_values": {
+      "FULL_W12": 0.006399999999999961,
+      "PRICE_PATH_FLOW_CONTEXT": 0.006399999999999961,
+      "PRICE_PATH_FLOW_CONTEXT_SPACE": 0.006399999999999961,
+      "PRICE_PATH_ONLY": 0.006399999999999961,
+      "PRICE_PATH_PLUS_FLOW": 0.006399999999999961
+    },
+    "method": "BENJAMINI_HOCHBERG",
+    "raw_p_values": {
+      "FULL_W12": 0.006399999999999961,
+      "PRICE_PATH_FLOW_CONTEXT": 0.0049000000000000155,
+      "PRICE_PATH_FLOW_CONTEXT_SPACE": 0.0023999999999999577,
+      "PRICE_PATH_ONLY": 0.0047000000000000375,
+      "PRICE_PATH_PLUS_FLOW": 0.005199999999999982
+    }
+  },
+  "primary_per_date": [
+    {
+      "episodes": 26,
+      "executed": 3,
+      "net_bps_per_signal": -8.023248916206622,
+      "net_bps_per_trade": -69.53482394045739,
+      "signal_date": "2026-07-01"
+    },
+    {
+      "episodes": 8,
+      "executed": 1,
+      "net_bps_per_signal": 8.07283183311894,
+      "net_bps_per_trade": 64.58265466495152,
+      "signal_date": "2026-07-03"
+    },
+    {
+      "episodes": 9,
+      "executed": 0,
+      "net_bps_per_signal": 0.0,
+      "net_bps_per_trade": null,
+      "signal_date": "2026-07-04"
+    },
+    {
+      "episodes": 7,
+      "executed": 1,
+      "net_bps_per_signal": -14.802168838014692,
+      "net_bps_per_trade": -103.61518186610284,
+      "signal_date": "2026-07-05"
+    },
+    {
+      "episodes": 16,
+      "executed": 12,
+      "net_bps_per_signal": -48.30396720176473,
+      "net_bps_per_trade": -64.40528960235297,
+      "signal_date": "2026-07-06"
+    },
+    {
+      "episodes": 2,
+      "executed": 0,
+      "net_bps_per_signal": 0.0,
+      "net_bps_per_trade": null,
+      "signal_date": "2026-07-08"
+    },
+    {
+      "episodes": 4,
+      "executed": 1,
+      "net_bps_per_signal": -10.662243667068747,
+      "net_bps_per_trade": -42.64897466827499,
+      "signal_date": "2026-07-22"
+    },
+    {
+      "episodes": 12,
+      "executed": 3,
+      "net_bps_per_signal": -5.153599533043653,
+      "net_bps_per_trade": -20.61439813217461,
+      "signal_date": "2026-07-23"
+    },
+    {
+      "episodes": 13,
+      "executed": 5,
+      "net_bps_per_signal": 7.957209283354984,
+      "net_bps_per_trade": 20.68874413672296,
+      "signal_date": "2026-07-24"
+    },
+    {
+      "episodes": 8,
+      "executed": 0,
+      "net_bps_per_signal": 0.0,
+      "net_bps_per_trade": null,
+      "signal_date": "2026-07-25"
+    },
+    {
+      "episodes": 9,
+      "executed": 0,
+      "net_bps_per_signal": 0.0,
+      "net_bps_per_trade": null,
+      "signal_date": "2026-07-26"
+    }
+  ],
+  "primary_per_symbol": [
+    {
+      "episodes": 22,
+      "executed": 6,
+      "net_bps_per_signal": -19.818556656983283,
+      "net_bps_per_trade": -72.66804107560537,
+      "symbol": "ADAUSDT"
+    },
+    {
+      "episodes": 16,
+      "executed": 4,
+      "net_bps_per_signal": -3.3750173473831273,
+      "net_bps_per_trade": -13.500069389532507,
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "episodes": 1,
+      "executed": 0,
+      "net_bps_per_signal": 0.0,
+      "net_bps_per_trade": null,
+      "symbol": "BNBUSDT"
+    },
+    {
+      "episodes": 3,
+      "executed": 1,
+      "net_bps_per_signal": -72.79529582942179,
+      "net_bps_per_trade": -218.38588748826535,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "episodes": 13,
+      "executed": 1,
+      "net_bps_per_signal": 6.625287457500351,
+      "net_bps_per_trade": 86.12873694750456,
+      "symbol": "DOGEUSDT"
+    },
+    {
+      "episodes": 10,
+      "executed": 2,
+      "net_bps_per_signal": -11.109734684263104,
+      "net_bps_per_trade": -55.54867342131552,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "episodes": 4,
+      "executed": 1,
+      "net_bps_per_signal": -2.621265377855783,
+      "net_bps_per_trade": -10.485061511423131,
+      "symbol": "LINKUSDT"
+    },
+    {
+      "episodes": 14,
+      "executed": 4,
+      "net_bps_per_signal": -8.776210747571128,
+      "net_bps_per_trade": -30.716737616498946,
+      "symbol": "LTCUSDT"
+    },
+    {
+      "episodes": 9,
+      "executed": 2,
+      "net_bps_per_signal": 2.82959431006353,
+      "net_bps_per_trade": 12.733174395285886,
+      "symbol": "SOLUSDT"
+    },
+    {
+      "episodes": 10,
+      "executed": 1,
+      "net_bps_per_signal": -2.690877796901846,
+      "net_bps_per_trade": -26.90877796901846,
+      "symbol": "SUIUSDT"
+    },
+    {
+      "episodes": 12,
+      "executed": 4,
+      "net_bps_per_signal": -12.782621673410281,
+      "net_bps_per_trade": -38.34786502023084,
+      "symbol": "XRPUSDT"
+    }
+  ],
+  "primary_stress_metrics": {
+    "actions": {
+      "CANCEL_EARLY_INVALIDATION": 57,
+      "CANCEL_NO_CONFIRMATION": 31,
+      "ENTER_AT_STATE_1": 20,
+      "ENTER_AT_STATE_2": 6
+    },
+    "bad_avoidance": 0.6774193548387096,
+    "cancellation_rate": 0.7719298245614035,
+    "cancelled": 88,
+    "confirmation_too_late_rate": 0.07692307692307693,
+    "episodes": 114,
+    "executed": 26,
+    "execution_rate": 0.22807017543859648,
+    "good_retention": 0.23529411764705882,
+    "gross_bps_per_executed_trade": -25.290343178151655,
+    "gross_bps_per_original_signal": -5.767973005543361,
+    "improvement_vs_enter_now_bps": 19.37626323316026,
+    "long_executed": 0,
+    "maximum_single_symbol_fraction": 0.23076923076923078,
+    "median_confirmation_seconds": 93.195,
+    "median_entry_price_improvement_bps": 0.714489854243272,
+    "median_mae_bps": 41.262901381783344,
+    "median_mae_reduction_vs_enter_now": -0.21160949584554595,
+    "median_mfe_bps": 31.80970263700067,
+    "median_missed_mfe_bps": 2.491678964599009,
+    "mixed_retention": 0.125,
+    "net_bps_per_executed_trade": -45.29034317815165,
+    "net_bps_per_original_signal": -10.329376514315292,
+    "profit_factor": 0.21297169835578234,
+    "short_executed": 26,
+    "symbols_executed": 10,
+    "win_rate": 0.34615384615384615
+  },
+  "resolution": {
+    "core": "CLOSED_1M",
+    "optional_l2_overlap": "NONE",
+    "states": [
+      "FULL_POST_SIGNAL_BAR_1",
+      "FULL_POST_SIGNAL_BAR_2"
+    ],
+    "subminute_available": false
+  },
+  "restrictions_verified": {
+    "authenticated_api_used": false,
+    "brain_modified": false,
+    "exchange_modified": false,
+    "guards_modified": false,
+    "leverage_modified": false,
+    "live_enabled": false,
+    "orders_sent": false,
+    "pm2_modified": false,
+    "production_modified": false,
+    "shadow_enabled": false,
+    "typescript_modified": false
+  },
+  "schema_version": "aegis-early-path-confirmation-w12-verdict-v1",
+  "status": "AEGIS_W12_NO_ROBUST_EARLY_PATH_EDGE",
+  "validation_gates": {
+    "bad_avoidance": true,
+    "beats_enter_now": true,
+    "beats_w11": false,
+    "beats_wait_2m": true,
+    "bootstrap_enter_now": true,
+    "bootstrap_w11": false,
+    "bootstrap_wait_2m": true,
+    "concentration": true,
+    "execution_rate": true,
+    "good_retention": false,
+    "mae_reduction": false,
+    "minimum_episodes": true,
+    "minimum_executed": true,
+    "positive_per_signal": false,
+    "positive_per_trade": false,
+    "stress_cost": false,
+    "symbol_breadth": true
+  }
+}
