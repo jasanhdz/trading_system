@@ -1,0 +1,11 @@
+{
+  "verdict": "AEGIS_W14_NO_RECENT_ECONOMIC_EDGE",
+  "W14A_RECENT_SHORT_EDGE_FOUND": false,
+  "W14B_VOLUME_NAVIGATION_EDGE_FOUND": false,
+  "W14_EDGE_FOUND": false,
+  "W14_MODELING_JUSTIFIED": false,
+  "W14_READY_FOR_SHADOW": false,
+  "W14_READY_FOR_LIVE": false,
+  "FINAL_HOLDOUT": "SEALED_NOT_OPENED",
+  "production_modified": false
+}

@@ -1,0 +1,57 @@
+schema_version: aegis-recent-short-w14-v1
+experiment_id: AEGIS_W14_RECENT_SHORT_AND_VOLUME_NAVIGATION
+status: PREREGISTERED_BEFORE_VALIDATION
+data_end_utc: "2026-08-15T06:59:00Z"
+universe:
+  - ADAUSDT
+  - AVAXUSDT
+  - BNBUSDT
+  - BTCUSDT
+  - DOGEUSDT
+  - ETHUSDT
+  - LINKUSDT
+  - LTCUSDT
+  - SOLUSDT
+  - SUIUSDT
+  - XRPUSDT
+splits:
+  train: ["2026-07-09T00:00:00Z", "2026-08-07T23:59:59Z"]
+  calibration: ["2026-08-08T00:00:00Z", "2026-08-11T23:59:59Z"]
+  validation: ["2026-08-12T00:00:00Z", "2026-08-15T06:59:00Z"]
+  final_holdout: SEALED_NOT_OPENED
+costs_bps: [14.0, 20.0]
+w14a:
+  side: SHORT
+  anchor_cadence: 1h
+  horizons_minutes: [15, 30, 60]
+  models: [regularized_logistic, shallow_hist_gradient_boosting]
+  calibration_selection_quantiles: [0.80, 0.90, 0.95]
+  minimum_calibration_trades: 50
+  minimum_validation_trades: 40
+  minimum_positive_symbols: 4
+  minimum_net_expectancy_bps: 2.0
+w14b:
+  sides: [LONG, SHORT]
+  sequence_lengths: [2, 3]
+  volume_ratio_minimums: [1.0, 1.5]
+  exits: [fixed_15m, fixed_30m, causal_decay]
+  minimum_separation_bars: 12
+  causal_decay:
+    maximum_bars: 12
+    adverse_closes: 2
+    activation_mfe_bps: 14.0
+    giveback_fraction: 0.40
+    cooldown_bars: 3
+  minimum_validation_trades: 40
+  minimum_positive_symbols: 4
+  minimum_net_expectancy_bps: 2.0
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_block: 6h
+  bootstrap_seed: 20260816
+governance:
+  production_changes: FORBIDDEN
+  automatic_activation: false
+  leverage_optimization: false
+  validation_threshold_retuning: false
+  primary_metric: net_bps_per_original_anchor
