@@ -1,0 +1,30 @@
+schema_version: aegis-recent-short-signal-gate-w15-v1
+experiment_id: AEGIS_W15_RECENT_SHORT_SIGNAL_GATE
+status: PREREGISTERED_BEFORE_VALIDATION
+side: SHORT
+source: data/prospective_shadow/cohort_1/journals
+splits:
+  train: ["2026-07-21T00:00:00Z", "2026-08-07T23:59:59Z"]
+  calibration: ["2026-08-08T00:00:00Z", "2026-08-11T23:59:59Z"]
+  validation: ["2026-08-12T00:00:00Z", "2026-08-16T23:59:59Z"]
+  future_prospective_start: FREEZE_COMMIT_TIMESTAMP
+  final_holdout: FUTURE_ONLY_SEALED
+models: [regularized_logistic, shallow_hgb, shallow_hgb_regression]
+threshold_quantiles: [0.70, 0.80, 0.90]
+minimum_calibration_trades: 40
+minimum_validation_trades: 40
+minimum_positive_symbols: 4
+minimum_net_expectancy_bps_at_14bps: 2.0
+costs:
+  recorded_round_trip_bps: 10.0
+  baseline_stress_bps: 14.0
+  severe_stress_bps: 20.0
+statistics:
+  bootstrap_repetitions: 10000
+  block_hours: 12
+  seed: 20260816
+governance:
+  input_population: AEGIS_ENTER_NOW_SHORT_ONLY
+  action_space: [TAKE, SKIP]
+  automatic_activation: false
+  production_changes: forbidden

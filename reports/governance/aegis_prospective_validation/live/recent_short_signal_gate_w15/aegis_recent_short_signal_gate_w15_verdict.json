@@ -1,0 +1,9 @@
+{
+  "verdict": "AEGIS_W15_NO_RECENT_SHORT_SIGNAL_EDGE",
+  "W15_RECENT_SHORT_SIGNAL_EDGE_FOUND": false,
+  "W15_MODELING_JUSTIFIED": false,
+  "W15_READY_FOR_SHADOW": false,
+  "W15_READY_FOR_LIVE": false,
+  "FINAL_HOLDOUT": "FUTURE_ONLY_SEALED",
+  "production_modified": false
+}
