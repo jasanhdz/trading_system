@@ -1,0 +1,38 @@
+schema_version: aegis-recent-strategy-atlas-w16-v1
+experiment_id: AEGIS_W16_RECENT_CLASSIC_STRATEGY_ATLAS
+status: PREREGISTERED_BEFORE_WALK_FORWARD
+source: data/live_entry_quality_audit_20260815/candles_1m
+universe: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+walk_forward:
+  first_test_day: "2026-08-01"
+  last_test_day: "2026-08-15"
+  train_days: 30
+  maximum_trades_per_test_day: 8
+  target_training_trades_per_day: [3, 8]
+  minimum_training_trades: 60
+costs_bps: [10.0, 14.0, 20.0]
+families:
+  mean_reversion:
+    extension_atr: [1.0, 1.5, 2.0]
+    rsi_extremes: [[30, 70], [25, 75]]
+    maximum_abs_ema25_slope_atr: [0.15, 0.30]
+    maximum_hold_bars: [6, 12]
+    stop_atr: 1.0
+  trend_pullback:
+    minimum_ema25_slope_atr: [0.10, 0.20]
+    maximum_hold_bars: [6, 12]
+    stop_atr: 1.0
+  breakout:
+    lookback_bars: [12, 24]
+    minimum_volume_ratio: [1.25, 1.50]
+    maximum_hold_bars: [6, 12]
+    stop_atr: 1.0
+selection:
+  primary_metric: net_bps_per_day_at_10bps
+  require_positive_training_net: true
+  no_trade_if_no_candidate_passes: true
+governance:
+  no_production_changes: true
+  no_orders: true
+  no_parameter_changes_after_test: true
+  ready_for_live: false
