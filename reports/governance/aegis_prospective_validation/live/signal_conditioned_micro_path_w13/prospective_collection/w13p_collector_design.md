@@ -18,6 +18,8 @@ block, alter, route, place, or cancel a financial action.
    codes, scores, collector wall/monotonic clocks, and nearest causal BBO are hashed
    into an immutable signal snapshot.
 4. The ring contributes T0-30s and the live stream contributes through T0+180s.
+   Five-second full-book checkpoints are retained with the ring; the checkpoint at or
+   before T0-30s is persisted with the diffs required for deterministic L2 replay.
 5. Overlapping signals share persisted market events; each signal retains its own
    logical time range and quality record.
 6. Bounded queues decouple ingestion and Parquet/ZSTD batches. Overflow invalidates

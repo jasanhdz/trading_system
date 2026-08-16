@@ -8,6 +8,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from aegis.research.prospective_microstructure_w13p import (
+    CURRENT_QUALITY_GATE_VERSION,
     CollectorConfig,
     JournalTail,
     LocalOrderBook,
@@ -68,6 +69,17 @@ def envelope(t0_iso: str = "2026-08-15T12:00:00.000Z") -> dict:
     }
 
 
+def l2_snapshot(t0_us: int) -> dict:
+    return {
+        "exchange_timestamp_us": t0_us - 35_000_000,
+        "last_update_id": 99,
+        "generation": 1,
+        "valid": True,
+        "bids": [("100", "2")],
+        "asks": [("101", "3")],
+    }
+
+
 def test_local_book_snapshot_sequence_duplicate_gap_cross_and_resync():
     book = LocalOrderBook("BTCUSDT")
     book.buffer({"U": 100, "u": 101, "pu": 99, "b": [["100", "2"]], "a": []})
@@ -83,6 +95,19 @@ def test_local_book_snapshot_sequence_duplicate_gap_cross_and_resync():
     assert not book.integrity.valid
 
 
+def test_book_checkpoint_is_sorted_and_versioned():
+    book = LocalOrderBook("BTCUSDT")
+    book.bids = {"99": "1", "100": "2"}
+    book.asks = {"102": "1", "101": "3"}
+    book.integrity.valid = True
+    book.integrity.last_update_id = 77
+    book.integrity.generation = 2
+    checkpoint = book.checkpoint(123_000_000)
+    assert checkpoint["bids"] == [("100", "2"), ("99", "1")]
+    assert checkpoint["asks"] == [("101", "3"), ("102", "1")]
+    assert checkpoint["last_update_id"] == 77
+
+
 def test_signal_snapshot_ring_window_overlap_and_quality(tmp_path: Path, monkeypatch):
     emitted = []
     cfg = config(tmp_path, ring_max_events_per_symbol=5000)
@@ -93,10 +118,10 @@ def test_signal_snapshot_ring_window_overlap_and_quality(tmp_path: Path, monkeyp
         for kind in ("BOOK", "QUOTE", "TRADE"):
             core.observe_event(event(t0 + second * 1_000_000, kind, str(second)))
     first = envelope()
-    assert core.observe_signal(first) == "a" * 64
+    assert core.observe_signal(first, l2_base_snapshot=l2_snapshot(t0)) == "a" * 64
     second = envelope()
     second["prospective_signal_id"] = "f" * 64
-    assert core.observe_signal(second) == "f" * 64
+    assert core.observe_signal(second, l2_base_snapshot=l2_snapshot(t0)) == "f" * 64
     for second in range(1, 181):
         for kind in ("BOOK", "QUOTE", "TRADE"):
             core.observe_event(event(t0 + second * 1_000_000, kind, str(second)))
@@ -110,6 +135,8 @@ def test_signal_snapshot_ring_window_overlap_and_quality(tmp_path: Path, monkeyp
     assert snapshots[0]["reference_mid"] == 100.5
     assert snapshots[0]["financial_mutation_capability"] is False
     assert snapshots[0]["authenticated_exchange_access"] is False
+    assert snapshots[0]["l2_base_snapshot_valid"] is True
+    assert json.loads(snapshots[0]["l2_base_bids_json"]) == [["100", "2"]]
     assert snapshots[0]["open_position_state"] == "NOT_COLLECTED_PUBLIC_ONLY"
     without_hash = dict(snapshots[0])
     digest = without_hash.pop("signal_snapshot_hash")
@@ -160,7 +187,7 @@ def test_parquet_writer_bounded_queue_and_progress(tmp_path: Path):
 
 async def _exercise_parquet_writer(tmp_path: Path):
     writer = ParquetBatchWriter(tmp_path, max_queue=1, batch_rows=1, flush_seconds=1)
-    assert writer.submit("QUALITY", {"signal_id": "a", "symbol": "BTCUSDT", "side": "SHORT", "signal_timestamp_us": 1_765_800_000_000_000, "W13_ELIGIBLE": True})
+    assert writer.submit("QUALITY", {"signal_id": "a", "symbol": "BTCUSDT", "side": "SHORT", "signal_timestamp_us": 1_765_800_000_000_000, "W13_ELIGIBLE": True, "quality_gate_version": CURRENT_QUALITY_GATE_VERSION})
     assert not writer.submit("QUALITY", {"signal_id": "b"})
     assert writer.dropped == 1
     task = asyncio.create_task(writer.run())
@@ -236,3 +263,23 @@ def test_raw_trade_stream_is_normalized(tmp_path: Path):
     assert row.event_type == "TRADE"
     assert row.event_id == "T:BTCUSDT:123"
     assert row.payload["p"] == "100.1"
+
+
+def test_valid_depth_updates_create_causal_book_checkpoints(tmp_path: Path):
+    sidecar = W13PSidecar(config(tmp_path), consume_signals=False)
+    book = sidecar.books["BTCUSDT"]
+    book.buffer({"U": 100, "u": 101, "pu": 99, "b": [["100", "2"]], "a": []})
+    assert book.install_snapshot(
+        {"lastUpdateId": 100, "bids": [["99", "1"]], "asks": [["101", "1"]]}
+    )
+    row = sidecar._normalize(
+        {"e": "depthUpdate", "E": 1_765_800_000_000, "T": 1_765_800_000_000,
+         "s": "BTCUSDT", "U": 102, "u": 102, "pu": 101,
+         "b": [["100", "3"]], "a": []},
+        1_765_800_000_000_100,
+        99,
+    )
+    assert row is not None and row.book_valid
+    checkpoint = sidecar.book_checkpoints["BTCUSDT"][-1]
+    assert checkpoint["exchange_timestamp_us"] == 1_765_800_000_000_000
+    assert checkpoint["last_update_id"] == 102

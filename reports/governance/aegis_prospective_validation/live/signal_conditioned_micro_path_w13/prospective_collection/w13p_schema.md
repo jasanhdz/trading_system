@@ -9,6 +9,11 @@ Primary key: `signal_id` (the contemporary `prospective_signal_id`). Includes ca
 T0, collector observation clocks/delay, symbol, side, causal BBO/mid, source envelope
 JSON, model/config hashes, commits, reasons, scores, schema version and snapshot hash.
 
+Quality gate v2 also embeds the latest valid full L2 checkpoint at or before T0-30s:
+checkpoint exchange timestamp, update ID, generation, and sorted bid/ask levels. Raw
+diffs from that checkpoint onward are persisted so L1/L5/L10/L20 and depth can be
+reconstructed without a future snapshot.
+
 Account-derived state is never queried; descriptive fields contain
 `NOT_COLLECTED_PUBLIC_ONLY`.
 
@@ -27,8 +32,8 @@ lossless normalized public payload JSON.
 ## QUALITY
 
 One terminal row per completed signal: logical start/T0/end, pre/post completeness,
-L2 continuity, quote/trade coverage, maximum observed gap, event counts, reconnect and
-drop state, quality version, and `W13_ELIGIBLE`.
+L2 base snapshot and continuity, quote/trade coverage, maximum observed gap, event
+counts, reconnect/drop state, quality version, and `W13_ELIGIBLE`.
 
 Physical layout is Parquet/ZSTD partitioned by record kind, UTC date and symbol.
 Overlapping signals reference a shared event stream by time and segment rather than

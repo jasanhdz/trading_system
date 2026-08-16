@@ -41,5 +41,14 @@ The collector now retains 90 seconds physically (logical output remains T0-30s) 
 raw trades. Inter-event gaps remain descriptive because the streams are event-driven.
 The six original quality records remain unchanged and excluded.
 
+## Full L2 reconstruction correction
+
+A pilot audit of ten core-path bundles found that diff events alone cannot reconstruct
+absolute historical depth without a base snapshot. From quality gate v2 onward, the
+collector maintains causal five-second L2 checkpoints and persists the latest valid
+checkpoint at or before T0-30s plus all subsequent diffs. The ten legacy bundles remain
+usable for price/BBO/trade-flow description but do not count toward full W13 sample
+minimums.
+
 Collection does not authorize W13 research before sample minima and does not authorize
 Shadow or Live decisions.

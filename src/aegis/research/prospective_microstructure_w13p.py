@@ -29,6 +29,7 @@ import yaml
 
 SCHEMA_VERSION = "aegis-w13p-v1"
 SIGNAL_SCHEMA = "aegis-prospective-signal-evidence-v1"
+CURRENT_QUALITY_GATE_VERSION = "w13p-quality-v2-l2-base-snapshot"
 PUBLIC_WS_HOST = "fstream.binance.com"
 PUBLIC_SNAPSHOT_PATH = "/fapi/v1/depth"
 EVENT_TYPES = frozenset({"BOOK", "QUOTE", "TRADE"})
@@ -250,6 +251,16 @@ class LocalOrderBook:
     def _crossed(self) -> bool:
         return bool(self.bids and self.asks and max(map(float, self.bids)) >= min(map(float, self.asks)))
 
+    def checkpoint(self, exchange_timestamp_us: int) -> dict[str, Any]:
+        return {
+            "exchange_timestamp_us": exchange_timestamp_us,
+            "last_update_id": self.integrity.last_update_id,
+            "generation": self.integrity.generation,
+            "valid": self.integrity.valid,
+            "bids": sorted(((price, quantity) for price, quantity in self.bids.items()), key=lambda x: float(x[0]), reverse=True),
+            "asks": sorted(((price, quantity) for price, quantity in self.asks.items()), key=lambda x: float(x[0])),
+        }
+
 
 @dataclass
 class SignalWindow:
@@ -262,6 +273,8 @@ class SignalWindow:
     snapshot_hash: str
     capture_segment_id: str
     metadata: dict[str, Any]
+    capture_start_us: int
+    l2_base_snapshot_valid: bool
     event_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     first_event_us: int | None = None
     last_event_us: int | None = None
@@ -310,7 +323,12 @@ class PassiveCaptureCore:
         for window in active:
             self._account(window, event)
 
-    def observe_signal(self, envelope: Mapping[str, Any]) -> str | None:
+    def observe_signal(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        l2_base_snapshot: Mapping[str, Any] | None = None,
+    ) -> str | None:
         if envelope.get("schema_id") != SIGNAL_SCHEMA:
             raise ValueError("W13P_SIGNAL_SCHEMA_INVALID")
         if envelope.get("final_decision", {}).get("action") != "ENTER_NOW":
@@ -348,6 +366,23 @@ class PassiveCaptureCore:
             "capture_only": True,
             "financial_mutation_capability": False,
             "authenticated_exchange_access": False,
+            "l2_base_snapshot_timestamp_us": (
+                int(l2_base_snapshot["exchange_timestamp_us"])
+                if l2_base_snapshot is not None else None
+            ),
+            "l2_base_snapshot_last_update_id": (
+                int(l2_base_snapshot["last_update_id"])
+                if l2_base_snapshot is not None and l2_base_snapshot.get("last_update_id") is not None else None
+            ),
+            "l2_base_snapshot_generation": (
+                int(l2_base_snapshot["generation"])
+                if l2_base_snapshot is not None else None
+            ),
+            "l2_base_snapshot_valid": bool(
+                l2_base_snapshot is not None and l2_base_snapshot.get("valid")
+            ),
+            "l2_base_bids_json": _canonical_json(l2_base_snapshot.get("bids", [])) if l2_base_snapshot else "[]",
+            "l2_base_asks_json": _canonical_json(l2_base_snapshot.get("asks", [])) if l2_base_snapshot else "[]",
         }
         quote = next(
             (
@@ -365,19 +400,31 @@ class PassiveCaptureCore:
         snapshot_hash = _sha256(snapshot)
         snapshot["signal_snapshot_hash"] = snapshot_hash
         segment = f"seg-{symbol}-{t0}-{uuid.uuid4().hex[:12]}"
+        logical_start = t0 - self.config.pre_signal_seconds * 1_000_000
+        snapshot_timestamp = (
+            int(l2_base_snapshot["exchange_timestamp_us"])
+            if l2_base_snapshot is not None else logical_start
+        )
+        snapshot_valid = bool(
+            l2_base_snapshot is not None
+            and l2_base_snapshot.get("valid")
+            and snapshot_timestamp <= logical_start
+        )
         window = SignalWindow(
             signal_id, symbol, side, t0,
-            t0 - self.config.pre_signal_seconds * 1_000_000,
+            logical_start,
             t0 + self.config.post_signal_seconds * 1_000_000,
-            snapshot_hash, segment, snapshot, drops_at_start=self.drop_count,
+            snapshot_hash, segment, snapshot, snapshot_timestamp, snapshot_valid,
+            drops_at_start=self.drop_count,
         )
         self.active[signal_id] = window
         if not self.emit("SIGNAL", snapshot):
             self.note_drop()
             window.invalid_book_seen = True
         for event in self.rings[symbol]:
-            if window.start_us <= event.exchange_event_timestamp_us <= t0:
+            if window.capture_start_us <= event.exchange_event_timestamp_us <= t0:
                 self._persist_event_once(event, segment)
+            if window.start_us <= event.exchange_event_timestamp_us <= t0:
                 self._account(window, event)
         return signal_id
 
@@ -393,7 +440,7 @@ class PassiveCaptureCore:
             post_complete = window.last_event_us is not None and window.last_event_us > window.t0_us
             quote_ok = window.event_counts.get("QUOTE", 0) > 0
             trade_ok = window.event_counts.get("TRADE", 0) > 0
-            eligible = all((pre_complete, post_complete, quote_ok, trade_ok, not window.invalid_book_seen, self.drop_count == window.drops_at_start))
+            eligible = all((pre_complete, post_complete, quote_ok, trade_ok, window.l2_base_snapshot_valid, not window.invalid_book_seen, self.drop_count == window.drops_at_start))
             quality = {
                 "schema_id": f"{SCHEMA_VERSION}-signal-quality",
                 "signal_id": signal_id,
@@ -407,12 +454,14 @@ class PassiveCaptureCore:
                 "l2_sequence_valid": not window.invalid_book_seen,
                 "quote_coverage": quote_ok,
                 "trade_coverage": trade_ok,
+                "l2_base_snapshot_valid": window.l2_base_snapshot_valid,
+                "l2_base_snapshot_timestamp_us": window.capture_start_us,
                 "max_gap_ms": window.max_gap_us / 1000,
                 "event_counts_json": _canonical_json(dict(window.event_counts)),
                 "reconnect_during_window": window.reconnects > 0,
                 "disk_drop_count": self.drop_count - window.drops_at_start,
                 "W13_ELIGIBLE": eligible,
-                "quality_gate_version": "w13p-quality-v1",
+                "quality_gate_version": CURRENT_QUALITY_GATE_VERSION,
             }
             if not self.emit("QUALITY", quality):
                 self.note_drop()
@@ -583,6 +632,10 @@ class W13PSidecar:
         self.resync_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=max(1, len(config.symbols) * 4))
         self.resync_pending: set[str] = set()
         self.started_wall_us = _now_wall_us()
+        self.book_checkpoints: dict[str, deque[dict[str, Any]]] = {
+            symbol: deque() for symbol in config.symbols
+        }
+        self.last_book_checkpoint_us: dict[str, int] = defaultdict(int)
 
     async def run(self, duration_seconds: float | None = None) -> None:
         self._assert_disk_safe()
@@ -624,7 +677,15 @@ class W13PSidecar:
     async def _signal_loop(self) -> None:
         while not self.stop_event.is_set():
             for row in self.tail.poll():
-                self.core.observe_signal(row)
+                symbol = str(row.get("symbol", "")).upper()
+                t0 = _utc_us(str(row["signal_timestamp_utc"])) if row.get("signal_timestamp_utc") else 0
+                logical_start = t0 - self.config.pre_signal_seconds * 1_000_000
+                checkpoints = self.book_checkpoints.get(symbol, ())
+                base = next(
+                    (checkpoint for checkpoint in reversed(checkpoints) if int(checkpoint["exchange_timestamp_us"]) <= logical_start),
+                    None,
+                )
+                self.core.observe_signal(row, l2_base_snapshot=base)
             self.core.finalize(_now_wall_us())
             self._assert_disk_safe()
             await asyncio.sleep(0.2)
@@ -756,7 +817,15 @@ class W13PSidecar:
                 if book.needs_snapshot:
                     self._request_resync(symbol)
             payload = {key: data.get(key) for key in ("E", "T", "U", "u", "pu", "b", "a")}
-            return MarketEvent(f"D:{symbol}:{data['U']}:{data['u']}", "BOOK", symbol, int(data["E"]) * 1000, int(data.get("T", data["E"])) * 1000, wall, mono, payload, valid, book.integrity.generation)
+            exchange_us = int(data["E"]) * 1000
+            if valid and exchange_us - self.last_book_checkpoint_us[symbol] >= 5_000_000:
+                checkpoints = self.book_checkpoints[symbol]
+                checkpoints.append(book.checkpoint(exchange_us))
+                self.last_book_checkpoint_us[symbol] = exchange_us
+                cutoff = exchange_us - self.config.ring_retention_seconds * 1_000_000
+                while checkpoints and int(checkpoints[0]["exchange_timestamp_us"]) < cutoff:
+                    checkpoints.popleft()
+            return MarketEvent(f"D:{symbol}:{data['U']}:{data['u']}", "BOOK", symbol, exchange_us, int(data.get("T", data["E"])) * 1000, wall, mono, payload, valid, book.integrity.generation)
         if kind == "bookTicker":
             payload = {key: data.get(key) for key in ("E", "T", "u", "b", "B", "a", "A")}
             return MarketEvent(f"Q:{symbol}:{data.get('u')}:{data.get('E')}", "QUOTE", symbol, int(data["E"]) * 1000, int(data.get("T", data["E"])) * 1000, wall, mono, payload, book.integrity.valid, book.integrity.generation)
@@ -783,7 +852,11 @@ def progress_report(root: Path) -> dict[str, Any]:
     signals = [row for path in signal_files for row in pq.read_table(path).to_pylist()]
     signals_by_id = {str(row["signal_id"]): row for row in signals}
     quality_by_id = {str(row["signal_id"]): row for row in rows}
-    eligible = [row for row in rows if row.get("W13_ELIGIBLE")]
+    legacy_eligible = [row for row in rows if row.get("W13_ELIGIBLE")]
+    eligible = [
+        row for row in legacy_eligible
+        if row.get("quality_gate_version") == CURRENT_QUALITY_GATE_VERSION
+    ]
     by_symbol: dict[str, int] = defaultdict(int)
     by_day: dict[str, int] = defaultdict(int)
     directions: dict[str, int] = defaultdict(int)
@@ -798,6 +871,7 @@ def progress_report(root: Path) -> dict[str, Any]:
         "schema_id": "aegis-w13p-progress-v1",
         "total_signals_captured": len(signals_by_id),
         "eligible_signals": len(eligible),
+        "legacy_core_path_eligible_signals": len(legacy_eligible) - len(eligible),
         "ineligible_signals": len(rows) - len(eligible),
         "pending_signal_windows": len(set(signals_by_id) - set(quality_by_id)),
         "direction_counts": dict(sorted(directions.items())),
