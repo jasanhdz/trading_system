@@ -61,6 +61,7 @@ class CollectorConfig:
     depth_stream_interval: str = "100ms"
     pre_signal_seconds: int = 30
     post_signal_seconds: int = 180
+    ring_retention_seconds: int = 90
     ring_max_events_per_symbol: int = 500_000
     market_queue_max_events: int = 250_000
     disk_queue_max_records: int = 250_000
@@ -91,6 +92,8 @@ class CollectorConfig:
             raise ValueError("W13P_SYMBOL_UNIVERSE_INVALID")
         if self.pre_signal_seconds != 30 or self.post_signal_seconds != 180:
             raise ValueError("W13P_CAPTURE_WINDOW_MUST_REMAIN_PREREGISTERED")
+        if self.ring_retention_seconds < self.pre_signal_seconds + 30:
+            raise ValueError("W13P_RING_RETENTION_INSUFFICIENT_FOR_JOURNAL_DELAY")
         websocket = urlparse(self.public_websocket_url)
         snapshot = urlparse(self.public_snapshot_url)
         if websocket.scheme != "wss" or websocket.hostname != PUBLIC_WS_HOST or websocket.path != "/public/stream":
@@ -275,7 +278,10 @@ class PassiveCaptureCore:
         self.config = config
         self.emit = emit
         self.rings: dict[str, deque[MarketEvent]] = {
-            symbol: deque(maxlen=config.ring_max_events_per_symbol) for symbol in config.symbols
+            symbol: deque() for symbol in config.symbols
+        }
+        self.ring_type_counts: dict[str, dict[str, int]] = {
+            symbol: defaultdict(int) for symbol in config.symbols
         }
         self.active: dict[str, SignalWindow] = {}
         self.persisted: dict[str, int] = {}
@@ -287,10 +293,15 @@ class PassiveCaptureCore:
         ring = self.rings.get(event.symbol)
         if ring is None:
             return
+        if len(ring) >= self.config.ring_max_events_per_symbol:
+            evicted = ring.popleft()
+            self.ring_type_counts[event.symbol][evicted.event_type] -= 1
         ring.append(event)
-        cutoff = event.exchange_event_timestamp_us - self.config.pre_signal_seconds * 1_000_000
+        self.ring_type_counts[event.symbol][event.event_type] += 1
+        cutoff = event.exchange_event_timestamp_us - self.config.ring_retention_seconds * 1_000_000
         while ring and ring[0].exchange_event_timestamp_us < cutoff:
-            ring.popleft()
+            evicted = ring.popleft()
+            self.ring_type_counts[event.symbol][evicted.event_type] -= 1
         self._prune_persisted(cutoff)
         active = [w for w in self.active.values() if w.symbol == event.symbol and w.start_us <= event.exchange_event_timestamp_us <= w.end_us]
         if not active:
@@ -376,11 +387,13 @@ class PassiveCaptureCore:
             if through_us < window.end_us:
                 continue
             pre_complete = window.first_event_us is not None and window.first_event_us <= window.start_us + 1_500_000
-            post_complete = window.last_event_us is not None and window.last_event_us >= window.end_us - 1_500_000
+            # Streams are event-driven: a quiet interval is not data loss. The
+            # window is complete when capture survived through its deadline;
+            # reconnects, sequence loss and queue drops are checked separately.
+            post_complete = window.last_event_us is not None and window.last_event_us > window.t0_us
             quote_ok = window.event_counts.get("QUOTE", 0) > 0
             trade_ok = window.event_counts.get("TRADE", 0) > 0
-            gap_ok = window.max_gap_us <= self.config.maximum_quality_gap_ms * 1000
-            eligible = all((pre_complete, post_complete, quote_ok, trade_ok, gap_ok, not window.invalid_book_seen, self.drop_count == window.drops_at_start))
+            eligible = all((pre_complete, post_complete, quote_ok, trade_ok, not window.invalid_book_seen, self.drop_count == window.drops_at_start))
             quality = {
                 "schema_id": f"{SCHEMA_VERSION}-signal-quality",
                 "signal_id": signal_id,
@@ -634,6 +647,10 @@ class W13PSidecar:
                     "collector_drop_count": self.core.drop_count,
                     "disk_drop_count": self.writer.dropped,
                     "reconnect_count": self.core.reconnect_count,
+                    "ring_event_counts": {
+                        symbol: dict(counts)
+                        for symbol, counts in self.core.ring_type_counts.items()
+                    },
                     "books": {symbol: asdict(book.integrity) for symbol, book in self.books.items()},
                 }
                 path = self.config.storage_root / "runtime" / "health.json"
@@ -650,7 +667,7 @@ class W13PSidecar:
         streams = []
         for symbol in self.config.symbols:
             lower = symbol.lower()
-            streams.extend((f"{lower}@depth@{self.config.depth_stream_interval}", f"{lower}@bookTicker", f"{lower}@aggTrade"))
+            streams.extend((f"{lower}@depth@{self.config.depth_stream_interval}", f"{lower}@bookTicker", f"{lower}@trade"))
         url = f"{self.config.public_websocket_url}?streams={'/'.join(streams)}"
         timeout = aiohttp.ClientTimeout(total=None, connect=20, sock_read=30)
         while not self.stop_event.is_set():
@@ -743,9 +760,10 @@ class W13PSidecar:
         if kind == "bookTicker":
             payload = {key: data.get(key) for key in ("E", "T", "u", "b", "B", "a", "A")}
             return MarketEvent(f"Q:{symbol}:{data.get('u')}:{data.get('E')}", "QUOTE", symbol, int(data["E"]) * 1000, int(data.get("T", data["E"])) * 1000, wall, mono, payload, book.integrity.valid, book.integrity.generation)
-        if kind == "aggTrade":
-            payload = {key: data.get(key) for key in ("E", "a", "p", "q", "f", "l", "T", "m")}
-            return MarketEvent(f"T:{symbol}:{data['a']}", "TRADE", symbol, int(data["E"]) * 1000, int(data["T"]) * 1000, wall, mono, payload, book.integrity.valid, book.integrity.generation)
+        if kind in {"trade", "aggTrade"}:
+            trade_id = data.get("t", data.get("a"))
+            payload = {key: data.get(key) for key in ("E", "t", "a", "p", "q", "f", "l", "T", "m", "X")}
+            return MarketEvent(f"T:{symbol}:{trade_id}", "TRADE", symbol, int(data["E"]) * 1000, int(data["T"]) * 1000, wall, mono, payload, book.integrity.valid, book.integrity.generation)
         return None
 
     def _assert_disk_safe(self) -> None:

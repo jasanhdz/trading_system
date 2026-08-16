@@ -8,8 +8,10 @@ block, alter, route, place, or cancel a financial action.
 
 ## Data path
 
-1. Public combined streams continuously populate bounded 30-second rings for the 11
-   Aegis symbols: `depth@100ms`, `bookTicker`, and `aggTrade`.
+1. Public combined streams continuously populate bounded 90-second rings for the 11
+   Aegis symbols: `depth@100ms`, `bookTicker`, and raw `trade`. The longer physical
+   retention absorbs journal publication delay; the persisted logical window remains
+   exactly T0-30s/T0+180s.
 2. The sidecar tails `signal_evidence_v1.jsonl` from a durable byte offset. Only a
    frozen `ENTER_NOW` envelope opens a logical capture window.
 3. At T0 the complete source envelope, model/configuration hashes, commits, reason

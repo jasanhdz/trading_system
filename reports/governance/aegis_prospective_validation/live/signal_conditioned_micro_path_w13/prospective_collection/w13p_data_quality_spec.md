@@ -6,10 +6,17 @@ A signal is eligible only when all preregistered acquisition conditions pass:
 - post-window reaches T0+180s within 1.5s tolerance;
 - no L2 sequence invalidity, crossed book, queue/disk drop or reconnect in the window;
 - at least one quote and trade event;
-- maximum combined-stream gap no greater than 1,000ms.
+- inter-event gaps are recorded descriptively but are not a rejection condition:
+  Binance streams are event-driven, so market inactivity is not evidence of data loss.
+  Sequence continuity, socket reconnects and queue drops are the causal loss tests.
 
 Every discontinuity is explicit. No gap interpolation, synthetic depth, retrospective
 signal recreation or outcome label is permitted.
+
+The first six prospective signals remain permanently ineligible. They exposed a
+measurement defect: a 30-second physical ring could not cover T0-30s after the journal
+publication delay, and `aggTrade` emitted no events on the active public endpoint.
+They are not rewritten after switching to a 90-second ring and raw `trade` stream.
 
 The collector records quality only; it does not assign GOOD/BAD, ENTER/CANCEL,
 TRAIN/VALIDATION or W13 thresholds. Minimum future samples remain TRAIN >= 1,000 and

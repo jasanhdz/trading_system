@@ -29,6 +29,7 @@ def config(tmp_path: Path, **overrides) -> CollectorConfig:
         public_snapshot_url="https://fapi.binance.com/fapi/v1/depth",
         pre_signal_seconds=30,
         post_signal_seconds=180,
+        ring_retention_seconds=90,
         ring_max_events_per_symbol=1000,
         market_queue_max_events=2,
         disk_queue_max_records=100,
@@ -104,6 +105,7 @@ def test_signal_snapshot_ring_window_overlap_and_quality(tmp_path: Path, monkeyp
     assert all(row["W13_ELIGIBLE"] for row in quality)
     event_rows = [row for kind, row in emitted if kind == "EVENT"]
     assert len(event_rows) == 211 * 3  # shared once despite two logical windows
+    assert core.ring_type_counts["BTCUSDT"] == {"BOOK": 91, "QUOTE": 91, "TRADE": 91}
     snapshots = [row for kind, row in emitted if kind == "SIGNAL"]
     assert snapshots[0]["reference_mid"] == 100.5
     assert snapshots[0]["financial_mutation_capability"] is False
@@ -217,3 +219,20 @@ def test_non_public_urls_and_unregistered_window_are_rejected(tmp_path: Path):
         config(tmp_path, public_websocket_url="wss://fstream.binance.com.evil.invalid/public/stream").validate()
     with pytest.raises(ValueError, match="PREREGISTERED"):
         config(tmp_path, pre_signal_seconds=29).validate()
+    with pytest.raises(ValueError, match="RING_RETENTION"):
+        config(tmp_path, ring_retention_seconds=45).validate()
+
+
+def test_raw_trade_stream_is_normalized(tmp_path: Path):
+    sidecar = W13PSidecar(config(tmp_path), consume_signals=False)
+    row = sidecar._normalize(
+        {"e": "trade", "E": 1_765_800_000_000, "T": 1_765_800_000_000,
+         "s": "BTCUSDT", "t": 123, "p": "100.1", "q": "2", "m": False,
+         "X": "MARKET"},
+        1_765_800_000_000_100,
+        99,
+    )
+    assert row is not None
+    assert row.event_type == "TRADE"
+    assert row.event_id == "T:BTCUSDT:123"
+    assert row.payload["p"] == "100.1"

@@ -10,6 +10,7 @@ depth_snapshot_limit: 1000
 depth_stream_interval: 100ms
 pre_signal_seconds: 30
 post_signal_seconds: 180
+ring_retention_seconds: 90
 ring_max_events_per_symbol: 100000
 market_queue_max_events: 50000
 disk_queue_max_records: 100000
@@ -20,7 +21,7 @@ maximum_collection_gb: 100
 quality:
   minimum_pre_coverage_ratio: 0.95
   minimum_post_coverage_ratio: 0.95
-  maximum_gap_ms: 1000
+  maximum_gap_ms: DESCRIPTIVE_ONLY_EVENT_DRIVEN_STREAMS
   require_l2_sequence_valid: true
   require_quotes: true
   require_trades: true

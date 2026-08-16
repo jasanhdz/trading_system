@@ -32,5 +32,14 @@ snapshot and logical window were preserved, but it was correctly marked ineligib
 (`pre_window_complete=false`, L2 invalid interval, no trade coverage). No attempt was
 made to repair or relabel it.
 
+## 2026-08-16 acquisition correction
+
+The first six signals were all ineligible. The audit identified two acquisition defects:
+the physical ring was too short for the approximately 15-second journal publication
+delay, and the active public endpoint emitted raw `trade` rather than `aggTrade` events.
+The collector now retains 90 seconds physically (logical output remains T0-30s) and uses
+raw trades. Inter-event gaps remain descriptive because the streams are event-driven.
+The six original quality records remain unchanged and excluded.
+
 Collection does not authorize W13 research before sample minima and does not authorize
 Shadow or Live decisions.

@@ -16,5 +16,6 @@ first 1,500 signals and imposes hard guards:
 - never stop or backpressure trading.
 
 Current filesystem at activation audit: 914 GB total, 242 GB used, 634 GB available.
-The ring is memory-only, bounded and covers all active Aegis symbols because starting a
-stream only after a signal cannot recover the required 30 seconds of pre-context.
+The 90-second physical ring is memory-only, bounded and covers all active Aegis symbols.
+It includes margin for journal publication delay while only T0-30s is persisted; starting
+a stream after a signal cannot recover that required pre-context.
