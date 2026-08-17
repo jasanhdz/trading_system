@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 import signal
 import time
@@ -33,6 +34,19 @@ CURRENT_QUALITY_GATE_VERSION = "w13p-quality-v2-l2-base-snapshot"
 PUBLIC_WS_HOST = "fstream.binance.com"
 PUBLIC_SNAPSHOT_PATH = "/fapi/v1/depth"
 EVENT_TYPES = frozenset({"BOOK", "QUOTE", "TRADE"})
+
+
+def _rate_limit_delay_seconds(headers: Mapping[str, Any], body: str, now_ms: int) -> float:
+    retry_after = headers.get("Retry-After") or headers.get("retry-after")
+    delays = [60.0]
+    try:
+        delays.append(float(retry_after))
+    except (TypeError, ValueError):
+        pass
+    match = re.search(r"banned until\s+(\d+)", body)
+    if match:
+        delays.append(max(0.0, (int(match.group(1)) - now_ms) / 1000.0))
+    return max(delays)
 
 
 def _canonical_json(value: Any) -> str:
@@ -186,7 +200,7 @@ class LocalOrderBook:
         started = False
         for event in pending:
             if not started:
-                if int(event["U"]) <= last <= int(event["u"]):
+                if int(event["U"]) <= last + 1 <= int(event["u"]):
                     self._apply_levels(event)
                     self.integrity.last_update_id = int(event["u"])
                     started = True
@@ -206,7 +220,7 @@ class LocalOrderBook:
             if update_id < previous:
                 self.integrity.duplicates += 1
                 return False
-            if int(event["U"]) <= previous <= update_id:
+            if int(event["U"]) <= previous + 1 <= update_id:
                 self._apply_levels(event)
                 self.integrity.last_update_id = update_id
                 self.integrity.valid = not self._crossed()
@@ -636,6 +650,9 @@ class W13PSidecar:
             symbol: deque() for symbol in config.symbols
         }
         self.last_book_checkpoint_us: dict[str, int] = defaultdict(int)
+        self.snapshot_semaphore = asyncio.Semaphore(1)
+        self.snapshot_backoff_until_monotonic = 0.0
+        self.snapshot_rate_limit_count = 0
 
     async def run(self, duration_seconds: float | None = None) -> None:
         self._assert_disk_safe()
@@ -708,6 +725,10 @@ class W13PSidecar:
                     "collector_drop_count": self.core.drop_count,
                     "disk_drop_count": self.writer.dropped,
                     "reconnect_count": self.core.reconnect_count,
+                    "snapshot_rate_limit_count": self.snapshot_rate_limit_count,
+                    "snapshot_backoff_remaining_seconds": max(
+                        0.0, self.snapshot_backoff_until_monotonic - time.monotonic()
+                    ),
                     "ring_event_counts": {
                         symbol: dict(counts)
                         for symbol, counts in self.core.ring_type_counts.items()
@@ -756,6 +777,8 @@ class W13PSidecar:
                 await asyncio.sleep(1)
 
     def _request_resync(self, symbol: str) -> None:
+        if time.monotonic() < self.snapshot_backoff_until_monotonic:
+            return
         if symbol in self.resync_pending or (symbol in self.snapshot_tasks and not self.snapshot_tasks[symbol].done()):
             return
         try:
@@ -776,16 +799,28 @@ class W13PSidecar:
 
     async def _resync_book(self, session: aiohttp.ClientSession, symbol: str) -> None:
         params = {"symbol": symbol, "limit": self.config.depth_snapshot_limit}
-        for attempt in range(5):
-            try:
-                async with session.get(self.config.public_snapshot_url, params=params) as response:
-                    response.raise_for_status()
-                    book = self.books[symbol]
-                    if book.install_snapshot(await response.json()) or not book.needs_snapshot:
-                        return
-            except Exception:
-                self.books[symbol].invalidate()
-            await asyncio.sleep(0.2 * (attempt + 1))
+        async with self.snapshot_semaphore:
+            if time.monotonic() < self.snapshot_backoff_until_monotonic:
+                return
+            for attempt in range(5):
+                try:
+                    async with session.get(self.config.public_snapshot_url, params=params) as response:
+                        if response.status in {418, 429}:
+                            body = await response.text()
+                            delay = _rate_limit_delay_seconds(
+                                response.headers, body, int(time.time() * 1000)
+                            )
+                            self.snapshot_backoff_until_monotonic = time.monotonic() + delay
+                            self.snapshot_rate_limit_count += 1
+                            self.books[symbol].invalidate()
+                            return
+                        response.raise_for_status()
+                        book = self.books[symbol]
+                        if book.install_snapshot(await response.json()) or not book.needs_snapshot:
+                            return
+                except Exception:
+                    self.books[symbol].invalidate()
+                await asyncio.sleep(0.5 * (attempt + 1))
         self.books[symbol].invalidate()
 
     async def _market_worker(self) -> None:

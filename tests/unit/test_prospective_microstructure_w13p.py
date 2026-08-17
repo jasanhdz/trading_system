@@ -16,6 +16,7 @@ from aegis.research.prospective_microstructure_w13p import (
     ParquetBatchWriter,
     PassiveCaptureCore,
     W13PSidecar,
+    _rate_limit_delay_seconds,
     _write_parquet_part,
     progress_report,
 )
@@ -95,6 +96,16 @@ def test_local_book_snapshot_sequence_duplicate_gap_cross_and_resync():
     assert not book.integrity.valid
 
 
+def test_snapshot_accepts_first_diff_starting_at_next_update_id():
+    book = LocalOrderBook("BTCUSDT")
+    assert not book.install_snapshot(
+        {"lastUpdateId": 100, "bids": [["99", "1"]], "asks": [["101", "1"]]}
+    )
+    assert book.apply({"U": 101, "u": 101, "pu": 100, "b": [["100", "2"]], "a": []})
+    assert book.integrity.valid
+    assert book.integrity.last_update_id == 101
+
+
 def test_book_checkpoint_is_sorted_and_versioned():
     book = LocalOrderBook("BTCUSDT")
     book.bids = {"99": "1", "100": "2"}
@@ -106,6 +117,15 @@ def test_book_checkpoint_is_sorted_and_versioned():
     assert checkpoint["bids"] == [("100", "2"), ("99", "1")]
     assert checkpoint["asks"] == [("101", "3"), ("102", "1")]
     assert checkpoint["last_update_id"] == 77
+
+
+def test_rate_limit_delay_honors_ban_timestamp_and_retry_after():
+    delay = _rate_limit_delay_seconds(
+        {"Retry-After": "120"},
+        '{"code":-1003,"msg":"IP banned until 1000500"}',
+        1_000_000,
+    )
+    assert delay == 120.0
 
 
 def test_signal_snapshot_ring_window_overlap_and_quality(tmp_path: Path, monkeypatch):

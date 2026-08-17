@@ -50,5 +50,19 @@ checkpoint at or before T0-30s plus all subsequent diffs. The ten legacy bundles
 usable for price/BBO/trade-flow description but do not count toward full W13 sample
 minimums.
 
+## 2026-08-17 sequence and rate-limit correction
+
+A runtime audit found all local books invalid after repeated snapshot attempts. The
+snapshot bridge had required the first diff to contain `lastUpdateId`; Binance also
+permits the first applicable diff to begin at `lastUpdateId + 1`. The bridge and
+post-snapshot recovery checks now accept that documented contiguous sequence.
+
+The prior retry loop triggered a temporary public REST IP ban. Snapshot requests are
+now globally serialized and a `418`/`429` response creates a collector-wide backoff
+that honors `Retry-After` and Binance's ban-until timestamp. During that backoff the
+sidecar keeps trading-independent market acquisition running, marks books invalid and
+does not create eligible L2 bundles. Health reports expose the rate-limit count and
+remaining backoff. Existing bundles and quality decisions were not rewritten.
+
 Collection does not authorize W13 research before sample minima and does not authorize
 Shadow or Live decisions.

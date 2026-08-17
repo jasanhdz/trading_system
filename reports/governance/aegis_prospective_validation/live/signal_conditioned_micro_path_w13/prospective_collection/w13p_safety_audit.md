@@ -44,6 +44,11 @@ On 2026-08-15 a full-universe 15-second public dry run reconstructed all 11 book
 Initial dry runs exposed and fixed two sidecar-only defects: event-loop fairness and
 serial snapshot initialization. Neither run consumed signal events or affected Aegis.
 
+A later runtime audit corrected the snapshot-to-diff bridge to accept a first update
+starting at `lastUpdateId + 1`. It also added one-at-a-time public snapshots and a
+global backoff for HTTP `418`/`429`. Rate limiting therefore invalidates collection
+quality instead of producing a retry storm or blocking a trading process.
+
 ## Verdict
 
 `W13P_SAFE_TO_COLLECT = TRUE` applies only to passive public acquisition. It is not a
