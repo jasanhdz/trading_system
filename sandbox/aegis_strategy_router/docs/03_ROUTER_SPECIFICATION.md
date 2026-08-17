@@ -25,6 +25,11 @@ The router receives:
 
 Assessments from different snapshot IDs are rejected.
 
+Every assessment follows the probability and magnitude contract frozen in
+`10_PHASE0_FROZEN_DECISIONS.md`: the three barrier probabilities come from one
+coherent multinomial distribution and sum to one within tolerance. Conditional
+and unconditional excursion fields are distinct and may not be substituted.
+
 ## 3. Decision stages
 
 ### Stage A: integrity and hard abstention
@@ -36,7 +41,7 @@ Return `SKIP` immediately when:
 - required timeframe has not warmed up;
 - timestamp ordering cannot be proven;
 - critical OOD is detected;
-- a preregistered safety critic is CRITICAL.
+- critical data quality or OOD policy requires abstention.
 
 This stage never chooses a strategy.
 
@@ -80,28 +85,24 @@ Probability alone is insufficient because strategies have different gains,
 losses, and horizons. Each assessment is transformed into a comparable research
 utility.
 
-Conceptual form:
+Frozen barrier-payoff core:
 
 ```text
-directional_value
-  = P(favorable first) × expected favorable excursion
-  - P(adverse first) × expected adverse excursion
+expected_barrier_payoff
+  = p_favorable_first × favorable_barrier
+  - p_adverse_first × adverse_barrier
+  + p_neither × expected_terminal_return_given_neither
 
 router_value
-  = directional_value
-  + path-quality adjustment
-  - uncertainty penalty
-  - OOD penalty
-  - conflict penalty
-  - lateness/consumed-move penalty
+  = lower_90_bound(expected_barrier_payoff)
 ```
 
-During early directional research, costs are reported separately. Before any
-deployment gate, transaction costs and latency must be added to router value.
-Leverage is never part of this formula.
-
-The exact coefficients are not chosen in this design document. They must be
-preregistered or learned on TRAIN only and frozen before validation.
+The lower bound is estimated by the frozen block-bootstrap model ensemble with
+the frozen calibration map defined in the Phase 0 record. No learned utility weights, critic
+penalties, or path-quality coefficients exist in the initial router. Path,
+conflict, OOD, lateness, and economic requirements are explicit gates. The
+formula does not multiply unconditional MFE/MAE by event probabilities, which
+would count event likelihood twice. Leverage is never part of this formula.
 
 ### Stage F: dominance and conflict
 
@@ -110,16 +111,20 @@ bound rather than point estimate where possible.
 
 Required conditions for `ENTER`:
 
-- winner exceeds its absolute minimum quality;
+- winner conservative value exceeds the frozen 20 bps plausibility hurdle;
 - winner exceeds `NONE/NO_TRADE`;
-- winner exceeds the runner-up by a frozen dominance margin;
-- no opposed strategy remains within the ambiguity band;
-- risk critics remain below their allowed severity;
+- winner exceeds the runner-up by at least 5 bps;
+- no opposed `CONFLICT_ONLY` strategy remains within 5 bps of the winner;
+- `p_favorable_first > p_adverse_first`;
+- `expected_mfe_unconditional > expected_mae_unconditional`;
+- no hard data-quality, version, or critical-OOD abstention exists;
+- diagnostic market critics are recorded but do not alter initial utility;
 - expected remaining move has not already been consumed;
 - intended horizon is compatible with timeframe context.
 
-Otherwise return `WAIT` if evidence may resolve within a frozen expiry, or
-`SKIP` when it cannot.
+Otherwise return terminal `WAIT` during static router replay when evidence may
+resolve later, or `SKIP` when it cannot. Static `WAIT` does not read another
+snapshot; sequential reevaluation begins only in the later pending experiment.
 
 ### Stage G: action contract
 
@@ -157,6 +162,11 @@ separate data, labels, governance, and authorization.
 
 Initial work uses signal-conditioned mode unless explicitly changed.
 
+Every assessment also declares `routing_role = PROPOSER | CONFLICT_ONLY`.
+Only specialists aligned with the frozen Aegis side may be `PROPOSER`.
+Opposite-side specialists are `CONFLICT_ONLY`: they may cause `WAIT` or `SKIP`
+but cannot win, create an order, or flip the side.
+
 ## 5. Timeframe-horizon compatibility
 
 Higher timeframes are not universal vetoes. The router uses an explicit matrix:
@@ -172,9 +182,12 @@ not for a two-hour continuation thesis. Specialists must declare their horizon.
 
 ## 6. Pending decisions
 
-`WAIT` stores a hypothesis set, not a promise to enter later.
+In Phase 6, `WAIT` is a terminal classification and realized per-signal utility
+is zero. It stores an explanation but does not advance time.
 
-At every pending evaluation:
+In Phase 7, `WAIT` may create a pending hypothesis set, not a promise to enter.
+
+Only in Phase 7, at every pending evaluation:
 
 - rebuild a new causal snapshot;
 - reevaluate the same eligible hypotheses;
@@ -224,4 +237,3 @@ A learned router may be considered only when:
 
 Training a router on in-sample specialist predictions is prohibited because it
 would learn unrealistically clean confidence patterns.
-

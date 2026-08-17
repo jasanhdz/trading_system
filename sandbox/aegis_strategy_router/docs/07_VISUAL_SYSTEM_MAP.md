@@ -39,11 +39,11 @@ flowchart TD
 
     R --> D{Decision}
     D -- Dominant safe hypothesis --> E[ENTER proposal]
-    D -- Evidence incomplete --> W[PENDING / WAIT]
+    D -- Evidence incomplete --> W[Static WAIT<br/>terminal in Phase 6]
     D -- Conflict risk or no edge --> X[SKIP]
 
-    W --> A2[New causal snapshot]
-    A2 --> R
+    W -. Phase 7 only .-> A2[New causal snapshot]
+    A2 -. Phase 7 only .-> R
 ```
 
 ## Separation of responsibilities
@@ -125,6 +125,6 @@ stateDiagram-v2
     end note
 ```
 
-Entry arbitration and position management remain separate experiments. The
-first implementation evaluates only `FLAT -> PENDING -> ENTER/SKIP`.
-
+Entry arbitration and position management remain separate experiments. Phase 6
+evaluates only terminal `ENTER/WAIT/SKIP`. The `PENDING` lifecycle is introduced
+for the first time in the separately gated Phase 7 experiment.

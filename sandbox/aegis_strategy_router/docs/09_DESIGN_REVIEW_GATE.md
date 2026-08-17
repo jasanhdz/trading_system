@@ -16,73 +16,46 @@
   prospective event adapter is required.
 - Existing W1-W14 holdouts remain sealed.
 
-## Items that must be resolved before executable code
+## Resolved blockers
 
-### Fresh experimental timeline
+All prior blockers are frozen in
+`10_PHASE0_FROZEN_DECISIONS.md`: fresh nested timeline, causal structural
+levels, common targets, probability simplex, substate timestamps, static WAIT,
+critic enforcement, equivalent-coverage routing, economic plausibility, and
+signal-conditioned opposite-side semantics, general-to-Aegis transfer, pooled
+side modeling, and the exact deterministic router equation.
 
-Define new TRAIN, calibration, VALIDATION, and FINAL_HOLDOUT periods that do not
-reuse prior holdouts or validation-driven thresholds. If only prospective data
-is fresh, implementation starts with collection/data audit rather than model
-training.
+## Phase 1 acceptance gates
 
-### Causal structural-level algorithm
+The methodological choices above are no longer open implementation decisions.
+Phase 1 must verify that they can be represented faithfully in data and code:
 
-Choose and freeze one or a very small family of level definitions on TRAIN:
+- fresh-window data exists with causal warmup and stable source identifiers;
+- the frozen structural-level algorithm passes availability-time and
+  future-injection tests;
+- snapshot serialization is deterministic and immutable;
+- effective episode counts can be audited without weakening frozen minima;
+- signal-conditioned side immutability is enforced by types and tests;
+- no imported adapter exposes authenticated exchange or financial mutation
+  capability.
 
-- fractal/pivot swings with known confirmation delay;
-- rolling prior highs/lows;
-- clustered repeated touches;
-- optional volume-at-price only if historical construction is causal.
-
-Document level availability time. A pivot requiring right-side bars becomes
-available only after those bars close.
-
-### Strategy horizon/barrier families
-
-Perform a TRAIN-only movement-scale audit, then preregister a limited family per
-specialist. Do not optimize every strategy on every horizon.
-
-### Minimum sample gates
-
-Use event-rate and effective-degrees-of-freedom audits to set final minima.
-Insufficient sample means no model, not weaker evidence requirements.
-
-### General-to-Aegis transfer
-
-Define whether models train on general candidates and calibrate on Aegis
-signals, or require an Aegis-only model. Quantify population shift before
-choosing.
-
-### LONG/SHORT policy
-
-Decide whether one direction-normalized model is allowed initially. Any claim
-of side symmetry requires independent side results. A side-specific specialist
-must be preregistered, not selected because one side won validation.
-
-### Router primary objective
-
-Freeze the exact directional/path objective and uncertainty penalty. A possible
-starting contract is favorable-first probability plus MFE/MAE geometry with a
-tail-MAE constraint, but coefficients cannot be chosen after validation.
-
-### Critic enforcement
-
-Only data quality and critical OOD are hard abstentions by design. Every market
-critic begins diagnostic unless independently validated as a veto.
+Failure of one of these checks blocks Phase 2. It does not reopen thresholds,
+splits, targets, critic policy, or router metrics.
 
 ## Approval checklist before Phase 1 code
 
-- [ ] Specialist definitions approved.
-- [ ] Critic definitions approved.
-- [ ] Signal-conditioned scope approved.
-- [ ] Fresh split/data acquisition approved.
-- [ ] Structural-level algorithm selected.
-- [ ] Candidate event-rate audit design approved.
-- [ ] Snapshot and feature contracts approved.
-- [ ] Router abstention and conflict behavior approved.
-- [ ] Primary metrics and negative-result policy approved.
-- [ ] Sandbox dependency and deletion boundaries approved.
-- [ ] No production integration authorized.
+- [x] Specialist definitions approved.
+- [x] Critic definitions approved.
+- [x] Signal-conditioned scope approved.
+- [x] Fresh split/data acquisition approved.
+- [x] Structural-level algorithm selected.
+- [x] Candidate event-rate audit design approved.
+- [x] Snapshot and feature contracts approved.
+- [x] Router abstention and conflict behavior approved.
+- [x] Primary metrics and negative-result policy approved.
+- [x] Sandbox dependency and deletion boundaries approved.
+- [x] No production integration authorized.
 
-Until this checklist is approved, the sandbox remains documentation-only.
-
+The checklist authorizes Phase 1 design implementation only. Specialists,
+models, router replay, prospective observation, Shadow, and Live remain blocked
+by their later phase gates.

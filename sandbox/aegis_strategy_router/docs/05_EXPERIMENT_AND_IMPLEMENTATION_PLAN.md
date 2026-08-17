@@ -2,8 +2,9 @@
 
 ## Program status
 
-This document is the implementation gate. No executable sandbox code exists at
-the time of writing.
+Phase 0 is approved under the frozen decision record. No executable sandbox
+code exists at the time of writing. Phase 1 is limited to contracts, snapshots,
+adapters, data audit, leakage tests, and deterministic fixtures.
 
 ## Phase 0: design freeze and data audit
 
@@ -14,8 +15,8 @@ Deliverables:
 - inventory causal 1m/5m/15m/1h/4h/1d coverage;
 - inventory taker, L2, funding/OI, BTC/ETH, and structural-level support;
 - quantify candidate event rates using rules only;
-- define a fresh split not used by W1-W14;
-- define provisional sample gates per specialist;
+- verify collection feasibility for the frozen fresh split;
+- verify the frozen effective-sample gates per specialist;
 - freeze snapshot, assessment, and decision contracts;
 - threat model all imports and prove no financial capability.
 
@@ -149,7 +150,7 @@ Required outputs:
 Data quality and critical OOD may fail closed by design. Market-risk critics
 require evidence before enforcement.
 
-## Phase 6: deterministic router replay
+## Phase 6: deterministic static router replay
 
 Prerequisites:
 
@@ -186,6 +187,9 @@ Router diagnostics:
 - MFE/MAE and tail risk;
 - turnover/churn assumptions;
 - per-symbol/side/time stability.
+
+Phase 6 `WAIT` is terminal. It does not create a pending episode, inspect a
+future snapshot, or simulate delayed entry.
 
 ## Phase 7: pending confirmation experiment
 
@@ -271,4 +275,3 @@ Required suites:
 - cost/latency stress results;
 - verdict JSON with explicit flags;
 - sealed-holdout status.
-

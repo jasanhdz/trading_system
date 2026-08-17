@@ -163,7 +163,7 @@ The router needs a frozen compatibility matrix rather than informal reasoning.
 | Breakout LONG | Transition reversal LONG | Potentially compatible but avoid double counting |
 | Breakout LONG | Breakout SHORT | Mutually exclusive |
 | Range mean reversion LONG | Range mean reversion SHORT | Mutually exclusive at same timestamp |
-| Any strategy | Shock critic CRITICAL | Initially veto |
+| Any strategy | Shock critic CRITICAL | Diagnostic initially; enforcement requires independent validation |
 | Any strategy | Data quality invalid | Hard veto |
 | Any strategy | OOD critical | Hard abstention |
 
@@ -181,4 +181,3 @@ calculating confidence.
 - Strategy packages can be removed independently.
 - Router behavior remains unchanged when a disabled specialist is absent.
 - All uncertainty or data failure degrades to `WAIT/SKIP`, never forced entry.
-

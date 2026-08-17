@@ -1,10 +1,11 @@
 # Aegis Strategy Router Sandbox
 
-Status: `DESIGN_ONLY_NO_EXECUTABLE_CODE`
+Status: `PHASE_0_APPROVED_PHASE_1_CODE_NOT_STARTED`
 
 This directory is the isolation boundary for the proposed hybrid
 multi-strategy system. No implementation may be added until the design review
-is explicitly approved.
+is explicitly approved. Phase 0 is approved; executable work remains limited
+to the Phase 1 scope recorded below.
 
 ## Objective
 
@@ -35,6 +36,8 @@ Given a causal market snapshot and an optional frozen Aegis directional signal:
 - [Risk register and failure analysis](docs/06_RISK_REGISTER.md)
 - [Visual system map](docs/07_VISUAL_SYSTEM_MAP.md)
 - [Isolation and deletion plan](docs/08_ISOLATION_AND_DELETION.md)
+- [Design review gate](docs/09_DESIGN_REVIEW_GATE.md)
+- [Phase 0 frozen decisions](docs/10_PHASE0_FROZEN_DECISIONS.md)
 
 ## Planned implementation tree
 
@@ -75,3 +78,5 @@ If the hypothesis fails, deleting this directory and reverting one future
 integration adapter must remove the entire experiment. Production must remain
 behaviorally identical before and after that deletion.
 
+Phase 0 is now methodologically frozen. Phase 1 is authorized in design but has
+not started; no executable strategy-router code exists yet.

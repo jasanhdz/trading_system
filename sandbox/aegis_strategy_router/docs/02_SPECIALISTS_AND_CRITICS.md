@@ -9,12 +9,16 @@ Every specialist must return the same conceptual contract:
 | `specialist_id/version` | Reproducible model identity |
 | `eligible` | Deterministic candidate rules passed |
 | `side` | LONG or SHORT proposed by the setup |
+| `routing_role` | `PROPOSER` or signal-opposed `CONFLICT_ONLY` |
 | `horizon` | Intended evaluation/holding horizon |
 | `p_favorable_first` | Calibrated favorable-barrier probability |
 | `p_adverse_first` | Calibrated adverse-barrier probability |
 | `p_neither` | Probability neither barrier occurs in time |
-| `expected_mfe` | Expected remaining favorable excursion |
-| `expected_mae` | Expected remaining adverse excursion |
+| `expected_mfe_unconditional` | `E[MFE from now]` |
+| `expected_mae_unconditional` | `E[MAE from now]` |
+| `expected_mfe_given_favorable` | `E[MFE \| favorable first]` |
+| `expected_mae_given_adverse` | `E[MAE \| adverse first]` |
+| `expected_terminal_return_given_neither` | `E[R_60m \| neither]` |
 | `expected_time_to_event` | Timing estimate |
 | `path_quality` | Expected MFE/MAE and efficiency geometry |
 | `uncertainty` | Confidence interval/model uncertainty |
@@ -22,9 +26,10 @@ Every specialist must return the same conceptual contract:
 | `invalidation` | Causal structural invalidation description |
 | `evidence` | Human-readable supporting and opposing facts |
 
-The initial primary outcome is directional/path safety. Economic costs remain a
-secondary report until directional information is demonstrated, but they must
-be restored before any deployment claim.
+The three barrier probabilities are one multinomial distribution and must sum
+to one within `1e-6`. Independent binary probability heads are prohibited.
+The initial primary outcome is directional/path safety, with the frozen
+economic plausibility kill gate applied before a specialist may enter routing.
 
 ## Specialist 1: Trend Continuation
 
@@ -209,8 +214,9 @@ Invalid data is a hard abstention.
 ### Shock Critic
 
 Uses volatility expansion, range shock, volume shock, spread/depth deterioration,
-cross-market movement, and discontinuity. It distinguishes useful expansion
-from disorder only after validation; initial CRITICAL shock is abstention.
+cross-market movement, and discontinuity. It begins `DIAGNOSTIC_ONLY`, including
+CRITICAL observations. Any penalty or veto requires independent validation and
+must be frozen before router validation.
 
 ### Exhaustion and Late-Entry Critic
 
@@ -240,4 +246,3 @@ confidence cannot override critical OOD.
 Evaluates correlated exposure, BTC beta, simultaneous same-direction signals,
 and concentration. It is excluded from initial entry-quality research so that
 entry evidence and portfolio sizing are not confounded.
-

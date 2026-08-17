@@ -124,26 +124,28 @@ Shared label components:
 - `NEITHER/NONE`.
 
 Strategy-specific labels are defined in the specialist catalog. LONG and SHORT
-use exactly symmetric formulas before any side-specific model is considered.
+use exactly symmetric formulas. The initial experiment prohibits side-specific
+models; any later exception requires a separately preregistered experiment.
 
 Same-bar barrier ambiguity resolves adverse-first unless higher-resolution data
 can establish ordering.
 
 ## 6. Horizon policy
 
-Each specialist owns a small preregistered horizon family. It cannot search
-hundreds of barrier/horizon combinations.
+Every specialist uses the frozen common router target: symmetric `0.50 ATR14`
+barriers and a 60-minute horizon from its actual decision timestamp.
 
-Provisional research horizons:
+Frozen secondary diagnostics are limited to:
 
-- timing/pullback confirmation: 1-15 minutes;
-- breakout/retest: 5-60 minutes;
-- trend continuation: 15-120 minutes;
-- range reversion: 5-60 minutes;
-- regime transition: 30-240 minutes.
+- trend continuation: structural survival through 60 and 120 minutes;
+- pullback continuation: common 60-minute target from confirmation;
+- breakout/retest: common 60-minute target from breakout or retest
+  confirmation, never from the earlier pending timestamp;
+- range reversion: midpoint before range break within 60 minutes;
+- regime transition: new-regime structural persistence through 120 minutes.
 
-These are planning ranges, not frozen experiment values. A movement-scale audit
-on TRAIN must select the final limited families before validation.
+These diagnostics cannot replace the common target, select a different entry
+price, or create an additional horizon search on validation.
 
 ## 7. Dataset populations
 
@@ -166,8 +168,11 @@ must quantify the difference.
 
 ## 8. Split and leakage rules
 
-- New TRAIN/VALIDATION/FINAL_HOLDOUT windows only.
-- Existing W1-W14 holdouts remain sealed.
+- Use the frozen `FRESH_TRAIN`, `FRESH_CALIBRATION`,
+  `SPECIALIST_VALIDATION`, `ROUTER_VALIDATION`, and `FINAL_SYSTEM_HOLDOUT`
+  windows in the Phase 0 decision record.
+- Existing W1-W14 holdouts remain sealed, and all data that influenced W1-W14
+  or this architecture is discovery-only.
 - Purge candidate horizons around split boundaries.
 - Embargo overlapping episodes.
 - Keep all specialists for one snapshot in the same split.
@@ -181,15 +186,16 @@ must quantify the difference.
 Before model training, produce an event-rate audit per specialist, side,
 symbol, regime, and time window.
 
-Provisional minimums requiring final preregistration:
+Frozen minimums are defined in `10_PHASE0_FROZEN_DECISIONS.md`: 2,000 TRAIN,
+500 calibration, and 500 specialist-validation candidate episodes per fitted
+specialist; 300 signal episodes in router validation and final holdout; at least
+150 validation episodes per side for side-specific claims; at least four weekly
+blocks and six symbols, with no symbol above 35%.
 
-- enough TRAIN episodes for at least 10-20 outcome events per effective model
-  degree of freedom;
-- at least 500 independent validation candidates per promoted specialist where
-  event frequency permits;
-- minimum temporal and symbol breadth;
-- sufficient LONG and SHORT evidence before claiming symmetry.
+Model degrees of freedom must additionally retain at least 20 observed outcomes
+of the least frequent common-target class per effective fitted degree of
+freedom. This constraint may simplify or block a model, never weaken the frozen
+episode minima.
 
 If a specialist lacks support, retain its rules as descriptive and do not fit a
 model merely to complete the architecture.
-
