@@ -64,5 +64,14 @@ sidecar keeps trading-independent market acquisition running, marks books invali
 does not create eligible L2 bundles. Health reports expose the rate-limit count and
 remaining backoff. Existing bundles and quality decisions were not rewritten.
 
+## 2026-08-17 post-signal ring correction
+
+The signal journal is intentionally asynchronous and current publication delay was
+approximately 7-18 seconds. A diagnostic pulse found that signal activation persisted
+the ring only through T0, omitting already-observed events between T0 and collector
+activation. Quality-v3 now backfills those post-T0 ring events before live capture
+continues. The 31 quality-v2 bundles remain diagnostic only and do not count toward the
+current 1,000/500 W13 minima. No historical quality row was rewritten.
+
 Collection does not authorize W13 research before sample minima and does not authorize
 Shadow or Live decisions.

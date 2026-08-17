@@ -30,7 +30,7 @@ import yaml
 
 SCHEMA_VERSION = "aegis-w13p-v1"
 SIGNAL_SCHEMA = "aegis-prospective-signal-evidence-v1"
-CURRENT_QUALITY_GATE_VERSION = "w13p-quality-v2-l2-base-snapshot"
+CURRENT_QUALITY_GATE_VERSION = "w13p-quality-v3-post-signal-ring-backfill"
 PUBLIC_WS_HOST = "fstream.binance.com"
 PUBLIC_SNAPSHOT_PATH = "/fapi/v1/depth"
 EVENT_TYPES = frozenset({"BOOK", "QUOTE", "TRADE"})
@@ -435,10 +435,13 @@ class PassiveCaptureCore:
         if not self.emit("SIGNAL", snapshot):
             self.note_drop()
             window.invalid_book_seen = True
+        # The journal is intentionally decoupled and may publish several seconds
+        # after T0. Backfill every already-observed event through the current ring
+        # tail so that the critical T0-to-observation interval is not lost.
         for event in self.rings[symbol]:
-            if window.capture_start_us <= event.exchange_event_timestamp_us <= t0:
+            if window.capture_start_us <= event.exchange_event_timestamp_us <= window.end_us:
                 self._persist_event_once(event, segment)
-            if window.start_us <= event.exchange_event_timestamp_us <= t0:
+            if window.start_us <= event.exchange_event_timestamp_us <= window.end_us:
                 self._account(window, event)
         return signal_id
 

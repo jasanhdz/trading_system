@@ -164,6 +164,26 @@ def test_signal_snapshot_ring_window_overlap_and_quality(tmp_path: Path, monkeyp
     assert digest == _sha256(without_hash)
 
 
+def test_delayed_signal_backfills_post_t0_events_from_ring(tmp_path: Path, monkeypatch):
+    emitted = []
+    core = PassiveCaptureCore(
+        config(tmp_path, ring_max_events_per_symbol=5000),
+        lambda kind, row: emitted.append((kind, row)) or True,
+    )
+    t0 = 1_765_800_000_000_000
+    monkeypatch.setattr("aegis.research.prospective_microstructure_w13p._utc_us", lambda _: t0)
+    for second in range(-30, 9):
+        for kind in ("BOOK", "QUOTE", "TRADE"):
+            core.observe_event(event(t0 + second * 1_000_000, kind, str(second)))
+
+    core.observe_signal(envelope(), l2_base_snapshot=l2_snapshot(t0))
+
+    persisted = [row for kind, row in emitted if kind == "EVENT"]
+    assert any(row["exchange_event_timestamp_us"] == t0 + 5_000_000 for row in persisted)
+    window = next(iter(core.active.values()))
+    assert window.event_counts == {"BOOK": 39, "QUOTE": 39, "TRADE": 39}
+
+
 def test_drop_reconnect_invalidates_without_blocking(tmp_path: Path, monkeypatch):
     cfg = config(tmp_path)
     core = PassiveCaptureCore(cfg, lambda _kind, _row: False)
