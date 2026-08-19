@@ -119,12 +119,23 @@ class RiskGuardConfig:
     candle_data_root: str = ""
     fail_closed: bool = True
 
+    _VALID_MODES = frozenset({"disabled", "observe_only", "enforce"})
+
     def __post_init__(self) -> None:
         if self.tail_risk_threshold != FROZEN_TAIL_RISK_THRESHOLD:
             raise ValueError(
                 f"tail_risk_threshold must be FROZEN at {FROZEN_TAIL_RISK_THRESHOLD}, "
                 f"got {self.tail_risk_threshold}. "
                 f"Threshold cannot be changed in V1."
+            )
+        if self.mode not in self._VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{self.mode}'. Must be one of: {sorted(self._VALID_MODES)}"
+            )
+        if self.enabled and self.mode == "disabled":
+            raise ValueError(
+                "Contradictory state: enabled=True with mode='disabled'. "
+                "Use mode='observe_only' or mode='enforce' when enabled."
             )
 
     @property

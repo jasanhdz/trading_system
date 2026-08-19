@@ -121,3 +121,13 @@ class TestRiskGuardFlags:
             t.join()
 
         assert not errors
+
+    def test_update_rejects_invalid_mode(self):
+        flags = RiskGuardFlags()
+        with pytest.raises(ValueError, match="Invalid mode"):
+            flags.update(mode="enfroce")
+
+    def test_update_rejects_enabled_with_disabled(self):
+        flags = RiskGuardFlags()
+        with pytest.raises(ValueError, match="Contradictory"):
+            flags.update(enabled=True, mode=RiskGuardMode.DISABLED)

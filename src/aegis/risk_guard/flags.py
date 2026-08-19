@@ -68,15 +68,27 @@ class RiskGuardFlags:
         with cls._lock:
             cls._instance = None
 
+    _VALID_MODES = frozenset({RiskGuardMode.DISABLED, RiskGuardMode.OBSERVE_ONLY, RiskGuardMode.ENFORCE})
+
     def load_from_file(self, path: str | Path) -> None:
         """Load flags from a JSON file."""
         p = Path(path)
         if not p.exists():
             return
         data = json.loads(p.read_text())
+        mode = data.get("mode", RiskGuardMode.DISABLED)
+        if mode not in self._VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}' in {path}. Must be one of: {sorted(self._VALID_MODES)}"
+            )
+        enabled = data.get("enabled", False)
+        if enabled and mode == RiskGuardMode.DISABLED:
+            raise ValueError(
+                f"Contradictory state in {path}: enabled=True with mode='disabled'"
+            )
         with self._update_lock:
-            self._enabled = data.get("enabled", False)
-            self._mode = data.get("mode", RiskGuardMode.DISABLED)
+            self._enabled = enabled
+            self._mode = mode
             self._fail_closed = data.get("fail_closed", True)
             self._models_joblib_path = data.get("models_joblib_path", "")
             self._models_joblib_sha256 = data.get("models_joblib_sha256", "")
@@ -98,9 +110,18 @@ class RiskGuardFlags:
             if enabled is not None:
                 self._enabled = enabled
             if mode is not None:
+                if mode not in self._VALID_MODES:
+                    raise ValueError(
+                        f"Invalid mode '{mode}'. Must be one of: {sorted(self._VALID_MODES)}"
+                    )
                 self._mode = mode
             if fail_closed is not None:
                 self._fail_closed = fail_closed
+            # Check for contradictory state after update
+            if self._enabled and self._mode == RiskGuardMode.DISABLED:
+                raise ValueError(
+                    "Contradictory state: enabled=True with mode='disabled'"
+                )
 
     def to_config(self) -> RiskGuardConfig:
         """Convert current flags to a RiskGuardConfig."""

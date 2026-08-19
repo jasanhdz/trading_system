@@ -150,3 +150,23 @@ class TestRiskGuardConfig:
         import pytest
         with pytest.raises(ValueError, match="must be FROZEN"):
             RiskGuardConfig(tail_risk_threshold=0.0)
+
+    def test_mode_valid_values(self):
+        for mode in ("disabled", "observe_only", "enforce"):
+            c = RiskGuardConfig(mode=mode)
+            assert c.mode == mode
+
+    def test_mode_rejects_typo(self):
+        import pytest
+        with pytest.raises(ValueError, match="Invalid mode"):
+            RiskGuardConfig(mode="enfroce")
+
+    def test_mode_rejects_arbitrary_string(self):
+        import pytest
+        with pytest.raises(ValueError, match="Invalid mode"):
+            RiskGuardConfig(mode="whatever")
+
+    def test_enabled_with_disabled_mode_rejected(self):
+        import pytest
+        with pytest.raises(ValueError, match="Contradictory"):
+            RiskGuardConfig(enabled=True, mode="disabled")
