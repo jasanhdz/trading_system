@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aegis-strategy-router-sandbox"
+version = "0.1.0"
+description = "Offline causal snapshot and deterministic candidate infrastructure for Aegis research"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24", "pandas>=1.5"]
+
+[project.optional-dependencies]
+audit = ["pyarrow>=12"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

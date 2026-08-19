@@ -1,0 +1,28 @@
+{
+  "schema": "aegis-e4-risk-guard-thresholds-frozen-v1",
+  "frozen_at": "2026-08-19T00:00:00Z",
+  "frozen_source": "CALIBRATION_SPLIT_TRADE_OFF_ANALYSIS",
+  "calibration_rows": 67,
+  "thresholds": {
+    "late_entry_guard": {
+      "threshold": 0.03769693740050854,
+      "quantile_on_calibration": 0.7,
+      "description": "Reject if e4_late_entry_score >= 0.0377 (Q70 on CALIBRATION)",
+      "calibration_bad_rejection_rate": 0.23076923076923078,
+      "calibration_good_destruction_rate": 0.34146341463414637
+    },
+    "tail_risk_guard": {
+      "threshold": 0.4522452210875323,
+      "quantile_on_calibration": 0.7,
+      "description": "Reject if e4_tail_risk_score >= 0.4522 (Q70 on CALIBRATION)",
+      "calibration_bad_rejection_rate": 0.46153846153846156,
+      "calibration_good_destruction_rate": 0.1951219512195122
+    },
+    "dual_guard": {
+      "late_entry_threshold": 0.03769693740050854,
+      "tail_risk_threshold": 0.4522452210875323,
+      "logic": "BLOCK_IF_EITHER_EXCEEDED",
+      "description": "BLOCK if e4_late_entry_score >= 0.0377 OR e4_tail_risk_score >= 0.4522"
+    }
+  }
+}

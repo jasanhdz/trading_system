@@ -1,0 +1,127 @@
+{
+  "schema": "aegis-entry-enhancement-v1-preregistration",
+  "experiment": "AEGIS_ENTRY_ENHANCEMENT_V1",
+  "classification": "RETROSPECTIVE_DISCOVERY_CONTAMINATED_NO_CLEAN_CONFIRMATION",
+  "frozen_at": "2026-08-18T00:00:00Z",
+  "aegis_baseline": {
+    "strategy": "AEGIS_TURBO",
+    "mode": "AEGIS_TURBO_MICRO_LIVE",
+    "signal_timestamp": "TIMESTAMP_ENCODED_IN_TRADE_ID_AT_POLICY_DECISION",
+    "side_immutable": true,
+    "source_csv": "reports/governance/aegis_prospective_validation/live/live_entry_quality_audit_20260815/live_entry_classification.csv",
+    "source_csv_sha256": "1d53b18171c97195be1f73a8c8d76966cb8383e24cc5f779c7a09c8f61214a38",
+    "open_log_glob": "binance-futures-bot-ts/logs/aegis/turbo_trades_*.jsonl",
+    "version_contract": "PER_SIGNAL_IMMUTABLE_POLICY_METADATA_HASH",
+    "maximum_open_minus_signal_ms": 60000
+  },
+  "frozen_modules": {
+    "opportunity": {
+      "artifact": "sandbox/aegis_strategy_router/experiments/independent_entry_quality_discovery_v1/artifacts/run_01/development_models.joblib",
+      "sha256": "6ba81bd4d1e1ccd80f2566de8c07168e6b03a69658426c28caac0720304a611f",
+      "component": "opportunity",
+      "retrain": false,
+      "accept_threshold": 0.9999066987326859,
+      "threshold_source": "DIRECTIONAL_ALPHA_V1_TRAIN_P90"
+    },
+    "directional": {
+      "artifact": "sandbox/aegis_strategy_router/experiments/directional_alpha_v1/artifacts/run_01/flow_cross_market_models.joblib",
+      "sha256": "54af501a9d52dc6ac9598c7d1bfda9191d33bc5d1849216b155c77a93e1d9063",
+      "retrain": false,
+      "conflict_margin_bps": 20.0,
+      "minimum_aegis_side_predicted_net_bps": 0.0
+    }
+  },
+  "symbols": ["ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT", "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT"],
+  "sources": {
+    "warmup_public_months": ["2026-01", "2026-02", "2026-03", "2026-04"],
+    "live_candles": "data/live_entry_quality_audit_20260815/candles_1m",
+    "prepared_candles": "data/aegis_entry_enhancement_v1/candles_1m",
+    "resolution": "1m"
+  },
+  "splits": {
+    "DISCOVERY": ["2026-05-07T00:00:00Z", "2026-07-01T00:00:00Z"],
+    "EMBARGO_1": ["2026-07-01T00:00:00Z", "2026-07-01T01:00:00Z"],
+    "CALIBRATION": ["2026-07-01T01:00:00Z", "2026-07-15T00:00:00Z"],
+    "EMBARGO_2": ["2026-07-15T00:00:00Z", "2026-07-15T01:00:00Z"],
+    "VALIDATION": ["2026-07-15T01:00:00Z", "2026-08-01T00:00:00Z"],
+    "EMBARGO_3": ["2026-08-01T00:00:00Z", "2026-08-01T01:00:00Z"],
+    "FINAL_HOLDOUT": ["2026-08-01T01:00:00Z", "2026-08-15T00:00:00Z"]
+  },
+  "contamination": {
+    "may_july_2026": "USED_BY_W11_W12_AND_PRIOR_LIVE_ENTRY_AUDITS",
+    "validation_evidence": "DIAGNOSTIC_ONLY_NOT_CLEAN_CONFIRMATION",
+    "august_w11_holdout": "SEALED_NOT_OPENED",
+    "w1_w14_holdouts": "SEALED_UNREAD"
+  },
+  "target": {
+    "atr_reference": "ATR14_LAST_CLOSED_15M_AT_SIGNAL",
+    "favorable_barrier_atr": 0.5,
+    "adverse_barrier_atr": 0.5,
+    "horizon_minutes": 60,
+    "same_bar_ambiguity": "ADVERSE_FIRST",
+    "baseline_cost_bps": 20.0,
+    "cost_scenarios_bps": [0.0, 14.0, 20.0, 30.0]
+  },
+  "primary_target": {
+    "atr_reference": "ATR14_LAST_CLOSED_15M_AT_SIGNAL",
+    "favorable_barrier_atr": 0.5,
+    "adverse_barrier_atr": 0.5,
+    "horizon_minutes": 60,
+    "same_bar_ambiguity": "ADVERSE_FIRST",
+    "conservative_cost_bps": 20.0,
+    "economic_hurdle_net_bps": 20.0
+  },
+  "policies": {
+    "AEGIS_ONLY": "ACCEPT_ALL",
+    "AEGIS_OPPORTUNITY_GATE": "ACCEPT_IF_OPPORTUNITY_SCORE_GE_FROZEN_THRESHOLD",
+    "AEGIS_CROSS_MARKET_CONFIRMATION": "REJECT_ONLY_IF_OPPOSITE_MINUS_AEGIS_PREDICTED_NET_GE_20BPS",
+    "AEGIS_OPPORTUNITY_CONFLICT_GATE": "ACCEPT_IF_OPPORTUNITY_PASS_AND_AEGIS_PREDICTED_NET_GT_0_AND_AEGIS_MINUS_OPPOSITE_GE_20BPS",
+    "primary": "AEGIS_OPPORTUNITY_CONFLICT_GATE",
+    "wait": "NOT_EVALUATED_STATIC_MODULES_CANNOT_RECONSTRUCT_CONFIRMATION_TIMESTAMP"
+  },
+  "ranking": {
+    "quality_score": "FROZEN_OPPORTUNITY_PROBABILITY_TIMES_FROZEN_DIRECTIONAL_FAVORABLE_PROBABILITY_FOR_AEGIS_SIDE",
+    "coverage_levels": [1.0, 0.75, 0.5, 0.25, 0.1],
+    "primary_coverage": 0.25,
+    "no_percentile_selection": true
+  },
+  "population_shift": {
+    "reference": "ENTRY_QUALITY_V1_TRAIN_FEATURE_P01_P99",
+    "ood_feature_fraction_threshold": 0.20,
+    "combined_policy_rejects_ood": true
+  },
+  "subgroups": ["ALL_AEGIS_SIGNALS", "AEGIS_SHORT", "AEGIS_LONG"],
+  "outcome_classes": {
+    "GOOD": "FAVORABLE_FIRST_AND_NET_COMMON_PAYOFF_GT_0",
+    "BAD": "ADVERSE_FIRST_OR_NET_COMMON_PAYOFF_LT_0",
+    "MIXED": "ALL_OTHER"
+  },
+  "trivial_baselines": {
+    "random_seed": 20260818,
+    "random_repetitions": 10000,
+    "volatility": "HIGHEST_15M_ATR_PERCENTILE_AT_MATCHED_COVERAGE",
+    "btc_direction": "STRONGEST_ALIGNED_BTC_1H_DIRECTIONAL_RETURN_AT_MATCHED_COVERAGE",
+    "aegis_confidence": "HIGHEST_CONTEMPORANEOUS_TURBO_SCORE_AT_MATCHED_COVERAGE"
+  },
+  "support": {
+    "minimum_validation_signals": 100,
+    "minimum_validation_day_blocks": 10,
+    "minimum_symbols": 8,
+    "minimum_selected_signals": 25,
+    "minimum_clean_independent_validation_signals": 100
+  },
+  "success": {
+    "minimum_delta_net_bps": 2.0,
+    "minimum_coverage": 0.1,
+    "maximum_coverage": 0.9,
+    "minimum_good_retention": 0.5,
+    "rejection_precision_must_beat_bad_prevalence": true,
+    "bad_rejection_must_exceed_good_destruction": true,
+    "minimum_positive_symbols": 6,
+    "minimum_positive_week_fraction": 0.6666666667,
+    "improvement_ci_lower_above_bps": 0.0
+  },
+  "statistics": {"block_bootstrap_samples": 10000, "seed": 20260818},
+  "final_holdout": {"state": "SEALED_NOT_OPENED", "labels_built": false, "open_automatically": false},
+  "prohibited": ["AEGIS_RETRAIN", "OPPORTUNITY_RETRAIN", "DIRECTIONAL_RETRAIN", "SIDE_FLIP", "HOLDOUT_LABEL_BUILD", "PRODUCTION_CHANGES", "SHADOW", "LIVE"]
+}

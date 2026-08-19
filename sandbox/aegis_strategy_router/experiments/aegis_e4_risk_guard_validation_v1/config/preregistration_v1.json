@@ -1,0 +1,154 @@
+{
+  "schema": "aegis-e4-risk-guard-validation-v1-preregistration",
+  "experiment": "AEGIS_E4_RISK_GUARD_VALIDATION_V1",
+  "classification": "FROZEN_CRITIC_RISK_GUARD_EVALUATION",
+  "frozen_at": "2026-08-19T00:00:00Z",
+  "aegis_baseline": {
+    "strategy": "AEGIS_TURBO",
+    "mode": "AEGIS_TURBO_MICRO_LIVE",
+    "source_csv": "reports/governance/aegis_prospective_validation/live/live_entry_quality_audit_20260815/live_entry_classification.csv",
+    "source_csv_sha256": "1d53b18171c97195be1f73a8c8d76966cb8383e24cc5f779c7a09c8f61214a38",
+    "open_log_glob": "binance-futures-bot-ts/logs/aegis/turbo_trades_*.jsonl",
+    "side_immutable": true,
+    "version_contract": "PER_SIGNAL_IMMUTABLE_POLICY_METADATA_HASH",
+    "maximum_open_minus_signal_ms": 60000
+  },
+  "frozen_e4_artifacts": {
+    "models_joblib": "sandbox/aegis_strategy_router/experiments/aegis_e4_robust_training/artifacts/run_01/development_models.joblib",
+    "feature_schema": "sandbox/aegis_strategy_router/experiments/aegis_e4_robust_training/artifacts/dataset_v1/feature_schema.json",
+    "late_entry_head": "target__late_entry_risk",
+    "tail_risk_head": "target__tail_risk",
+    "entry_quality_head": "target__entry_quality",
+    "retrain_models": false,
+    "models_joblib_sha256": "d9b02b8045a365541eec8ae02c4b67d99972af1be5fa327f48cac6c95c60dd9f",
+    "feature_schema_sha256": "9f86bf95bd78508698a5a1eac9147becaae48565aca6f3fcc1a8e0597d5ba1f2"
+  },
+  "symbols": [
+    "ADAUSDT",
+    "AVAXUSDT",
+    "BNBUSDT",
+    "BTCUSDT",
+    "DOGEUSDT",
+    "ETHUSDT",
+    "LINKUSDT",
+    "LTCUSDT",
+    "SOLUSDT",
+    "SUIUSDT",
+    "XRPUSDT"
+  ],
+  "sources": {
+    "live_candles": "data/aegis_entry_enhancement_v1/candles_1m",
+    "resolution": "1m",
+    "decision_cadence_minutes": 5,
+    "timeframes_minutes": [
+      5,
+      15,
+      60,
+      240
+    ]
+  },
+  "splits": {
+    "DISCOVERY": [
+      "2026-05-07T00:00:00Z",
+      "2026-07-01T00:00:00Z"
+    ],
+    "EMBARGO_1": [
+      "2026-07-01T00:00:00Z",
+      "2026-07-01T01:00:00Z"
+    ],
+    "CALIBRATION": [
+      "2026-07-01T01:00:00Z",
+      "2026-07-15T00:00:00Z"
+    ],
+    "EMBARGO_2": [
+      "2026-07-15T00:00:00Z",
+      "2026-07-15T01:00:00Z"
+    ],
+    "VALIDATION": [
+      "2026-07-15T01:00:00Z",
+      "2026-08-01T00:00:00Z"
+    ],
+    "EMBARGO_3": [
+      "2026-08-01T00:00:00Z",
+      "2026-08-01T01:00:00Z"
+    ],
+    "FINAL_HOLDOUT": [
+      "2026-08-01T01:00:00Z",
+      "2026-08-15T00:00:00Z"
+    ]
+  },
+  "contamination": {
+    "training_time_separation": "E4_TRAINED_ON_2023_DATA_ZERO_LOOKAHEAD_ON_2026_SIGNALS",
+    "may_july_2026": "USED_BY_PRIOR_DISCOVERY_AUDITS",
+    "validation_evidence": "DIAGNOSTIC_OOS_CONFIRMATORY",
+    "august_holdout": "SEALED_NOT_OPENED_UNLESS_VALIDATION_PASSES"
+  },
+  "policies": {
+    "AEGIS_ONLY": {
+      "name": "Policy A (Baseline)",
+      "description": "Execute all Aegis signals without filtering",
+      "rule": "ALLOW_ALL"
+    },
+    "AEGIS_PLUS_LATE_ENTRY_GUARD": {
+      "name": "Policy B (Late Entry Guard)",
+      "description": "Block trade if E4 Late Entry Risk exceeds frozen threshold",
+      "rule": "BLOCK_IF_LATE_ENTRY_RISK_GTE_THRESHOLD"
+    },
+    "AEGIS_PLUS_TAIL_RISK_GUARD": {
+      "name": "Policy C (Tail Risk Guard)",
+      "description": "Block trade if E4 Tail Risk exceeds frozen threshold",
+      "rule": "BLOCK_IF_TAIL_RISK_GTE_THRESHOLD"
+    },
+    "AEGIS_PLUS_E4_DUAL_GUARD": {
+      "name": "Policy D (Dual Guard)",
+      "description": "Block trade if either Late Entry Risk OR Tail Risk exceeds frozen threshold",
+      "rule": "BLOCK_IF_LATE_OR_TAIL_GTE_THRESHOLD"
+    }
+  },
+  "ranking_deciles": [
+    1.0,
+    0.9,
+    0.8,
+    0.7,
+    0.6,
+    0.5
+  ],
+  "cost_scenarios_bps": [
+    0.0,
+    14.0,
+    20.0,
+    30.0
+  ],
+  "primary_cost_bps": 14.0,
+  "conservative_cost_bps": 20.0,
+  "trivial_baselines": {
+    "random_seed": 20260819,
+    "random_repetitions": 10000,
+    "simple_late_move": "15m ATR extension / 30m return",
+    "simple_volatility": "15m ATR percentile",
+    "aegis_confidence": "Contemporaneous turbo_score"
+  },
+  "support": {
+    "minimum_validation_signals": 100,
+    "minimum_validation_day_blocks": 10,
+    "minimum_symbols": 8
+  },
+  "statistics": {
+    "bootstrap_samples": 10000,
+    "seed": 20260819,
+    "block_unit": "TEMPORAL_DAY_OR_HOUR_BLOCK"
+  },
+  "final_holdout": {
+    "state": "SEALED_NOT_OPENED",
+    "open_automatically": false
+  },
+  "prohibited": [
+    "REORIENT_AEGIS_SIDE",
+    "CREATE_NON_AEGIS_TRADES",
+    "RETRAIN_E4",
+    "ADJUST_E4_FEATURES",
+    "OPTIMIZE_THRESHOLDS_ON_VALIDATION",
+    "OPEN_HOLDOUT_PREMATURELY",
+    "MODIFY_PRODUCTION"
+  ]
+}

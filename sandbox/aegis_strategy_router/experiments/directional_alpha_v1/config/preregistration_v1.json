@@ -1,0 +1,112 @@
+{
+  "schema": "directional-alpha-v1-preregistration",
+  "experiment": "DIRECTIONAL_ALPHA_V1",
+  "classification": "RETROSPECTIVE_DISCOVERY_WITH_TEMPORAL_OOS_VALIDATION",
+  "frozen_at": "2026-08-18T00:00:00Z",
+  "opportunity_model": {
+    "source_experiment": "INDEPENDENT_ENTRY_QUALITY_DISCOVERY_V1",
+    "artifact": "sandbox/aegis_strategy_router/experiments/independent_entry_quality_discovery_v1/artifacts/run_01/development_models.joblib",
+    "artifact_sha256": "6ba81bd4d1e1ccd80f2566de8c07168e6b03a69658426c28caac0720304a611f",
+    "component": "opportunity",
+    "retrain": false,
+    "primary_population_quantile": 0.90,
+    "diagnostic_population_quantiles": [0.80, 0.90, 0.95],
+    "population_control": "ALL_ELIGIBLE_STATES"
+  },
+  "symbols": ["ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT", "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "XRPUSDT"],
+  "excluded_symbols": [
+    {"symbol": "SUIUSDT", "reason": "NOT_LISTED_DURING_ALTERNATIVE_PRE_V1_PERIOD"}
+  ],
+  "source": {
+    "market": "BINANCE_USDM_PUBLIC_MONTHLY_KLINES",
+    "start_inclusive": "2022-01-01T00:00:00Z",
+    "end_exclusive": "2023-04-01T00:00:00Z",
+    "resolution": "1m",
+    "decision_cadence_minutes": 60,
+    "outcome_horizon_minutes": 60,
+    "same_symbol_overlap_minutes": 60
+  },
+  "splits": {
+    "TRAIN": ["2022-05-01T00:00:00Z", "2022-09-01T00:00:00Z"],
+    "EMBARGO_1": ["2022-09-01T00:00:00Z", "2022-09-02T00:00:00Z"],
+    "CALIBRATION": ["2022-09-02T00:00:00Z", "2022-11-01T00:00:00Z"],
+    "EMBARGO_2": ["2022-11-01T00:00:00Z", "2022-11-02T00:00:00Z"],
+    "VALIDATION": ["2022-11-02T00:00:00Z", "2023-02-01T00:00:00Z"],
+    "EMBARGO_3": ["2023-02-01T00:00:00Z", "2023-02-02T00:00:00Z"],
+    "FINAL_HOLDOUT": ["2023-02-02T00:00:00Z", "2023-04-01T00:00:00Z"]
+  },
+  "contamination": {
+    "entry_quality_v1_development": ["2023-09-01T00:00:00Z", "2023-12-06T00:00:00Z"],
+    "strategy_router_v1_discovery": ["2024-01-01T00:00:00Z", "2024-10-01T00:00:00Z"],
+    "w1_w14_holdouts": "SEALED_UNREAD",
+    "evidence_limit": "RETROSPECTIVE_NOT_PROSPECTIVE_CLEAN"
+  },
+  "target": {
+    "atr_reference": "ATR14_LAST_CLOSED_15M_AT_DECISION",
+    "favorable_barrier_atr": 0.5,
+    "adverse_barrier_atr": 0.5,
+    "horizon_minutes": 60,
+    "same_bar_ambiguity": "ADVERSE_FIRST",
+    "utility": "COMMON_BARRIER_OR_TERMINAL_DIRECTIONAL_RETURN_MINUS_20BPS",
+    "directional_advantage": "UTILITY_LONG_MINUS_UTILITY_SHORT",
+    "cost_bps": 20.0,
+    "materiality_hurdle_bps": 20.0
+  },
+  "primary_target": {
+    "atr_reference": "ATR14_LAST_CLOSED_15M_AT_DECISION",
+    "favorable_barrier_atr": 0.5,
+    "adverse_barrier_atr": 0.5,
+    "horizon_minutes": 60,
+    "same_bar_ambiguity": "ADVERSE_FIRST",
+    "conservative_cost_bps": 20.0,
+    "economic_hurdle_net_bps": 20.0
+  },
+  "opportunity_target": {
+    "definition": "MAX_ABSOLUTE_EXCURSION_WITHIN_60M_GE_MAX_0_5ATR_OR_20BPS",
+    "direction_independent": true
+  },
+  "features": {
+    "families": ["FLOW", "CROSS_MARKET"],
+    "l2_subexperiment": "NOT_RUN_NO_CLEAN_ELIGIBLE_L2_PERIOD",
+    "sequence_windows_minutes": [1, 3, 5, 15, 30, 60],
+    "forbidden": ["FUTURE", "TARGET", "MFE", "MAE", "PNL", "AEGIS", "PHASE2_CANDIDATE"]
+  },
+  "models": {
+    "primary": "DUAL_SIDE_RIDGE_NET_UTILITY",
+    "logistic": {"C": 1.0, "penalty": "l2", "max_iter": 2000},
+    "ridge": {"alpha": 1.0},
+    "tree": {"max_depth": 3, "min_samples_leaf": 100},
+    "gradient_boosting": "PROHIBITED_WITHOUT_NEW_FREEZE",
+    "seed": 20260818
+  },
+  "ablations": ["FLOW_ONLY", "CROSS_MARKET_ONLY", "FLOW_CROSS_MARKET"],
+  "directional_coverage_levels": [1.0, 0.5, 0.25, 0.1, 0.05, 0.02],
+  "abstention": {
+    "code": "SKIP_NO_DIRECTIONAL_ADVANTAGE",
+    "minimum_predicted_advantage_bps": 20.0,
+    "minimum_predicted_best_net_utility_bps": 0.0,
+    "invalid_l2": "EXCLUDE_FROM_L2_SUBEXPERIMENT_ONLY",
+    "contradictory_families": "DIAGNOSTIC_NOT_ADDITIONAL_THRESHOLD"
+  },
+  "support": {
+    "minimum_train_rows_in_primary_population": 4000,
+    "minimum_validation_rows_in_primary_population": 2500,
+    "minimum_validation_effective_blocks": 1500,
+    "minimum_symbols": 9,
+    "minimum_selected_effective_blocks": 150
+  },
+  "success": {
+    "primary_directional_coverage": 0.10,
+    "auc_must_exceed_entry_quality_v1": 0.5503396511301014,
+    "ranking_spearman_minimum": 0.7,
+    "monotonic_required_levels": [1.0, 0.5, 0.25, 0.1],
+    "minimum_positive_symbols": 6,
+    "minimum_positive_week_fraction": 0.6666666667,
+    "net_ci_lower_above_bps": 0.0,
+    "geometry_ratio_must_exceed_opportunity_baseline": true
+  },
+  "statistics": {"block_bootstrap_samples": 10000, "fdr_alpha": 0.05, "seed": 20260818},
+  "cost_scenarios_bps": [0.0, 14.0, 20.0, 30.0],
+  "final_holdout": {"state": "SEALED_NOT_OPENED", "labels_built": false, "open_automatically": false},
+  "prohibited": ["OPPORTUNITY_RETRAIN", "HYPERPARAMETER_SEARCH", "HOLDOUT_LABEL_BUILD", "PRODUCTION_CHANGES", "SHADOW", "LIVE"]
+}

@@ -94,6 +94,7 @@ Pivot definition:
 
 Clustering and strength:
 
+- `STRUCTURAL_LEVEL_CLUSTERING = COMPLETE_LINKAGE_DETERMINISTIC`;
 - levels cluster separately for highs and lows;
 - cluster tolerance: 0.20 ATR14 of the level's timeframe at evaluation time;
 - at least two confirmed touches;
@@ -102,6 +103,32 @@ Clustering and strength:
 - level age and last-touch time are retained continuously;
 - broken levels remain historical and may become retest candidates, but are not
   silently deleted.
+
+Complete-linkage algorithm:
+
+1. Use only strict L=R=2 pivots whose `available_at` is not later than the
+   current snapshot timestamp and whose pivot bar belongs to the frozen
+   timeframe lookback.
+2. Compute the single clustering tolerance as `0.20 × ATR14` from candles
+   available at that snapshot. HIGH and LOW pivots are processed independently.
+3. Start with one singleton cluster per pivot. A pair of clusters is mergeable
+   only when the maximum absolute price distance among every pivot in the
+   merged cluster is less than or equal to the tolerance and every adjacent
+   touch is separated by at least three bars.
+4. At each iteration merge the eligible pair with the smallest complete-linkage
+   distance. Ties resolve by the lexicographically smallest ordered tuple of
+   causal pivot identities `(pivot_at, available_at, bar_index, price)`.
+5. Repeat until no pair is mergeable. Discard singleton clusters. Level price
+   is the median pivot price; even-sized medians use the arithmetic mean of the
+   two central values.
+6. `level.available_at` is the maximum `available_at` of its pivots. Level IDs
+   hash only timeframe, pivot kind, and the ordered causal pivot identities.
+
+Historical snapshots are immutable. Replaying snapshot t filters pivots by
+`available_at <= t` before clustering, so a pivot confirmed after t cannot
+change the clusters, level IDs, prices, or nearest-level map previously emitted
+for t. Outcomes, labels, future barriers, and future prices are prohibited from
+clustering and tie-breaking.
 
 Lookbacks:
 

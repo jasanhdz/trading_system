@@ -42,6 +42,12 @@ Phase 1 must verify that they can be represented faithfully in data and code:
 Failure of one of these checks blocks Phase 2. It does not reopen thresholds,
 splits, targets, critic policy, or router metrics.
 
+Current result: Phase 1 code and tests exist, but the full acceptance gate is
+not met because the fresh-data gate is not yet available. The prior structural
+clustering gap is closed by `COMPLETE_LINKAGE_DETERMINISTIC`. See
+`11_PHASE1_IMPLEMENTATION_REPORT.md`. Phase 2 remains blocked.
+
+
 ## Approval checklist before Phase 1 code
 
 - [x] Specialist definitions approved.

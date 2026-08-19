@@ -1,0 +1,12 @@
+{
+  "decision_at": "2026-08-17T03:00:00Z",
+  "expected_canonical_sha256": "123830d06beb167f9194792af0f0d09d24007b6b882594a4edcddc03017aafaf",
+  "expected_snapshot_id": "bdef86a11a3dd3dd138003080b01952cb24edd2f800643a31d630dad3cd6ca46",
+  "generator": "linear-v1",
+  "reference_price": 100.177,
+  "rows": 180,
+  "signal_id": "golden-signal-v1",
+  "side": "SHORT",
+  "start": "2026-08-17T00:00:00Z",
+  "symbol": "BTCUSDT"
+}

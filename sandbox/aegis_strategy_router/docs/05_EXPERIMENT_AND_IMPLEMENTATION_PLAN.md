@@ -2,9 +2,11 @@
 
 ## Program status
 
-Phase 0 is approved under the frozen decision record. No executable sandbox
-code exists at the time of writing. Phase 1 is limited to contracts, snapshots,
-adapters, data audit, leakage tests, and deterministic fixtures.
+Phase 0 is approved under the frozen decision record. Phase 1 technical
+acceptance is met. The governance amendment in
+`12_PHASE2_GOVERNANCE_AMENDMENT.md` authorizes Phase 2 implementation while
+fresh collection continues, but prohibits Phase 2 validation and specialist
+implementation until their separate gates pass.
 
 ## Phase 0: design freeze and data audit
 

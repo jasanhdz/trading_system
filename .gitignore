@@ -7,7 +7,6 @@ __pycache__/
 .venv_rocm57/
 .venv_rocm62/
 
-
 # Database & Data
 *.db
 *.db-shm
@@ -61,6 +60,14 @@ backtest_*.csv
 *.tar
 scripts/archived/
 archive/
-data/
-*.npz
-*.db
+
+# Parquet data files (experiment datasets, scored signals, candles)
+*.parquet
+
+# Experiment artifacts (results, scored data, models, audits)
+# Keep: src/, tools/, config/, tests/ (code)
+# Exclude: artifacts/ (generated outputs)
+sandbox/**/artifacts/
+
+# Experiment-generated docs (not source code)
+sandbox/aegis_strategy_router/experiments/*/docs/

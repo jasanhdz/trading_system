@@ -1,0 +1,24 @@
+{
+  "schema": "aegis-strategy-router-retrospective-exclusions-v1",
+  "policy": "exclude every explicitly identified W1-W14 final holdout; use a candidate window ending before the earliest populated holdout",
+  "authoritative_candidate_window": {
+    "start_inclusive": "2024-01-01T00:00:00Z",
+    "last_inclusive": "2024-09-30T23:00:00Z",
+    "source_end_exclusive": "2024-10-01T00:00:00Z"
+  },
+  "excluded": [
+    {"family": "W3", "start": "2024-10-01T00:00:00Z", "end": "2026-08-01T00:00:00Z", "state": "SEALED"},
+    {"family": "W2", "start": "2025-04-01T00:00:00Z", "end": "2026-08-01T00:00:00Z", "state": "SEALED"},
+    {"family": "W1", "start": "2026-05-01T00:00:00Z", "end": "2026-08-01T00:00:00Z", "state": "SEALED"},
+    {"family": "W7", "start": "2026-05-01T00:00:00Z", "end": "2026-07-18T00:00:00Z", "state": "SEALED_NOT_OPENED"},
+    {"family": "W9.1", "start": "2026-06-01T00:00:00Z", "end": "2026-07-01T00:00:00Z", "state": "SEALED_NOT_OPENED_NOT_DOWNLOADED"},
+    {"family": "W12", "start": "2026-07-27T00:00:00Z", "end": "2026-08-01T00:00:00Z", "state": "SEALED_NOT_OPENED"},
+    {"family": "W11/W14", "start": "2026-08-01T00:00:00Z", "end": null, "state": "SEALED_NOT_OPENED"},
+    {"family": "W4/W6/W8/W9/W10/W13", "start": null, "end": null, "state": "FUTURE_OR_UNPOPULATED_SEALED"}
+  ],
+  "assertions": {
+    "candidate_window_intersects_excluded_period": false,
+    "sealed_holdout_outcomes_loaded": false,
+    "w1_w14_holdouts_remain_sealed": true
+  }
+}
