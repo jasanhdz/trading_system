@@ -47,6 +47,18 @@ class E4TailRiskGuard(RiskGuard):
     def is_available(self) -> bool:
         return self._loaded
 
+    @staticmethod
+    def _patch_sklearn_compat() -> None:
+        """Patch sklearn compatibility for models trained with 1.8.0+.
+
+        The frozen models were pickled with sklearn 1.8.0 which removed the
+        LogisticRegression.multi_class attribute. If we're running on 1.7.x,
+        the attribute is missing and calibrator.predict_proba fails.
+        """
+        import sklearn.linear_model
+        if not hasattr(sklearn.linear_model.LogisticRegression, "multi_class"):
+            sklearn.linear_model.LogisticRegression.multi_class = "auto"
+
     def load(self) -> None:
         """Load frozen model artifacts with hash verification.
 
@@ -56,6 +68,8 @@ class E4TailRiskGuard(RiskGuard):
 
         Refuses to load if any required artifact or hash is missing.
         """
+        self._patch_sklearn_compat()
+
         if not self._config.models_joblib_path or not self._config.models_joblib_sha256:
             raise ValueError(
                 "E4 models_joblib_path and models_joblib_sha256 are both required"
@@ -256,7 +270,9 @@ class E4TailRiskGuard(RiskGuard):
     @staticmethod
     def _hash_features(features: pd.DataFrame) -> str:
         """Deterministic hash of the feature row for auditability."""
-        raw = features.to_json(sort_keys=True, default=str).encode()
+        d = features.to_dict(orient="records")[0]
+        items = sorted(d.items())
+        raw = str(items).encode()
         return hashlib.sha256(raw).hexdigest()
 
     @staticmethod

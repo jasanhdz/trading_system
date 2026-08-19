@@ -26,6 +26,7 @@ from .domain import (
 from .direction_provider import DirectionProvider
 from .risk_guard import RiskGuard
 from .e4_tail_risk_guard import E4TailRiskGuard
+from .feature_bridge import FeatureBridge, FeatureRow
 from .entry_decision import EntryDecisionOrchestrator
 from .flags import RiskGuardMode, RiskGuardFlags
 from .position_manager import (
@@ -40,6 +41,8 @@ __all__ = [
     "EntryDecision",
     "EntryDecisionOrchestrator",
     "E4TailRiskGuard",
+    "FeatureBridge",
+    "FeatureRow",
     "FROZEN_TAIL_RISK_THRESHOLD",
     "PositionManagerContract",
     "PositionManagerResult",
