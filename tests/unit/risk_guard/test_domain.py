@@ -134,3 +134,19 @@ class TestRiskGuardConfig:
         c = RiskGuardConfig(enabled=False, mode="enforce")
         assert not c.enforce
         assert not c.observe_only
+
+    def test_threshold_frozen(self):
+        """Threshold must be exactly the frozen V1 value."""
+        c = RiskGuardConfig()
+        assert c.tail_risk_threshold == 0.4522452210875323
+
+    def test_threshold_rejects_different_value(self):
+        """Cannot construct RiskGuardConfig with non-frozen threshold."""
+        import pytest
+        with pytest.raises(ValueError, match="must be FROZEN"):
+            RiskGuardConfig(tail_risk_threshold=0.9)
+
+    def test_threshold_rejects_zero(self):
+        import pytest
+        with pytest.raises(ValueError, match="must be FROZEN"):
+            RiskGuardConfig(tail_risk_threshold=0.0)

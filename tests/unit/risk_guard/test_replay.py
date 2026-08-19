@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from aegis.risk_guard.domain import RiskGuardConfig, RiskDecision, RiskGuardVerdict
+from aegis.risk_guard.domain import RiskGuardConfig, RiskDecision, RiskGuardVerdict, FROZEN_TAIL_RISK_THRESHOLD
 from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
 from aegis.risk_guard.replay import DeterministicReplay
 
@@ -259,8 +259,6 @@ class TestRealE4Inference:
 
     def test_score_validation_rejects_out_of_range(self):
         """Score validation must reject scores outside [0, 1]."""
-        from aegis.risk_guard.flags import FROZEN_TAIL_RISK_THRESHOLD
-
         # A valid score outside [0,1] should be caught
         assert FROZEN_TAIL_RISK_THRESHOLD >= 0.0
         assert FROZEN_TAIL_RISK_THRESHOLD <= 1.0

@@ -1,8 +1,12 @@
 """PositionManager contract — defines the handoff from EntryDecision to execution.
 
 The PositionManager is the final gatekeeper:
-- EntryDecision.ALLOW → may proceed to executor/PositionManager
-- EntryDecision.BLOCK → NUNCA reaches executor/PositionManager
+
+    EntryDecision with verdict ALLOW          → may execute
+    EntryDecision with verdict OBSERVED_BLOCK  → executes (observe_only logs but doesn't block)
+    EntryDecision with verdict BLOCK           → NUNCA reaches executor
+
+    SKIP direction                            → NUNCA reaches PositionManager at all
 
 This module defines the interface contract. The actual PositionManager
 implementation lives in the existing codebase and is NOT modified by
@@ -15,7 +19,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .domain import EntryDecision, RiskGuardVerdict
+from .domain import Direction, EntryDecision, RiskGuardVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -23,18 +27,19 @@ logger = logging.getLogger(__name__)
 class PositionManagerContract(ABC):
     """Abstract contract for the position manager handoff.
 
-   任何实现了此接口的 PositionManager 必须遵守以下规则：
-    1. 只接受 verdict == ALLOW 的 EntryDecision
-    2. 对 verdict == BLOCK 的 EntryDecision 拒绝执行
-    3. 对 verdict == OBSERVED_BLOCK 的 EntryDecision 记录但不执行
+    Rules:
+        1. SKIP direction → can_execute=False (should never reach here)
+        2. verdict=ALLOW → can_execute=True
+        3. verdict=OBSERVED_BLOCK → can_execute=True (observe_only doesn't block)
+        4. verdict=BLOCK → can_execute=False
     """
 
     @abstractmethod
     def can_execute(self, decision: EntryDecision) -> bool:
         """Check if an entry decision can be executed.
 
-        Returns True only if verdict == ALLOW.
-        Returns False for BLOCK and OBSERVED_BLOCK.
+        Returns True for ALLOW and OBSERVED_BLOCK.
+        Returns False for BLOCK and SKIP.
         """
         ...
 
@@ -42,7 +47,7 @@ class PositionManagerContract(ABC):
     def execute(self, decision: EntryDecision) -> PositionManagerResult:
         """Execute an entry decision.
 
-        Raises ValueError if decision.verdict != ALLOW.
+        Raises ValueError if not can_execute().
         """
         ...
 
@@ -72,29 +77,41 @@ class PositionManagerResult:
 
 
 class AllowOnlyPositionManager(PositionManagerContract):
-    """Reference implementation that only allows ALLOW decisions.
+    """Reference implementation with correct semantics.
 
-    This demonstrates the correct contract behavior:
-    - ALLOW → accepted
-    - BLOCK → rejected
-    - OBSERVED_BLOCK → rejected (logged but not executed)
+    Flow:
+        SKIP          → NUNCA ejecutar (should not reach here)
+        LONG/SHORT + ALLOW           → ejecutar
+        LONG/SHORT + OBSERVED_BLOCK  → ejecutar (observe_only)
+        LONG/SHORT + BLOCK           → NO ejecutar
     """
 
     def can_execute(self, decision: EntryDecision) -> bool:
-        return decision.verdict == RiskGuardVerdict.ALLOW
+        # SKIP direction should never reach PositionManager
+        if decision.signal.side == Direction.SKIP:
+            return False
+
+        # ALLOW and OBSERVED_BLOCK are both executable
+        # OBSERVED_BLOCK means "E4 flagged it but we're observing — trade proceeds"
+        if decision.verdict in (RiskGuardVerdict.ALLOW, RiskGuardVerdict.OBSERVED_BLOCK):
+            return True
+
+        # BLOCK is not executable
+        return False
 
     def execute(self, decision: EntryDecision) -> PositionManagerResult:
         if not self.can_execute(decision):
             logger.warning(
-                "PositionManager: rejecting %s decision for %s/%s (verdict=%s)",
+                "PositionManager: rejecting %s decision for %s/%s (verdict=%s, side=%s)",
                 decision.risk_result.decision.value,
                 decision.signal.symbol,
                 decision.signal.side.value,
                 decision.verdict.value,
+                decision.signal.side.value,
             )
             return PositionManagerResult(
                 accepted=False,
-                reason=f"VERDICT_NOT_ALLOW:{decision.verdict.value}",
+                reason=f"VERDICT_NOT_ALLOW:{decision.verdict.value}:SIDE:{decision.signal.side.value}",
                 metadata={
                     "signal_id": decision.signal.signal_id,
                     "tail_risk_score": decision.risk_result.score,
@@ -102,15 +119,16 @@ class AllowOnlyPositionManager(PositionManagerContract):
             )
 
         logger.info(
-            "PositionManager: accepting %s for %s/%s (score=%.6f)",
+            "PositionManager: accepting %s for %s/%s (verdict=%s, score=%.6f)",
             decision.risk_result.decision.value,
             decision.signal.symbol,
             decision.signal.side.value,
+            decision.verdict.value,
             decision.risk_result.score,
         )
         return PositionManagerResult(
             accepted=True,
-            reason="ALLOW",
+            reason=f"ALLOW:{decision.verdict.value}",
             metadata={
                 "signal_id": decision.signal.signal_id,
                 "tail_risk_score": decision.risk_result.score,

@@ -16,6 +16,7 @@ Frozen invariants (V1):
 from .domain import (
     Direction,
     EntryDecision,
+    FROZEN_TAIL_RISK_THRESHOLD,
     RiskDecision,
     RiskGuardConfig,
     RiskGuardResult,
@@ -26,7 +27,7 @@ from .direction_provider import DirectionProvider
 from .risk_guard import RiskGuard
 from .e4_tail_risk_guard import E4TailRiskGuard
 from .entry_decision import EntryDecisionOrchestrator
-from .flags import RiskGuardMode, RiskGuardFlags, FROZEN_TAIL_RISK_THRESHOLD
+from .flags import RiskGuardMode, RiskGuardFlags
 from .position_manager import (
     PositionManagerContract,
     PositionManagerResult,

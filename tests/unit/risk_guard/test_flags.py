@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from aegis.risk_guard.flags import RiskGuardFlags, RiskGuardMode, FROZEN_TAIL_RISK_THRESHOLD
+from aegis.risk_guard.domain import FROZEN_TAIL_RISK_THRESHOLD
+from aegis.risk_guard.flags import RiskGuardFlags, RiskGuardMode
 
 
 class TestRiskGuardFlags:

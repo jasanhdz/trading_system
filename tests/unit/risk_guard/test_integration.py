@@ -227,7 +227,14 @@ class TestFullFlow:
 
 
 class TestPositionManagerContract:
-    """Integration tests for the PositionManager contract handoff."""
+    """Integration tests for the PositionManager contract handoff.
+
+    Correct semantics:
+        SKIP                    → NUNCA ejecutar (should not reach PM)
+        LONG/SHORT + ALLOW      → ejecutar
+        LONG/SHORT + OBSERVED_BLOCK → ejecutar (observe_only, trade proceeds)
+        LONG/SHORT + BLOCK      → NO ejecutar
+    """
 
     def test_allow_passes_to_position_manager(self):
         """ALLOW decisions should be accepted by the PositionManager."""
@@ -242,7 +249,7 @@ class TestPositionManagerContract:
         assert pm.can_execute(decision)
         result = pm.execute(decision)
         assert result.accepted
-        assert result.reason == "ALLOW"
+        assert "ALLOW" in result.reason
 
     def test_block_rejected_by_position_manager(self):
         """BLOCK decisions should be rejected by the PositionManager."""
@@ -259,8 +266,11 @@ class TestPositionManagerContract:
         assert not result.accepted
         assert "BLOCK" in result.reason
 
-    def test_observed_block_rejected_by_position_manager(self):
-        """OBSERVED_BLOCK decisions should be rejected (not executed)."""
+    def test_observed_block_accepted_by_position_manager(self):
+        """OBSERVED_BLOCK decisions should be ACCEPTED (observe_only doesn't block).
+
+        This is the critical semantic: observe_only means "log it but let the trade through."
+        """
         provider = StubDirectionProvider({"BTCUSDT": Direction.SHORT})
         guard = StubRiskGuard(block_above=0.45)
         config = RiskGuardConfig(enabled=True, mode="observe_only")
@@ -269,10 +279,27 @@ class TestPositionManagerContract:
 
         decision = orch.evaluate("BTCUSDT", {"score": 0.8})
 
+        assert decision.verdict == RiskGuardVerdict.OBSERVED_BLOCK
+        assert pm.can_execute(decision)
+        result = pm.execute(decision)
+        assert result.accepted
+        assert "OBSERVED_BLOCK" in result.reason
+
+    def test_skip_rejected_by_position_manager(self):
+        """SKIP decisions should be rejected by the PositionManager."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SKIP})
+        guard = StubRiskGuard(block_above=0.0)
+        config = RiskGuardConfig(enabled=True, mode="enforce")
+        orch = EntryDecisionOrchestrator(provider, guard, config)
+        pm = AllowOnlyPositionManager()
+
+        decision = orch.evaluate("BTCUSDT", {"score": 0.99})
+
+        assert decision.signal.side == Direction.SKIP
         assert not pm.can_execute(decision)
         result = pm.execute(decision)
         assert not result.accepted
-        assert "OBSERVED_BLOCK" in result.reason
+        assert "SKIP" in result.reason
 
     def test_full_chain_allow(self):
         """Full chain: Provider → Guard → Orchestrator → PositionManager (ALLOW)."""
@@ -308,19 +335,19 @@ class TestPositionManagerContract:
         result = pm.execute(decision)
         assert not result.accepted
 
-    def test_skip_never_reaches_position_manager(self):
-        """SKIP decisions never reach the PositionManager (orchestrator returns ALLOW)."""
-        provider = StubDirectionProvider({"BTCUSDT": Direction.SKIP})
-        guard = StubRiskGuard(block_above=0.0)
-        config = RiskGuardConfig(enabled=True, mode="enforce")
+    def test_full_chain_observed_block(self):
+        """Full chain: observe_only mode → OBSERVED_BLOCK → trade proceeds."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SHORT})
+        guard = StubRiskGuard(block_above=0.45)
+        config = RiskGuardConfig(enabled=True, mode="observe_only")
         orch = EntryDecisionOrchestrator(provider, guard, config)
         pm = AllowOnlyPositionManager()
 
-        decision = orch.evaluate("BTCUSDT", {"score": 0.99})
+        decision = orch.evaluate("BTCUSDT", {"score": 0.8})
 
-        assert decision.signal.side == Direction.SKIP
-        assert decision.verdict == RiskGuardVerdict.ALLOW
+        assert decision.signal.side == Direction.SHORT
+        assert decision.risk_result.decision == RiskDecision.BLOCK
+        assert decision.verdict == RiskGuardVerdict.OBSERVED_BLOCK
         assert pm.can_execute(decision)
         result = pm.execute(decision)
         assert result.accepted
-        assert result.reason == "ALLOW"

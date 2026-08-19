@@ -13,7 +13,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from .domain import RiskDecision, RiskGuardConfig, RiskGuardResult, Signal
+from .domain import RiskDecision, RiskGuardConfig, RiskGuardResult, Signal, FROZEN_TAIL_RISK_THRESHOLD
 from .risk_guard import RiskGuard
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,19 @@ class E4TailRiskGuard(RiskGuard):
         return self._loaded
 
     def load(self) -> None:
-        """Load frozen model artifacts with hash verification."""
+        """Load frozen model artifacts with hash verification.
+
+        Requires:
+            - models_joblib_path + models_joblib_sha256 (both non-empty)
+            - feature_schema_path + feature_schema_sha256 (both non-empty)
+
+        Refuses to load if any required artifact or hash is missing.
+        """
+        if not self._config.models_joblib_path or not self._config.models_joblib_sha256:
+            raise ValueError(
+                "E4 models_joblib_path and models_joblib_sha256 are both required"
+            )
+
         models_path = Path(self._config.models_joblib_path)
         if not models_path.exists():
             raise FileNotFoundError(f"E4 models not found: {models_path}")
@@ -65,22 +77,23 @@ class E4TailRiskGuard(RiskGuard):
         if self._tail_bundle is None:
             raise KeyError("target__tail_risk head not found in E4 models")
 
-        if self._config.feature_schema_path:
-            schema_path = Path(self._config.feature_schema_path)
-            if schema_path.exists():
-                schema_raw = schema_path.read_text()
-                self._schema = json.loads(schema_raw)
-                if self._config.feature_schema_sha256:
-                    actual_schema_hash = hashlib.sha256(schema_raw.encode()).hexdigest()
-                    if actual_schema_hash != self._config.feature_schema_sha256:
-                        raise RuntimeError(
-                            f"E4_SCHEMA_HASH_MISMATCH: expected {self._config.feature_schema_sha256}, "
-                            f"got {actual_schema_hash}"
-                        )
-            elif self._config.feature_schema_sha256:
-                raise FileNotFoundError(
-                    f"E4 feature schema not found but hash required: {schema_path}"
-                )
+        if not self._config.feature_schema_path or not self._config.feature_schema_sha256:
+            raise ValueError(
+                "E4 feature_schema_path and feature_schema_sha256 are both required"
+            )
+
+        schema_path = Path(self._config.feature_schema_path)
+        if not schema_path.exists():
+            raise FileNotFoundError(f"E4 feature schema not found: {schema_path}")
+
+        schema_raw = schema_path.read_text()
+        self._schema = json.loads(schema_raw)
+        actual_schema_hash = hashlib.sha256(schema_raw.encode()).hexdigest()
+        if actual_schema_hash != self._config.feature_schema_sha256:
+            raise RuntimeError(
+                f"E4_SCHEMA_HASH_MISMATCH: expected {self._config.feature_schema_sha256}, "
+                f"got {actual_schema_hash}"
+            )
 
         self._loaded = True
         logger.info(

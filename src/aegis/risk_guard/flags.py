@@ -11,10 +11,7 @@ import json
 import threading
 from pathlib import Path
 from typing import Any
-
-from .domain import RiskGuardConfig
-
-FROZEN_TAIL_RISK_THRESHOLD = 0.4522452210875323
+from .domain import RiskGuardConfig, FROZEN_TAIL_RISK_THRESHOLD
 
 
 class RiskGuardMode:

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+FROZEN_TAIL_RISK_THRESHOLD = 0.4522452210875323
+
 
 class Direction(Enum):
     """Trading direction proposed by Aegis."""
@@ -105,17 +107,25 @@ class RiskGuardConfig:
     """Configuration for the risk guard system.
 
     tail_risk_threshold is FROZEN at V1 value (0.4522452210875323).
-    It cannot be changed at runtime.
+    Any attempt to set a different value will raise ValueError.
     """
     enabled: bool = False
     mode: str = "observe_only"
-    tail_risk_threshold: float = 0.4522452210875323
+    tail_risk_threshold: float = FROZEN_TAIL_RISK_THRESHOLD
     models_joblib_path: str = ""
     models_joblib_sha256: str = ""
     feature_schema_path: str = ""
     feature_schema_sha256: str = ""
     candle_data_root: str = ""
     fail_closed: bool = True
+
+    def __post_init__(self) -> None:
+        if self.tail_risk_threshold != FROZEN_TAIL_RISK_THRESHOLD:
+            raise ValueError(
+                f"tail_risk_threshold must be FROZEN at {FROZEN_TAIL_RISK_THRESHOLD}, "
+                f"got {self.tail_risk_threshold}. "
+                f"Threshold cannot be changed in V1."
+            )
 
     @property
     def enforce(self) -> bool:
