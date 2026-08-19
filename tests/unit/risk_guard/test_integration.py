@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,11 @@ from aegis.risk_guard.direction_provider import DirectionProvider
 from aegis.risk_guard.entry_decision import EntryDecisionOrchestrator
 from aegis.risk_guard.flags import RiskGuardFlags, RiskGuardMode
 from aegis.risk_guard.observability import RiskGuardMetrics, RiskGuardObserver
+from aegis.risk_guard.position_manager import (
+    AllowOnlyPositionManager,
+    PositionManagerContract,
+    PositionManagerResult,
+)
 from aegis.risk_guard.risk_guard import RiskGuard
 
 
@@ -220,4 +226,101 @@ class TestFullFlow:
         assert decision.verdict == RiskGuardVerdict.ALLOW
 
 
-import json
+class TestPositionManagerContract:
+    """Integration tests for the PositionManager contract handoff."""
+
+    def test_allow_passes_to_position_manager(self):
+        """ALLOW decisions should be accepted by the PositionManager."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SHORT})
+        guard = StubRiskGuard(block_above=0.45)
+        config = RiskGuardConfig(enabled=True, mode="enforce")
+        orch = EntryDecisionOrchestrator(provider, guard, config)
+        pm = AllowOnlyPositionManager()
+
+        decision = orch.evaluate("BTCUSDT", {"score": 0.3})
+
+        assert pm.can_execute(decision)
+        result = pm.execute(decision)
+        assert result.accepted
+        assert result.reason == "ALLOW"
+
+    def test_block_rejected_by_position_manager(self):
+        """BLOCK decisions should be rejected by the PositionManager."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SHORT})
+        guard = StubRiskGuard(block_above=0.45)
+        config = RiskGuardConfig(enabled=True, mode="enforce")
+        orch = EntryDecisionOrchestrator(provider, guard, config)
+        pm = AllowOnlyPositionManager()
+
+        decision = orch.evaluate("BTCUSDT", {"score": 0.8})
+
+        assert not pm.can_execute(decision)
+        result = pm.execute(decision)
+        assert not result.accepted
+        assert "BLOCK" in result.reason
+
+    def test_observed_block_rejected_by_position_manager(self):
+        """OBSERVED_BLOCK decisions should be rejected (not executed)."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SHORT})
+        guard = StubRiskGuard(block_above=0.45)
+        config = RiskGuardConfig(enabled=True, mode="observe_only")
+        orch = EntryDecisionOrchestrator(provider, guard, config)
+        pm = AllowOnlyPositionManager()
+
+        decision = orch.evaluate("BTCUSDT", {"score": 0.8})
+
+        assert not pm.can_execute(decision)
+        result = pm.execute(decision)
+        assert not result.accepted
+        assert "OBSERVED_BLOCK" in result.reason
+
+    def test_full_chain_allow(self):
+        """Full chain: Provider → Guard → Orchestrator → PositionManager (ALLOW)."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SHORT})
+        guard = StubRiskGuard(block_above=0.45)
+        config = RiskGuardConfig(enabled=True, mode="enforce")
+        orch = EntryDecisionOrchestrator(provider, guard, config)
+        pm = AllowOnlyPositionManager()
+
+        decision = orch.evaluate("BTCUSDT", {"score": 0.3})
+
+        assert decision.signal.side == Direction.SHORT
+        assert decision.risk_result.decision == RiskDecision.ALLOW
+        assert decision.verdict == RiskGuardVerdict.ALLOW
+        assert pm.can_execute(decision)
+        result = pm.execute(decision)
+        assert result.accepted
+
+    def test_full_chain_block(self):
+        """Full chain: Provider → Guard → Orchestrator → PositionManager (BLOCK)."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SHORT})
+        guard = StubRiskGuard(block_above=0.45)
+        config = RiskGuardConfig(enabled=True, mode="enforce")
+        orch = EntryDecisionOrchestrator(provider, guard, config)
+        pm = AllowOnlyPositionManager()
+
+        decision = orch.evaluate("BTCUSDT", {"score": 0.8})
+
+        assert decision.signal.side == Direction.SHORT
+        assert decision.risk_result.decision == RiskDecision.BLOCK
+        assert decision.verdict == RiskGuardVerdict.BLOCK
+        assert not pm.can_execute(decision)
+        result = pm.execute(decision)
+        assert not result.accepted
+
+    def test_skip_never_reaches_position_manager(self):
+        """SKIP decisions never reach the PositionManager (orchestrator returns ALLOW)."""
+        provider = StubDirectionProvider({"BTCUSDT": Direction.SKIP})
+        guard = StubRiskGuard(block_above=0.0)
+        config = RiskGuardConfig(enabled=True, mode="enforce")
+        orch = EntryDecisionOrchestrator(provider, guard, config)
+        pm = AllowOnlyPositionManager()
+
+        decision = orch.evaluate("BTCUSDT", {"score": 0.99})
+
+        assert decision.signal.side == Direction.SKIP
+        assert decision.verdict == RiskGuardVerdict.ALLOW
+        assert pm.can_execute(decision)
+        result = pm.execute(decision)
+        assert result.accepted
+        assert result.reason == "ALLOW"

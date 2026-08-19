@@ -1,4 +1,9 @@
-"""Feature flags for the Risk Guard system."""
+"""Feature flags for the Risk Guard system.
+
+The tail_risk_threshold is FROZEN at 0.4522452210875323 (V1).
+It cannot be changed at runtime. Only mode (disabled/observe_only/enforce)
+and fail_closed can be toggled.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from .domain import RiskGuardConfig
+
+FROZEN_TAIL_RISK_THRESHOLD = 0.4522452210875323
 
 
 class RiskGuardMode:
@@ -22,6 +29,9 @@ class RiskGuardFlags:
 
     Flags are loaded from a JSON file and can be updated at runtime.
     Default state: DISABLED (risk guard off, no enforcement).
+
+    The tail_risk_threshold is FROZEN and cannot be changed at runtime.
+    Only mode and fail_closed can be toggled.
 
     Usage:
         flags = RiskGuardFlags()
@@ -38,11 +48,11 @@ class RiskGuardFlags:
     def __init__(self) -> None:
         self._enabled = False
         self._mode = RiskGuardMode.DISABLED
-        self._tail_risk_threshold = 0.4522452210875323
         self._fail_closed = True
         self._models_joblib_path = ""
         self._models_joblib_sha256 = ""
         self._feature_schema_path = ""
+        self._feature_schema_sha256 = ""
         self._candle_data_root = ""
         self._update_lock = threading.Lock()
 
@@ -70,28 +80,28 @@ class RiskGuardFlags:
         with self._update_lock:
             self._enabled = data.get("enabled", False)
             self._mode = data.get("mode", RiskGuardMode.DISABLED)
-            self._tail_risk_threshold = data.get("tail_risk_threshold", 0.4522452210875323)
             self._fail_closed = data.get("fail_closed", True)
             self._models_joblib_path = data.get("models_joblib_path", "")
             self._models_joblib_sha256 = data.get("models_joblib_sha256", "")
             self._feature_schema_path = data.get("feature_schema_path", "")
+            self._feature_schema_sha256 = data.get("feature_schema_sha256", "")
             self._candle_data_root = data.get("candle_data_root", "")
 
     def update(
         self,
         enabled: bool | None = None,
         mode: str | None = None,
-        tail_risk_threshold: float | None = None,
         fail_closed: bool | None = None,
     ) -> None:
-        """Update flags at runtime (thread-safe)."""
+        """Update flags at runtime (thread-safe).
+
+        NOTE: tail_risk_threshold is FROZEN at V1 value and cannot be changed.
+        """
         with self._update_lock:
             if enabled is not None:
                 self._enabled = enabled
             if mode is not None:
                 self._mode = mode
-            if tail_risk_threshold is not None:
-                self._tail_risk_threshold = tail_risk_threshold
             if fail_closed is not None:
                 self._fail_closed = fail_closed
 
@@ -101,11 +111,12 @@ class RiskGuardFlags:
             return RiskGuardConfig(
                 enabled=self._enabled,
                 mode=self._mode,
-                tail_risk_threshold=self._tail_risk_threshold,
+                tail_risk_threshold=FROZEN_TAIL_RISK_THRESHOLD,
                 fail_closed=self._fail_closed,
                 models_joblib_path=self._models_joblib_path,
                 models_joblib_sha256=self._models_joblib_sha256,
                 feature_schema_path=self._feature_schema_path,
+                feature_schema_sha256=self._feature_schema_sha256,
                 candle_data_root=self._candle_data_root,
             )
 
@@ -115,11 +126,12 @@ class RiskGuardFlags:
             return {
                 "enabled": self._enabled,
                 "mode": self._mode,
-                "tail_risk_threshold": self._tail_risk_threshold,
+                "tail_risk_threshold": FROZEN_TAIL_RISK_THRESHOLD,
                 "fail_closed": self._fail_closed,
                 "models_joblib_path": self._models_joblib_path,
                 "models_joblib_sha256": self._models_joblib_sha256,
                 "feature_schema_path": self._feature_schema_path,
+                "feature_schema_sha256": self._feature_schema_sha256,
                 "candle_data_root": self._candle_data_root,
             }
 

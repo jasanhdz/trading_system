@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis.risk_guard.flags import RiskGuardFlags, RiskGuardMode
+from aegis.risk_guard.flags import RiskGuardFlags, RiskGuardMode, FROZEN_TAIL_RISK_THRESHOLD
 
 
 class TestRiskGuardFlags:
@@ -50,13 +50,20 @@ class TestRiskGuardFlags:
         assert flags.observe_only
         assert not flags.enforce
 
+    def test_threshold_frozen(self):
+        """Threshold is FROZEN at V1 value and cannot be changed."""
+        flags = RiskGuardFlags()
+        config = flags.to_config()
+        assert config.tail_risk_threshold == FROZEN_TAIL_RISK_THRESHOLD
+        assert config.tail_risk_threshold == 0.4522452210875323
+
     def test_to_config(self):
         flags = RiskGuardFlags()
-        flags.update(enabled=True, mode=RiskGuardMode.ENFORCE, tail_risk_threshold=0.5)
+        flags.update(enabled=True, mode=RiskGuardMode.ENFORCE)
         config = flags.to_config()
         assert config.enabled
         assert config.mode == RiskGuardMode.ENFORCE
-        assert config.tail_risk_threshold == 0.5
+        assert config.tail_risk_threshold == FROZEN_TAIL_RISK_THRESHOLD
 
     def test_to_dict(self):
         flags = RiskGuardFlags()
@@ -64,6 +71,7 @@ class TestRiskGuardFlags:
         d = flags.to_dict()
         assert d["enabled"] is True
         assert d["mode"] == "observe_only"
+        assert d["tail_risk_threshold"] == FROZEN_TAIL_RISK_THRESHOLD
 
     def test_save_and_load(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -71,7 +79,7 @@ class TestRiskGuardFlags:
 
         try:
             flags = RiskGuardFlags()
-            flags.update(enabled=True, mode=RiskGuardMode.ENFORCE, tail_risk_threshold=0.6)
+            flags.update(enabled=True, mode=RiskGuardMode.ENFORCE)
             flags.save_to_file(path)
 
             RiskGuardFlags.reset()
@@ -80,7 +88,9 @@ class TestRiskGuardFlags:
 
             assert flags2.enabled
             assert flags2.mode == RiskGuardMode.ENFORCE
-            assert flags2._tail_risk_threshold == 0.6
+            # Threshold is always frozen, regardless of what was in the file
+            config = flags2.to_config()
+            assert config.tail_risk_threshold == FROZEN_TAIL_RISK_THRESHOLD
         finally:
             Path(path).unlink(missing_ok=True)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +113,7 @@ class DeterministicReplay:
             context = self._build_context(signal, row, feature_rows)
 
             if pre_computed_scores is not None and i < len(pre_computed_scores):
-                context["pre_computed_tail_risk_score"] = float(pre_computed_scores.iloc[i])
+                context["_replay_pre_computed_score"] = float(pre_computed_scores.iloc[i])
 
             decision = self._orchestrator.evaluate(signal.symbol, context)
 

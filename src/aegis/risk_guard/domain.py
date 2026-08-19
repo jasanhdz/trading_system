@@ -102,13 +102,18 @@ class EntryDecision:
 
 @dataclass(frozen=True)
 class RiskGuardConfig:
-    """Configuration for the risk guard system."""
+    """Configuration for the risk guard system.
+
+    tail_risk_threshold is FROZEN at V1 value (0.4522452210875323).
+    It cannot be changed at runtime.
+    """
     enabled: bool = False
     mode: str = "observe_only"
     tail_risk_threshold: float = 0.4522452210875323
     models_joblib_path: str = ""
     models_joblib_sha256: str = ""
     feature_schema_path: str = ""
+    feature_schema_sha256: str = ""
     candle_data_root: str = ""
     fail_closed: bool = True
 

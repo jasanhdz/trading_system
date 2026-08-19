@@ -68,7 +68,19 @@ class E4TailRiskGuard(RiskGuard):
         if self._config.feature_schema_path:
             schema_path = Path(self._config.feature_schema_path)
             if schema_path.exists():
-                self._schema = json.loads(schema_path.read_text())
+                schema_raw = schema_path.read_text()
+                self._schema = json.loads(schema_raw)
+                if self._config.feature_schema_sha256:
+                    actual_schema_hash = hashlib.sha256(schema_raw.encode()).hexdigest()
+                    if actual_schema_hash != self._config.feature_schema_sha256:
+                        raise RuntimeError(
+                            f"E4_SCHEMA_HASH_MISMATCH: expected {self._config.feature_schema_sha256}, "
+                            f"got {actual_schema_hash}"
+                        )
+            elif self._config.feature_schema_sha256:
+                raise FileNotFoundError(
+                    f"E4 feature schema not found but hash required: {schema_path}"
+                )
 
         self._loaded = True
         logger.info(
@@ -84,7 +96,7 @@ class E4TailRiskGuard(RiskGuard):
             signal: The Aegis signal to evaluate.
             context: Optional dict with:
                 - "features": pre-computed feature row (dict or pd.Series)
-                - "candle_data": 1m candle DataFrame for feature construction
+                - "_replay_pre_computed_score": ONLY for replay/test, never operational
 
         Returns:
             RiskGuardResult with ALLOW or BLOCK.
@@ -92,8 +104,10 @@ class E4TailRiskGuard(RiskGuard):
         if not self._loaded:
             return self._fail_closed(signal, "E4_MODELS_NOT_LOADED")
 
-        if context and "pre_computed_tail_risk_score" in context:
-            score = context["pre_computed_tail_risk_score"]
+        if context and "_replay_pre_computed_score" in context:
+            score = context["_replay_pre_computed_score"]
+            if not self._validate_score(score):
+                return self._fail_closed(signal, f"INVALID_REPLAY_SCORE:{score}")
             if score >= self._threshold:
                 decision = RiskDecision.BLOCK
                 reason = f"TAIL_RISK_SCORE={score:.6f} >= THRESHOLD={self._threshold:.6f}"
@@ -105,7 +119,7 @@ class E4TailRiskGuard(RiskGuard):
                 score=score,
                 threshold=self._threshold,
                 model_version=self.version(),
-                feature_snapshot_hash="PRE_COMPUTED",
+                feature_snapshot_hash="REPLAY_PRE_COMPUTED",
                 reason=reason,
             )
 
@@ -117,6 +131,9 @@ class E4TailRiskGuard(RiskGuard):
         try:
             score = self._score_tail_risk(features)
             elapsed_ms = (time.monotonic() - start) * 1000
+
+            if not self._validate_score(score):
+                return self._fail_closed(signal, f"INVALID_SCORE:{score}")
 
             if score >= self._threshold:
                 decision = RiskDecision.BLOCK
@@ -212,6 +229,16 @@ class E4TailRiskGuard(RiskGuard):
             feature_snapshot_hash="",
             reason=f"FAIL_OPEN:{reason}",
         )
+
+    @staticmethod
+    def _validate_score(score: float) -> bool:
+        """Validate that a score is finite and in [0, 1] range."""
+        import math
+        if not math.isfinite(score):
+            return False
+        if score < 0.0 or score > 1.0:
+            return False
+        return True
 
     @staticmethod
     def _hash_features(features: pd.DataFrame) -> str:

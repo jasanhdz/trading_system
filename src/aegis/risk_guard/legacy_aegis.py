@@ -15,18 +15,26 @@ logger = logging.getLogger(__name__)
 class LegacyAegisDirectionProvider(DirectionProvider):
     """Wraps the current Aegis brain as a DirectionProvider.
 
-    This adapter allows the existing Aegis decision system to be used
-    as the direction source in the new architecture. It preserves all
-    existing behavior and adds no risk evaluation.
+    Compatible with CurrentBrainDecisionService.predict(symbol, trace_id)
+    which returns a dict with:
+        - aegis.decision_brain.side ("LONG" | "SHORT" | "HOLD")
+        - aegis.decision_brain.decision
+        - aegis.prod.action
+        - aegis.turbo.turbo_score
+        - aegis.candidate.model_identifier
 
-    In the future, this can be replaced with a new DirectionProvider
-    without modifying the RiskGuard or EntryDecisionOrchestrator.
+    Preserves temporal identity from Aegis:
+        - decision_id → Signal.signal_id
+        - generated_at → Signal.timestamp
+        - decision_cycle_id → Signal.metadata["decision_cycle_id"]
+        - model_bundle_id → Signal.direction_model_version
     """
 
     def __init__(self, brain_engine: Any | None = None) -> None:
         """Initialize with an optional brain engine.
 
         If brain_engine is None, evaluate() will return SKIP (safe default).
+        brain_engine should be a CurrentBrainDecisionService with .predict(symbol, trace_id).
         """
         self._brain = brain_engine
 
@@ -54,7 +62,10 @@ class LegacyAegisDirectionProvider(DirectionProvider):
             return self._skip(symbol, f"BRAIN_ERROR:{exc}")
 
     def _evaluate_brain(self, symbol: str, context: dict[str, Any] | None) -> Signal:
-        """Run the brain and extract direction."""
+        """Run the brain and extract direction.
+
+        Uses CurrentBrainDecisionService.predict(symbol, trace_id) interface.
+        """
         trace_id = (context or {}).get("trace_id", "")
 
         if hasattr(self._brain, "predict"):
@@ -77,35 +88,51 @@ class LegacyAegisDirectionProvider(DirectionProvider):
 
         turbo_score = self._extract_turbo_score(response)
         model_version = self._extract_model_version(response)
+        decision_id = self._extract_decision_id(response)
+        generated_at = self._extract_generated_at(response)
+        decision_cycle_id = self._extract_decision_cycle_id(response)
 
         return Signal(
-            signal_id=f"AEGIS-{symbol}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{id(self) % 1000:03d}",
-            timestamp=datetime.now(timezone.utc),
+            signal_id=decision_id,
+            timestamp=generated_at,
             symbol=symbol,
             side=side,
             direction_source=self.name(),
             direction_model_version=model_version,
             turbo_score=turbo_score,
-            metadata={"raw_response_keys": list(response.keys()) if isinstance(response, dict) else []},
+            metadata={
+                "decision_cycle_id": decision_cycle_id,
+                "raw_response_keys": list(response.keys()) if isinstance(response, dict) else [],
+            },
         )
 
     def _extract_side(self, response: Any) -> str | None:
-        """Extract the side from a brain response."""
-        if isinstance(response, dict):
-            prod = response.get("aegis", {}).get("prod", {})
-            side = prod.get("side")
-            if side:
-                return str(side).upper()
+        """Extract the side from a brain response.
 
-            turbo = response.get("aegis", {}).get("turbo", {})
-            side = turbo.get("side")
-            if side:
-                return str(side).upper()
+        Priority order matches compatibility_response() output:
+        1. aegis.decision_brain.side (primary)
+        2. aegis.prod.action (fallback)
+        3. top-level action (fallback)
+        """
+        if not isinstance(response, dict):
+            return None
 
-            decision = response.get("decision_brain", {})
-            side = decision.get("side")
-            if side:
-                return str(side).upper()
+        # Primary: aegis.decision_brain.side
+        decision_brain = response.get("aegis", {}).get("decision_brain", {})
+        side = decision_brain.get("side")
+        if side and str(side).upper() in {"LONG", "SHORT"}:
+            return str(side).upper()
+
+        # Fallback: aegis.prod.action
+        prod = response.get("aegis", {}).get("prod", {})
+        action = prod.get("action")
+        if action and str(action).upper() in {"LONG", "SHORT"}:
+            return str(action).upper()
+
+        # Fallback: top-level action
+        action = response.get("action")
+        if action and str(action).upper() in {"LONG", "SHORT"}:
+            return str(action).upper()
 
         return None
 
@@ -121,11 +148,77 @@ class LegacyAegisDirectionProvider(DirectionProvider):
     def _extract_model_version(self, response: Any) -> str:
         """Extract model version from brain response."""
         if isinstance(response, dict):
-            decision = response.get("decision_brain", {})
-            version = decision.get("model_version") or decision.get("authority", "")
-            if version:
-                return str(version)
+            # Try aegis.candidate.model_identifier first
+            candidate = response.get("aegis", {}).get("candidate", {})
+            if isinstance(candidate, str):
+                return candidate
+            if isinstance(candidate, dict):
+                ident = candidate.get("model_identifier") or candidate.get("identity", "")
+                if ident:
+                    return str(ident)
+
+            # Fallback to metadata
+            metadata = response.get("metadata", {})
+            bundle_id = metadata.get("model_bundle_id") or metadata.get("bundle_sha256", "")
+            if bundle_id:
+                return str(bundle_id)
+
         return "UNKNOWN"
+
+    def _extract_decision_id(self, response: Any) -> str:
+        """Extract decision_id from brain response, preserving Aegis temporal identity."""
+        if isinstance(response, dict):
+            # From metadata (compatibility_response output)
+            metadata = response.get("metadata", {})
+            decision_id = metadata.get("decision_id", "")
+            if decision_id:
+                return str(decision_id)
+
+            # From aegis subtree
+            aegis = response.get("aegis", {})
+            decision_id = aegis.get("decision_id", "")
+            if decision_id:
+                return str(decision_id)
+
+        # Fallback: generate deterministic ID
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+        return f"AEGIS-{ts}"
+
+    def _extract_generated_at(self, response: Any) -> datetime:
+        """Extract generated_at from brain response, preserving Aegis timestamp."""
+        if isinstance(response, dict):
+            metadata = response.get("metadata", {})
+            ts_str = metadata.get("generated_at") or metadata.get("market_timestamp", "")
+            if ts_str:
+                try:
+                    return datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    pass
+
+            aegis = response.get("aegis", {})
+            ts_str = aegis.get("generated_at", "")
+            if ts_str:
+                try:
+                    return datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    pass
+
+        return datetime.now(timezone.utc)
+
+    def _extract_decision_cycle_id(self, response: Any) -> str:
+        """Extract decision_cycle_id from brain response."""
+        if isinstance(response, dict):
+            metadata = response.get("metadata", {})
+            cycle_id = metadata.get("decision_cycle_id", "")
+            if cycle_id:
+                return str(cycle_id)
+
+            aegis = response.get("aegis", {})
+            cycle_id = aegis.get("decision_cycle_id", "")
+            if cycle_id:
+                return str(cycle_id)
+
+        return ""
 
     def _skip(self, symbol: str, reason: str) -> Signal:
         return Signal(
