@@ -3,15 +3,21 @@
 This module provides the missing link between Aegis signals and E4's
 frozen model. It accepts either:
     1. Pre-computed feature rows (from development_labeled.parquet)
-    2. Raw 1-minute candle DataFrames (via E4 feature builder)
+    2. Raw 1-minute candle DataFrames for ALL symbols (via E4 feature builder)
 
 The bridge produces exactly the 146 features that E4's tail_risk model
 expects, enabling real-time inference without pre-computed scores.
 
 Architecture:
-    MarketSnapshot / Candle DataFrame
+    candles_by_symbol = {BTCUSDT: df, ETHUSDT: df, ...}
             ↓
-    E4 Feature Builder (from aegis_e4.features)
+    build_neutral_symbol_panel() per symbol
+            ↓
+    CONCATENATE ALL symbols
+            ↓
+    add_cross_market()  ← requires multi-symbol panel
+            ↓
+    orient_sides()
             ↓
     146 feature__* columns
             ↓
@@ -22,8 +28,9 @@ Architecture:
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -52,27 +59,32 @@ class FeatureBridge:
 
     Two modes:
         1. From pre-computed features (development_labeled.parquet)
-        2. From raw 1-minute candles (requires E4 feature builder)
+        2. From raw 1-minute candles for ALL symbols (via E4 feature builder)
 
     Usage:
-        bridge = FeatureBridge()
+        bridge = FeatureBridge(feature_names=guard._tail_bundle["features"])
 
         # Mode 1: from pre-computed features
         row = bridge.from_feature_dict({"feature__base__tf5m__...": 0.5, ...})
 
-        # Mode 2: from candle DataFrame (when builder is available)
-        row = bridge.from_candles(candles_df, symbol="BTCUSDT", side="SHORT")
+        # Mode 2: from candle DataFrames for all symbols
+        row = bridge.from_market_candles(
+            candles_by_symbol={"BTCUSDT": btc_df, "ETHUSDT": eth_df, ...},
+            target_symbol="BTCUSDT",
+            side="SHORT",
+            decision_at=datetime.now(timezone.utc),
+        )
     """
 
-    def __init__(self, feature_names: list[str] | None = None) -> None:
+    def __init__(self, feature_names: list[str]) -> None:
         """Initialize with the 146 feature names.
 
-        If feature_names is None, loads from the feature schema.
+        feature_names MUST be provided — typically from the guard's verified bundle:
+            bridge = FeatureBridge(guard._tail_bundle["features"])
         """
-        if feature_names is not None:
-            self._feature_names = feature_names
-        else:
-            self._feature_names = self._load_feature_names()
+        if not feature_names:
+            raise ValueError("feature_names must be a non-empty list")
+        self._feature_names = list(feature_names)
 
     def from_feature_dict(
         self,
@@ -83,7 +95,9 @@ class FeatureBridge:
     ) -> FeatureRow:
         """Create a FeatureRow from a pre-computed feature dictionary.
 
-        Validates that all required features are present and finite.
+        Validates:
+            - All required features are present
+            - All values are finite (no NaN, no inf)
         """
         missing = [f for f in self._feature_names if f not in features]
         if missing:
@@ -91,19 +105,23 @@ class FeatureBridge:
                 f"Missing {len(missing)} features: {missing[:5]}..."
             )
 
+        non_finite = []
         feature_dict = {}
         for name in self._feature_names:
             val = features[name]
-            if isinstance(val, (np.floating, float)):
-                feature_dict[name] = float(val)
-            elif isinstance(val, (np.integer, int)):
-                feature_dict[name] = float(val)
-            elif isinstance(val, np.ndarray):
-                feature_dict[name] = float(val.item())
-            else:
-                feature_dict[name] = float(val)
+            try:
+                fval = float(val)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Feature '{name}' cannot convert to float: {val}") from e
+            if not np.isfinite(fval):
+                non_finite.append(name)
+            feature_dict[name] = fval
 
-        import hashlib
+        if non_finite:
+            raise ValueError(
+                f"Non-finite values in {len(non_finite)} features: {non_finite[:5]}..."
+            )
+
         raw = str(sorted(feature_dict.items())).encode()
         feature_hash = hashlib.sha256(raw).hexdigest()
 
@@ -136,56 +154,85 @@ class FeatureBridge:
             timestamp=row.get("decision_at") or row.get("signal_timestamp"),
         )
 
-    def from_candles(
+    def from_market_candles(
         self,
-        one_minute: pd.DataFrame,
-        symbol: str,
+        candles_by_symbol: dict[str, pd.DataFrame],
+        target_symbol: str,
         side: str,
         decision_at: datetime | None = None,
+        timeframes: list[int] | None = None,
     ) -> FeatureRow:
-        """Compute 146 E4 features from 1-minute candle data.
+        """Compute 146 E4 features from 1-minute candle data for ALL symbols.
 
-        Requires the E4 feature builder from the experiment code.
-        Falls back to pre-computed features if builder is not available.
+        The E4 feature builder requires candles from ALL tracked symbols
+        (not just the target) because add_cross_market() computes features
+        from BTC/ETH cross-correlations and market-wide breadth/dispersion.
+
+        Args:
+            candles_by_symbol: {SYMBOL: one_minute_candle_DataFrame} for all symbols.
+            target_symbol: The symbol to extract features for.
+            side: "LONG" or "SHORT".
+            decision_at: Timestamp of the decision (UTC).
+            timeframes: Candle aggregation timeframes (default: [5, 15, 60, 240]).
+
+        Returns:
+            FeatureRow with the 146 features for the target symbol/side.
+
+        Raises:
+            ImportError: If E4 feature builder is not available.
+            ValueError: If no features computed for the target.
         """
-        try:
-            from sandbox.aegis_strategy_router.experiments.aegis_e4_robust_training.src.aegis_e4.features import (
-                build_neutral_symbol_panel,
-                add_cross_market,
-                orient_sides,
-            )
+        from sandbox.aegis_strategy_router.experiments.aegis_e4_robust_training.src.aegis_e4.features import (
+            build_neutral_symbol_panel,
+            add_cross_market,
+            orient_sides,
+        )
 
-            ts = decision_at or datetime.now(timezone.utc)
-            anchors = pd.DatetimeIndex([ts])
-            panel, families = build_neutral_symbol_panel(
-                one_minute, anchors, timeframes=[5, 15, 60, 240]
-            )
+        ts = decision_at or datetime.now(timezone.utc)
+        tfs = timeframes or [5, 15, 60, 240]
+        anchors = pd.DatetimeIndex([ts])
+
+        panels = []
+        all_families: dict[str, str] = {}
+        for symbol, candles in candles_by_symbol.items():
+            if candles is None or candles.empty:
+                logger.warning("No candles for %s, skipping", symbol)
+                continue
+            panel, families = build_neutral_symbol_panel(candles, anchors, timeframes=tfs)
             panel["symbol"] = symbol
-            panel, families = add_cross_market(panel)
-            oriented, families = orient_sides(panel, families)
+            panels.append(panel)
+            all_families.update(families)
 
-            if side.upper() == "SHORT":
-                oriented = oriented[oriented["side"] == "SHORT"]
-            else:
-                oriented = oriented[oriented["side"] == "LONG"]
+        if not panels:
+            raise ValueError("No panels computed from any symbol")
 
-            if oriented.empty:
-                raise ValueError(f"No features computed for {symbol}/{side}")
+        combined = pd.concat(panels, ignore_index=True)
 
-            row = oriented.iloc[0]
-            features = {
-                name: float(row[name])
-                for name in self._feature_names
-                if name in row.index
-            }
+        combined, cross_families = add_cross_market(combined)
+        all_families.update(cross_families)
 
-            return self.from_feature_dict(features, symbol=symbol, side=side, timestamp=ts)
+        oriented, oriented_families = orient_sides(combined, all_families)
+        all_families.update(oriented_families)
 
-        except ImportError:
-            raise ImportError(
-                "E4 feature builder not available. "
-                "Use from_feature_dict() or from_dataframe_row() instead."
+        if side.upper() == "SHORT":
+            matched = oriented[oriented["side"] == "SHORT"]
+        else:
+            matched = oriented[oriented["side"] == "LONG"]
+
+        matched = matched[matched["symbol"] == target_symbol]
+        if matched.empty:
+            raise ValueError(
+                f"No features computed for {target_symbol}/{side} "
+                f"(available symbols: {oriented['symbol'].unique().tolist()})"
             )
+
+        row = matched.iloc[0]
+        features = {}
+        for name in self._feature_names:
+            if name in row.index:
+                features[name] = float(row[name])
+
+        return self.from_feature_dict(features, symbol=target_symbol, side=side, timestamp=ts)
 
     @property
     def feature_names(self) -> list[str]:
@@ -194,23 +241,3 @@ class FeatureBridge:
     @property
     def feature_count(self) -> int:
         return len(self._feature_names)
-
-    @staticmethod
-    def _load_feature_names() -> list[str]:
-        """Load the 146 feature names from the model artifacts."""
-        from pathlib import Path
-        import joblib
-
-        models_path = Path(
-            "sandbox/aegis_strategy_router/experiments/"
-            "aegis_e4_robust_training/artifacts/run_01/development_models.joblib"
-        )
-        if not models_path.exists():
-            raise FileNotFoundError(f"E4 models not found: {models_path}")
-
-        models = joblib.load(models_path)
-        tail = models.get("target__tail_risk")
-        if tail is None:
-            raise KeyError("target__tail_risk not found in E4 models")
-
-        return list(tail["features"])

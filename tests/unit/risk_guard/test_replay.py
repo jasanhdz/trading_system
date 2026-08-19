@@ -250,7 +250,7 @@ class TestRealE4Inference:
         guard = E4TailRiskGuard(config)
         guard.load()
 
-        bridge = FeatureBridge()
+        bridge = FeatureBridge(guard._tail_bundle["features"])
 
         dev = pd.read_parquet(DEVELOPMENT_LABELED_PATH)
         train = dev[dev["split"] == "TRAIN"].head(50)
@@ -333,3 +333,37 @@ class TestRealE4Inference:
             scores.append(score)
 
         assert len(set(scores)) == 1, f"Scores not deterministic: {scores}"
+
+
+class TestFeatureBridgeValidation:
+    """Test FeatureBridge input validation."""
+
+    def test_requires_feature_names(self):
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        with pytest.raises(ValueError, match="feature_names must be a non-empty list"):
+            FeatureBridge([])
+
+    def test_rejects_nan_features(self):
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1", "f2", "f3"])
+        with pytest.raises(ValueError, match="Non-finite"):
+            bridge.from_feature_dict({"f1": 1.0, "f2": float("nan"), "f3": 3.0})
+
+    def test_rejects_inf_features(self):
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1", "f2", "f3"])
+        with pytest.raises(ValueError, match="Non-finite"):
+            bridge.from_feature_dict({"f1": 1.0, "f2": float("inf"), "f3": 3.0})
+
+    def test_rejects_missing_features(self):
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1", "f2", "f3"])
+        with pytest.raises(ValueError, match="Missing"):
+            bridge.from_feature_dict({"f1": 1.0})
+
+    def test_accepts_valid_features(self):
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1", "f2", "f3"])
+        row = bridge.from_feature_dict({"f1": 0.5, "f2": -1.0, "f3": 3.14})
+        assert len(row.features) == 3
+        assert row.feature_hash != ""
