@@ -131,3 +131,16 @@ class TestRiskGuardFlags:
         flags = RiskGuardFlags()
         with pytest.raises(ValueError, match="Contradictory"):
             flags.update(enabled=True, mode=RiskGuardMode.DISABLED)
+
+    def test_update_is_atomic(self):
+        """Failed validation must not change the object's state."""
+        flags = RiskGuardFlags()
+        assert flags.enabled is False
+        assert flags.mode == RiskGuardMode.DISABLED
+
+        with pytest.raises(ValueError):
+            flags.update(enabled=True, mode="disabled")
+
+        # State must be unchanged
+        assert flags.enabled is False
+        assert flags.mode == RiskGuardMode.DISABLED

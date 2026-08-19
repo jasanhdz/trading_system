@@ -102,26 +102,28 @@ class RiskGuardFlags:
         mode: str | None = None,
         fail_closed: bool | None = None,
     ) -> None:
-        """Update flags at runtime (thread-safe).
+        """Update flags at runtime (thread-safe, atomic).
 
-        NOTE: tail_risk_threshold is FROZEN at V1 value and cannot be changed.
+        Computes prospective values first, validates, then assigns.
+        If validation fails, the object is unchanged.
         """
         with self._update_lock:
-            if enabled is not None:
-                self._enabled = enabled
-            if mode is not None:
-                if mode not in self._VALID_MODES:
-                    raise ValueError(
-                        f"Invalid mode '{mode}'. Must be one of: {sorted(self._VALID_MODES)}"
-                    )
-                self._mode = mode
-            if fail_closed is not None:
-                self._fail_closed = fail_closed
-            # Check for contradictory state after update
-            if self._enabled and self._mode == RiskGuardMode.DISABLED:
+            prospective_enabled = enabled if enabled is not None else self._enabled
+            prospective_mode = mode if mode is not None else self._mode
+            prospective_fail_closed = fail_closed if fail_closed is not None else self._fail_closed
+
+            if prospective_mode not in self._VALID_MODES:
+                raise ValueError(
+                    f"Invalid mode '{prospective_mode}'. Must be one of: {sorted(self._VALID_MODES)}"
+                )
+            if prospective_enabled and prospective_mode == RiskGuardMode.DISABLED:
                 raise ValueError(
                     "Contradictory state: enabled=True with mode='disabled'"
                 )
+
+            self._enabled = prospective_enabled
+            self._mode = prospective_mode
+            self._fail_closed = prospective_fail_closed
 
     def to_config(self) -> RiskGuardConfig:
         """Convert current flags to a RiskGuardConfig."""
