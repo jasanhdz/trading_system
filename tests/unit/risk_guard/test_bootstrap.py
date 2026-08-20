@@ -111,6 +111,12 @@ def test_conflicting_overlap_rejected_and_identical_is_idempotent():
         bootstrap.merge_candles(original, changed)
 
 
+def test_zero_volume_candle_is_valid():
+    frame = candles(0, 1)
+    frame.loc[0, ["volume", "taker_buy_volume"]] = 0.0
+    bootstrap._validate_frame(frame, "BTCUSDT")
+
+
 def test_atomic_write_cleans_temp_on_failure(tmp_path, monkeypatch):
     def fail(*_args, **_kwargs):
         raise RuntimeError("write failed")

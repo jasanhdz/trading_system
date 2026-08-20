@@ -352,9 +352,10 @@ def _validate_frame(frame: pd.DataFrame, symbol: str) -> None:
     values = frame.loc[:, CANDLE_COLUMNS[1:]].to_numpy(dtype=float)
     if not np.isfinite(values).all():
         raise BootstrapError(f"NON_FINITE_CANDLE:{symbol}")
-    positive = frame[["open", "high", "low", "close", "volume"]]
-    if (positive <= 0).any().any():
+    if (frame[["open", "high", "low", "close"]] <= 0).any().any():
         raise BootstrapError(f"NON_POSITIVE_CANDLE:{symbol}")
+    if (frame["volume"] < 0).any():
+        raise BootstrapError(f"NEGATIVE_VOLUME:{symbol}")
     if (frame["high"] < frame[["open", "close", "low"]].max(axis=1)).any() or (frame["low"] > frame[["open", "close", "high"]].min(axis=1)).any():
         raise BootstrapError(f"OHLC_INCOHERENT:{symbol}")
     if (frame["taker_buy_volume"] < 0).any() or (frame["taker_buy_volume"] > frame["volume"]).any():
