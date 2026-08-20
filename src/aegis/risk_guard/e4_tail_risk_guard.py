@@ -50,6 +50,13 @@ class E4TailRiskGuard(RiskGuard):
     def is_available(self) -> bool:
         return self._loaded
 
+    @property
+    def bridge(self) -> FeatureBridge:
+        """Public access to the FeatureBridge. Raises if not loaded."""
+        if self._bridge is None:
+            raise RuntimeError("E4TailRiskGuard not loaded; bridge unavailable")
+        return self._bridge
+
     @staticmethod
     def _patch_sklearn_compat() -> None:
         """Patch sklearn compatibility for models trained with 1.8.0+.
@@ -390,6 +397,12 @@ class E4TailRiskGuard(RiskGuard):
         raw = self._tail_bundle["model"].decision_function(tail_feats).reshape(-1, 1)
         score = float(self._tail_bundle["calibrator"].predict_proba(raw)[:, 1][0])
         return score
+
+    def score(self, features: pd.DataFrame) -> float:
+        """Public scoring interface. Validates model loaded, delegates to _score_tail_risk."""
+        if not self._loaded:
+            raise RuntimeError("E4TailRiskGuard not loaded")
+        return self._score_tail_risk(features)
 
     def _fail_closed(self, signal: Signal, reason: str) -> RiskGuardResult:
         """Return a fail-closed BLOCK result."""

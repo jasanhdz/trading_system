@@ -39,6 +39,7 @@ from .domain import (
 from .e4_tail_risk_guard import E4TailRiskGuard
 from .feature_bridge import FROZEN_E4_UNIVERSE, FROZEN_E4_TIMEFROZEN, FeatureBridge, FeatureRow
 from .market_snapshot import MarketSnapshot, fetch_snapshot
+from .observability import E4EvidenceRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,8 @@ class PrecomputeCycleResult:
     score_count: int
     scores: dict[str, dict[str, PrecomputedScore]]  # [symbol][side]
     error: str | None = None
+    snapshot_fetch_ms: float = 0.0
+    score_latency_ms: float = 0.0
 
 
 class E4PrecomputeService:
@@ -86,7 +89,11 @@ class E4PrecomputeService:
     On cycle failure, the previous cache remains valid (no partial updates).
     """
 
-    def __init__(self, config: RiskGuardConfig) -> None:
+    def __init__(
+        self,
+        config: RiskGuardConfig,
+        evidence_recorder: E4EvidenceRecorder | None = None,
+    ) -> None:
         self._config = config
         self._guard: E4TailRiskGuard | None = None
         self._lock = threading.Lock()
@@ -95,9 +102,14 @@ class E4PrecomputeService:
         self._running = False
         self._thread: threading.Thread | None = None
         self._cycle_count = 0
+        self._evidence_recorder = evidence_recorder or E4EvidenceRecorder()
 
     def initialize(self) -> None:
-        """Load frozen artifacts and run initial computation."""
+        """Load frozen artifacts and run initial computation.
+
+        Defect #10: First cycle MUST succeed with 22/22 valid scores.
+        Service will not start if initial precompute fails.
+        """
         logger.info("E4 precompute service initializing...")
 
         self._guard = E4TailRiskGuard(self._config)
@@ -108,7 +120,22 @@ class E4PrecomputeService:
 
         self._verify_frozen_invariants()
 
-        self._run_cycle()
+        # Defect #10: First cycle must succeed with 22/22 valid scores
+        result = self._run_cycle()
+
+        if result.error is not None:
+            raise RuntimeError(
+                f"E4 precompute initialization failed: {result.error}. "
+                f"Score count: {result.score_count}/22. "
+                f"Service will not start with partial data."
+            )
+
+        EXPECTED_SCORE_COUNT = len(FROZEN_E4_UNIVERSE) * 2
+        if result.score_count != EXPECTED_SCORE_COUNT:
+            raise RuntimeError(
+                f"E4 precompute initialization failed: expected {EXPECTED_SCORE_COUNT} scores, "
+                f"got {result.score_count}. Service will not start with partial data."
+            )
 
         logger.info(
             "E4 precompute service initialized",
@@ -117,6 +144,8 @@ class E4PrecomputeService:
                 "threshold": FROZEN_TAIL_RISK_THRESHOLD,
                 "universe": list(FROZEN_E4_UNIVERSE),
                 "timeframes": FROZEN_E4_TIMEFROZEN,
+                "initial_score_count": result.score_count,
+                "cycle_latency_ms": result.cycle_latency_ms,
             },
         )
 
@@ -160,13 +189,36 @@ class E4PrecomputeService:
         logger.info("E4 precompute background loop stopped")
 
     def _background_loop(self) -> None:
-        """Background loop that runs precompute cycles."""
+        """Background loop aligned to UTC 5-minute boundaries.
+
+        Prevents duplicate cycles per T by tracking last completed decision_at.
+        Sleeps until the next 5-minute boundary after cycle completion.
+        """
+        last_completed_decision_at: datetime | None = None
+
         while self._running:
             try:
-                self._run_cycle()
+                result = self._run_cycle()
+
+                # Prevent duplicate cycles for same decision_at
+                if result.decision_at == last_completed_decision_at:
+                    logger.debug(
+                        "Skipping duplicate cycle for decision_at=%s",
+                        result.decision_at.isoformat(),
+                    )
+                else:
+                    last_completed_decision_at = result.decision_at
+
             except Exception:
                 logger.exception("E4 precompute cycle failed")
-            time.sleep(CADENCE_SECONDS)
+
+            # Sleep until next 5-minute boundary
+            now = datetime.now(timezone.utc)
+            seconds_since_boundary = (now.minute % 5) * 60 + now.second
+            sleep_seconds = CADENCE_SECONDS - seconds_since_boundary
+            if sleep_seconds <= 0:
+                sleep_seconds = CADENCE_SECONDS
+            time.sleep(sleep_seconds)
 
     def _run_cycle(self) -> PrecomputeCycleResult:
         """Execute one precompute cycle. Thread-safe, atomic publish."""
@@ -184,80 +236,114 @@ class E4PrecomputeService:
         )
 
         try:
+            snapshot_start = time.monotonic()
             snapshot = fetch_snapshot(decision_at)
+            snapshot_ms = (time.monotonic() - snapshot_start) * 1000
+
             feature_start = time.monotonic()
 
-            panel_by_symbol: dict[str, pd.DataFrame] = {}
-            for symbol in sorted(FROZEN_E4_UNIVERSE):
-                panel_by_symbol[symbol] = snapshot.candles_by_symbol[symbol]
+            # Build ALL 22 feature rows in ONE panel pass (defect #3 fix)
+            feature_rows = self._guard.bridge.from_market_candles_batch(
+                snapshot.candles_by_symbol, decision_at
+            )
+            feature_build_ms = (time.monotonic() - feature_start) * 1000
 
             new_cache: dict[str, PrecomputedScore] = {}
-            feature_build_ms = 0.0
-            all_features_built = True
+            score_start = time.monotonic()
 
-            for symbol in sorted(FROZEN_E4_UNIVERSE):
-                for side in ["LONG", "SHORT"]:
-                    try:
-                        t0 = time.monotonic()
-                        feature_row = self._guard._feature_bridge.from_market_candles(
-                            panel_by_symbol, symbol, side, decision_at
-                        )
-                        feature_build_ms = (time.monotonic() - t0) * 1000
+            for (symbol, side), feature_row in feature_rows.items():
+                score = self._guard.score(
+                    pd.DataFrame([feature_row.features])
+                )
 
-                        t1 = time.monotonic()
-                        score = self._guard._score_tail_risk(
-                            pd.DataFrame([feature_row.features])
-                        )
-                        score_ms = (time.monotonic() - t1) * 1000
+                # Defect #11: Validate score range
+                if not (0.0 <= score <= 1.0):
+                    raise ValueError(
+                        f"INVALID_SCORE: {symbol}/{side} score={score} outside [0, 1]"
+                    )
 
-                        risk_decision = (
-                            RiskDecision.ALLOW.value
-                            if score < FROZEN_TAIL_RISK_THRESHOLD
-                            else RiskDecision.BLOCK.value
-                        )
-                        reason = (
-                            f"TAIL_RISK_SCORE={score:.6f} < THRESHOLD={FROZEN_TAIL_RISK_THRESHOLD:.6f}"
-                            if risk_decision == RiskDecision.ALLOW.value
-                            else f"TAIL_RISK_SCORE={score:.6f} >= THRESHOLD={FROZEN_TAIL_RISK_THRESHOLD:.6f}"
-                        )
+                # Defect #11: Validate threshold is exact frozen value
+                if FROZEN_TAIL_RISK_THRESHOLD != 0.4522452210875323:
+                    raise ValueError(
+                        f"THRESHOLD_DRIFT: expected 0.4522452210875323, "
+                        f"got {FROZEN_TAIL_RISK_THRESHOLD}"
+                    )
 
-                        computed = PrecomputedScore(
-                            symbol=symbol,
-                            side=side,
-                            decision_at=decision_at,
-                            score=score,
-                            threshold=FROZEN_TAIL_RISK_THRESHOLD,
-                            risk_decision=risk_decision,
-                            reason=reason,
-                            model_version=self._guard.version(),
-                            feature_snapshot_hash=feature_row.feature_hash,
-                            feature_available_at=feature_row.max_available_at,
-                            source_feed_lag_ms=feature_row.source_feed_lag_ms,
-                            computed_at=datetime.now(timezone.utc),
-                            snapshot_id=snapshot.snapshot_id,
-                        )
-                        cache_key = _cache_key(decision_at, symbol, side)
-                        new_cache[cache_key] = computed
+                # Defect #11: Decision must match threshold comparison
+                expected_decision = (
+                    RiskDecision.ALLOW.value
+                    if score < FROZEN_TAIL_RISK_THRESHOLD
+                    else RiskDecision.BLOCK.value
+                )
+                risk_decision = expected_decision
+                reason = (
+                    f"TAIL_RISK_SCORE={score:.6f} < THRESHOLD={FROZEN_TAIL_RISK_THRESHOLD:.6f}"
+                    if risk_decision == RiskDecision.ALLOW.value
+                    else f"TAIL_RISK_SCORE={score:.6f} >= THRESHOLD={FROZEN_TAIL_RISK_THRESHOLD:.6f}"
+                )
 
-                    except Exception as e:
-                        all_features_built = False
-                        error_score = PrecomputedScore(
-                            symbol=symbol,
-                            side=side,
-                            decision_at=decision_at,
-                            score=0.0,
-                            threshold=FROZEN_TAIL_RISK_THRESHOLD,
-                            risk_decision=RiskDecision.FEATURE_BUILD_ERROR.value,
-                            reason=f"FEATURE_BUILD_ERROR: {e}",
-                            model_version=self._guard.version(),
-                            feature_snapshot_hash="",
-                            feature_available_at=None,
-                            source_feed_lag_ms=None,
-                            computed_at=datetime.now(timezone.utc),
-                            snapshot_id=snapshot.snapshot_id,
-                        )
-                        cache_key = _cache_key(decision_at, symbol, side)
-                        new_cache[cache_key] = error_score
+                computed = PrecomputedScore(
+                    symbol=symbol,
+                    side=side,
+                    decision_at=decision_at,
+                    score=score,
+                    threshold=FROZEN_TAIL_RISK_THRESHOLD,
+                    risk_decision=risk_decision,
+                    reason=reason,
+                    model_version=self._guard.version(),
+                    feature_snapshot_hash=feature_row.feature_hash,
+                    feature_available_at=feature_row.max_available_at,
+                    source_feed_lag_ms=feature_row.source_feed_lag_ms,
+                    computed_at=datetime.now(timezone.utc),
+                    snapshot_id=snapshot.snapshot_id,
+                )
+                cache_key = _cache_key(decision_at, symbol, side)
+                new_cache[cache_key] = computed
+
+                # Defect #16: Wire evidence recorder
+                self._evidence_recorder.record_evaluation(
+                    signal_id=f"precompute_{decision_at.strftime('%Y%m%dT%H%M%SZ')}_{symbol}_{side}",
+                    decision_id=cache_key,
+                    decision_cycle_id=snapshot.snapshot_id,
+                    decision_at=decision_at,
+                    symbol=symbol,
+                    side=side,
+                    direction_source="precompute",
+                    e4_score=score,
+                    e4_threshold=FROZEN_TAIL_RISK_THRESHOLD,
+                    e4_decision=risk_decision,
+                    e4_reason=reason,
+                    e4_model_version=self._guard.version(),
+                    feature_snapshot_hash=feature_row.feature_hash,
+                    feature_available_at=feature_row.max_available_at,
+                    source_feed_lag_ms=feature_row.source_feed_lag_ms,
+                    snapshot_id=snapshot.snapshot_id,
+                    cache_age_ms=0.0,
+                    python_latency_ms=score_ms,
+                )
+
+            score_ms = (time.monotonic() - score_start) * 1000
+
+            # Defect #4: Atomic publish - require exactly 22/22 valid scores
+            EXPECTED_SCORE_COUNT = len(FROZEN_E4_UNIVERSE) * 2  # 11 symbols × 2 sides
+            if len(new_cache) != EXPECTED_SCORE_COUNT:
+                raise RuntimeError(
+                    f"ATOMIC_PUBLISH_FAILURE: expected {EXPECTED_SCORE_COUNT} scores, "
+                    f"got {len(new_cache)}. Refusing to publish partial results."
+                )
+
+            # Validate all scores are valid (not NaN, not error scores)
+            for key, score in new_cache.items():
+                if score.risk_decision == RiskDecision.FEATURE_BUILD_ERROR.value:
+                    raise RuntimeError(
+                        f"ATOMIC_PUBLISH_FAILURE: score {key} has FEATURE_BUILD_ERROR. "
+                        f"Refusing to publish partial results."
+                    )
+                if not (0.0 <= score.score <= 1.0):
+                    raise RuntimeError(
+                        f"ATOMIC_PUBLISH_FAILURE: score {key} has invalid score {score.score}. "
+                        f"Refusing to publish partial results."
+                    )
 
             cycle_completed = datetime.now(timezone.utc)
             cycle_latency_ms = (cycle_completed - cycle_started).total_seconds() * 1000
@@ -272,7 +358,9 @@ class E4PrecomputeService:
                 feature_build_latency_ms=feature_build_ms,
                 score_count=len(new_cache),
                 scores=_organize_scores(new_cache),
-                error=None if all_features_built else "PARTIAL_BUILD_FAILURE",
+                error=None,
+                snapshot_fetch_ms=snapshot_ms,
+                score_latency_ms=score_ms,
             )
 
             with self._lock:
@@ -285,10 +373,11 @@ class E4PrecomputeService:
                 extra={
                     "decision_at": decision_at.isoformat(),
                     "cycle_latency_ms": cycle_latency_ms,
+                    "snapshot_fetch_ms": snapshot_ms,
                     "feature_build_latency_ms": feature_build_ms,
+                    "score_latency_ms": score_ms,
                     "score_count": len(new_cache),
                     "snapshot_id": snapshot.snapshot_id,
-                    "error": result.error,
                 },
             )
 

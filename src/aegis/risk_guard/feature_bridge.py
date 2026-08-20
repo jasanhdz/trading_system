@@ -410,6 +410,181 @@ class FeatureBridge:
             source_feed_lag_ms=source_feed_lag_ms,
         )
 
+    def from_market_candles_batch(
+        self,
+        candles_by_symbol: dict[str, pd.DataFrame],
+        decision_at: datetime,
+    ) -> dict[tuple[str, str], FeatureRow]:
+        """Build features for ALL symbols × sides in ONE panel pass.
+
+        This is the efficient path for precomputation. Instead of calling
+        from_market_candles() 22 times (which rebuilds the panel each time),
+        this method:
+            1. Builds the full panel ONCE
+            2. Extracts 22 rows for all (symbol, side) combinations
+
+        Returns:
+            Dict mapping (symbol, side) → FeatureRow
+        """
+        from sandbox.aegis_strategy_router.experiments.aegis_e4_robust_training.src.aegis_e4.features import (
+            build_neutral_symbol_panel,
+            add_cross_market,
+            orient_sides,
+            assert_causal_availability,
+        )
+
+        if not candles_by_symbol:
+            raise ValueError("candles_by_symbol is empty")
+
+        provided = set(candles_by_symbol.keys())
+        if provided != FROZEN_E4_UNIVERSE:
+            missing = FROZEN_E4_UNIVERSE - provided
+            extra = provided - FROZEN_E4_UNIVERSE
+            parts = []
+            if missing:
+                parts.append(f"MISSING: {sorted(missing)}")
+            if extra:
+                parts.append(f"EXTRA: {sorted(extra)}")
+            raise ValueError(
+                f"UNIVERSE_MISMATCH: must be exactly {len(FROZEN_E4_UNIVERSE)} "
+                f"E4 symbols. {'; '.join(parts)}"
+            )
+
+        decision_ts = pd.Timestamp(decision_at)
+        if decision_ts.tzinfo is None:
+            decision_ts = decision_ts.tz_localize("UTC")
+        else:
+            decision_ts = decision_ts.tz_convert("UTC")
+
+        if decision_ts.minute % ANCHOR_CADENCE_MINUTES != 0:
+            raise ValueError(
+                f"decision_at must be aligned to {ANCHOR_CADENCE_MINUTES}-minute "
+                f"cadence, got minute={decision_ts.minute}"
+            )
+
+        normalized_decision_at = decision_ts
+        anchors = build_anchors(decision_at)
+
+        # Build all symbol panels
+        panels = []
+        all_families: dict[str, str] = {}
+        for symbol, candles in candles_by_symbol.items():
+            validate_candles(candles, symbol)
+            panel, families = build_neutral_symbol_panel(
+                candles, anchors, timeframes=FROZEN_E4_TIMEFROZEN
+            )
+            panel["symbol"] = symbol
+            panels.append(panel)
+            all_families.update(families)
+
+        # Concatenate and add cross-market features ONCE
+        combined = pd.concat(panels, ignore_index=True)
+        combined, cross_families = add_cross_market(combined)
+        all_families.update(cross_families)
+
+        # Orient sides ONCE
+        oriented, oriented_families = orient_sides(combined, all_families)
+        all_families.update(oriented_families)
+
+        # Validate causality ONCE
+        try:
+            assert_causal_availability(oriented)
+        except ValueError as exc:
+            raise ValueError(f"NON_CAUSAL_DATA:{exc}") from exc
+
+        # Extract 22 rows for all (symbol, side) combinations
+        result: dict[tuple[str, str], FeatureRow] = {}
+        for symbol in sorted(FROZEN_E4_UNIVERSE):
+            for side in ["LONG", "SHORT"]:
+                matched = oriented[
+                    (oriented["symbol"] == symbol)
+                    & (oriented["side"] == side)
+                    & (oriented["decision_at"] == normalized_decision_at)
+                ]
+                if matched.empty:
+                    raise ValueError(
+                        f"No features computed for {symbol}/{side} "
+                        f"at decision_at={normalized_decision_at}"
+                    )
+                if len(matched) != 1:
+                    raise ValueError(
+                        f"Expected exactly 1 row for {symbol}/{side} "
+                        f"at decision_at={normalized_decision_at}, got {len(matched)}"
+                    )
+
+                row = matched.iloc[0]
+
+                # Compute availability metrics
+                avail_cols = [c for c in row.index if c.startswith("available_at__")]
+                max_avail = None
+                source_age_ms: dict[str, float] = {}
+                source_feed_lag_ms: dict[str, float] = {}
+
+                expected_by_tf = {
+                    "tf5m": timedelta(minutes=5),
+                    "tf15m": timedelta(minutes=15),
+                    "tf60m": timedelta(minutes=60),
+                    "tf240m": timedelta(minutes=240),
+                    "flow": timedelta(minutes=5),
+                }
+
+                for col in avail_cols:
+                    avail_val = row[col]
+                    if pd.isna(avail_val):
+                        source_age_ms[col] = float("inf")
+                        source_feed_lag_ms[col] = float("inf")
+                        continue
+                    avail_ts = pd.Timestamp(avail_val)
+                    if avail_ts.tzinfo is None:
+                        avail_ts = avail_ts.tz_localize("UTC")
+                    else:
+                        avail_ts = avail_ts.tz_convert("UTC")
+
+                    age_ms = (normalized_decision_at - avail_ts).total_seconds() * 1000
+                    source_age_ms[col] = max(0.0, age_ms)
+
+                    tf_key = None
+                    for tf in expected_by_tf:
+                        if tf in col:
+                            tf_key = tf
+                            break
+                    if tf_key:
+                        tf_delta = expected_by_tf[tf_key]
+                        expected_avail = normalized_decision_at.floor(tf_delta)
+                        lag_ms = max(0.0, (expected_avail - avail_ts).total_seconds() * 1000)
+                        source_feed_lag_ms[col] = lag_ms
+                    else:
+                        source_feed_lag_ms[col] = max(0.0, age_ms)
+
+                    if avail_ts > normalized_decision_at:
+                        raise ValueError(
+                            f"NON_CAUSAL_DATA: {col}={avail_ts} > decision_at={normalized_decision_at}"
+                        )
+                    if max_avail is None or avail_ts > max_avail:
+                        max_avail = avail_ts
+
+                # Extract features
+                features = {
+                    name: float(row[name])
+                    for name in self._feature_names
+                    if name in row.index
+                }
+
+                feature_row = self.from_feature_dict(features, symbol=symbol, side=side, timestamp=decision_at)
+
+                result[(symbol, side)] = FeatureRow(
+                    features=feature_row.features,
+                    symbol=feature_row.symbol,
+                    side=feature_row.side,
+                    timestamp=feature_row.timestamp,
+                    feature_hash=feature_row.feature_hash,
+                    max_available_at=max_avail.to_pydatetime() if max_avail else None,
+                    source_age_ms=source_age_ms,
+                    source_feed_lag_ms=source_feed_lag_ms,
+                )
+
+        return result
+
     @property
     def feature_names(self) -> list[str]:
         return list(self._feature_names)

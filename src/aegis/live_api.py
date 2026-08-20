@@ -33,7 +33,8 @@ from aegis.research.dual_side_shadow import build_composite_research_observer
 from aegis.v17_execution_challenger import load_v17_challenger_config
 
 from aegis.risk_guard.domain import FROZEN_TAIL_RISK_THRESHOLD, RiskDecision, RiskGuardConfig
-from aegis.risk_guard.precompute import E4PrecomputeService
+from aegis.risk_guard.precompute import E4PrecomputeService, STALENESS_TOLERANCE_S
+from aegis.risk_guard.observability import E4EvidenceRecorder
 
 
 class PredictRequest(BaseModel):
@@ -45,7 +46,12 @@ class E4TailRiskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     symbol: str = Field(min_length=1, max_length=20)
     side: str = Field(pattern=r"^(LONG|SHORT)$")
-    decision_at: str = Field(default="", description="ISO 8601 timestamp, 5m aligned")
+    decision_at: str = Field(description="ISO 8601 timestamp, 5m aligned")
+
+
+# Defect #8: Pinned manifest hashes (frozen, never computed dynamically)
+PINNED_MODELS_JOBLIB_SHA256 = "d9b02b8045a365541eec8ae02c4b67d99972af1be5fa327f48cac6c95c60dd9f"
+PINNED_FEATURE_SCHEMA_SHA256 = "9f86bf95bd78508698a5a1eac9147becaae48565aca6f3fcc1a8e0597d5ba1f2"
 
 
 def _build_e4_config() -> RiskGuardConfig:
@@ -53,23 +59,15 @@ def _build_e4_config() -> RiskGuardConfig:
     models_path = root / "sandbox/aegis_strategy_router/experiments/aegis_e4_robust_training/artifacts/run_01/development_models.joblib"
     schema_path = root / "sandbox/aegis_strategy_router/experiments/aegis_e4_robust_training/artifacts/dataset_v1/feature_schema.json"
 
-    import hashlib
-    def _sha256(p: Path) -> str:
-        h = hashlib.sha256()
-        with open(p, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-        return h.hexdigest()
-
     return RiskGuardConfig(
         enabled=True,
         mode="observe_only",
         tail_risk_threshold=FROZEN_TAIL_RISK_THRESHOLD,
         fail_closed=True,
         models_joblib_path=str(models_path),
-        models_joblib_sha256=_sha256(models_path) if models_path.exists() else "",
+        models_joblib_sha256=PINNED_MODELS_JOBLIB_SHA256,
         feature_schema_path=str(schema_path),
-        feature_schema_sha256="9f86bf95bd78508698a5a1eac9147becaae48565aca6f3fcc1a8e0597d5ba1f2" if schema_path.exists() else "",
+        feature_schema_sha256=PINNED_FEATURE_SCHEMA_SHA256,
     )
 
 
@@ -97,14 +95,16 @@ def _build_e4_unavailable_response(
 def create_app(
     service: CurrentBrainDecisionService | None = None,
     e4_service: E4PrecomputeService | None = None,
+    evidence_recorder: E4EvidenceRecorder | None = None,
 ) -> FastAPI:
     runtime = service or build_service()
     e4 = e4_service
+    evidence = evidence_recorder or E4EvidenceRecorder()
 
     if e4 is None:
         try:
             e4_config = _build_e4_config()
-            e4 = E4PrecomputeService(e4_config)
+            e4 = E4PrecomputeService(e4_config, evidence_recorder=evidence)
             e4.initialize()
             e4.start_background()
         except Exception:
@@ -204,16 +204,24 @@ def create_app(
                 f"E4_CYCLE_ERROR: {last_cycle.error}"
             )
 
-        if request.decision_at:
-            try:
-                requested_dt = datetime.fromisoformat(request.decision_at.replace("Z", "+00:00"))
-            except ValueError:
-                return _build_e4_unavailable_response(
-                    symbol, side, request.decision_at, "E4_INVALID_DECISION_AT"
-                )
-        else:
-            requested_dt = last_cycle.decision_at
+        # Defect #5: Require decision_at and validate identity match
+        try:
+            requested_dt = datetime.fromisoformat(request.decision_at.replace("Z", "+00:00"))
+        except ValueError:
+            return _build_e4_unavailable_response(
+                symbol, side, request.decision_at, "E4_INVALID_DECISION_AT"
+            )
 
+        # Defect #6: Apply staleness tolerance
+        now = datetime.now(timezone.utc)
+        staleness_ms = (now - last_cycle.decision_at).total_seconds() * 1000
+        if staleness_ms > STALENESS_TOLERANCE_S * 1000:
+            return _build_e4_unavailable_response(
+                symbol, side, requested_dt.isoformat(),
+                f"E4_CYCLE_STALE: staleness={staleness_ms:.0f}ms > tolerance={STALENESS_TOLERANCE_S * 1000}ms"
+            )
+
+        # Defect #5: Require exact decision_at identity match
         if requested_dt != last_cycle.decision_at:
             return _build_e4_unavailable_response(
                 symbol, side, requested_dt.isoformat(),
@@ -227,7 +235,6 @@ def create_app(
                 symbol, side, requested_dt.isoformat(), "E4_SCORE_NOT_CACHED"
             )
 
-        now = datetime.now(timezone.utc)
         cache_age_ms = (now - score.computed_at).total_seconds() * 1000
 
         return {

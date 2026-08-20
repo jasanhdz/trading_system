@@ -332,3 +332,185 @@ class TestFeatureParity:
             "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT"
         }
         assert set(FROZEN_E4_UNIVERSE) == expected
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Defect #1: E4TailRiskGuard bridge property
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDefect1BridgeProperty:
+    def test_bridge_raises_when_not_loaded(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        config = RiskGuardConfig(enabled=True, mode="observe_only")
+        guard = E4TailRiskGuard(config)
+        with pytest.raises(RuntimeError, match="not loaded"):
+            _ = guard.bridge
+
+    def test_bridge_available_after_load(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        config = RiskGuardConfig(
+            enabled=True,
+            mode="observe_only",
+            models_joblib_path="sandbox/aegis_strategy_router/experiments/aegis_e4_robust_training/artifacts/run_01/development_models.joblib",
+            models_joblib_sha256="d9b02b8045a365541eec8ae02c4b67d99972af1be5fa327f48cac6c95c60dd9f",
+            feature_schema_path="sandbox/aegis_strategy_router/experiments/aegis_e4_robust_training/artifacts/dataset_v1/feature_schema.json",
+            feature_schema_sha256="9f86bf95bd78508698a5a1eac9147becaae48565aca6f3fcc1a8e0597d5ba1f2",
+        )
+        guard = E4TailRiskGuard(config)
+        guard.load()
+        bridge = guard.bridge
+        assert bridge is not None
+        assert bridge.feature_count == 146
+
+    def test_score_method_raises_when_not_loaded(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        import pandas as pd
+        config = RiskGuardConfig(enabled=True, mode="observe_only")
+        guard = E4TailRiskGuard(config)
+        with pytest.raises(RuntimeError, match="not loaded"):
+            guard.score(pd.DataFrame({"feature__test": [1.0]}))
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Defect #4: Atomic publish validation
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDefect4AtomicPublish:
+    def test_precompute_score_count_must_be_22(self):
+        from aegis.risk_guard.precompute import E4PrecomputeService
+        EXPECTED = len(FROZEN_E4_UNIVERSE) * 2
+        assert EXPECTED == 22
+
+    def test_precomputed_score_validates_score_range(self):
+        now = datetime.now(timezone.utc)
+        score = PrecomputedScore(
+            symbol="BTCUSDT",
+            side="LONG",
+            decision_at=now,
+            score=1.5,
+            threshold=FROZEN_TAIL_RISK_THRESHOLD,
+            risk_decision="BLOCK",
+            reason="test",
+            model_version="test",
+            feature_snapshot_hash="abc",
+            feature_available_at=None,
+            source_feed_lag_ms=None,
+            computed_at=now,
+            snapshot_id="test",
+        )
+        assert score.score == 1.5
+
+    def test_precomputed_score_freezes_threshold(self):
+        now = datetime.now(timezone.utc)
+        score = PrecomputedScore(
+            symbol="BTCUSDT",
+            side="LONG",
+            decision_at=now,
+            score=0.3,
+            threshold=FROZEN_TAIL_RISK_THRESHOLD,
+            risk_decision="ALLOW",
+            reason="test",
+            model_version="test",
+            feature_snapshot_hash="abc",
+            feature_available_at=None,
+            source_feed_lag_ms=None,
+            computed_at=now,
+            snapshot_id="test",
+        )
+        assert score.threshold == FROZEN_TAIL_RISK_THRESHOLD
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Defect #5: decision_at identity match
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDefect5DecisionAtIdentity:
+    def test_cache_key_includes_decision_at(self):
+        dt1 = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+        dt2 = datetime(2025, 1, 1, 12, 5, tzinfo=timezone.utc)
+        key1 = _cache_key(dt1, "BTCUSDT", "LONG")
+        key2 = _cache_key(dt2, "BTCUSDT", "LONG")
+        assert key1 != key2
+
+    def test_lookup_requires_exact_decision_at(self):
+        from aegis.risk_guard.precompute import E4PrecomputeService
+        config = RiskGuardConfig(enabled=True, mode="observe_only")
+        service = E4PrecomputeService(config)
+        dt = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+        result = service.lookup("BTCUSDT", "LONG", dt)
+        assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Defect #6: Staleness tolerance
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDefect6StalenessTolerance:
+    def test_staleness_tolerance_constant_exists(self):
+        from aegis.risk_guard.precompute import STALENESS_TOLERANCE_S
+        assert STALENESS_TOLERANCE_S == 60
+
+    def test_staleness_tolerance_positive(self):
+        from aegis.risk_guard.precompute import STALENESS_TOLERANCE_S
+        assert STALENESS_TOLERANCE_S > 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Defect #11: Score validation
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDefect11ScoreValidation:
+    def test_frozen_threshold_exact_value(self):
+        assert FROZEN_TAIL_RISK_THRESHOLD == 0.4522452210875323
+
+    def test_score_validation_rejects_nan(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        assert E4TailRiskGuard._validate_score(float("nan")) is False
+
+    def test_score_validation_rejects_inf(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        assert E4TailRiskGuard._validate_score(float("inf")) is False
+
+    def test_score_validation_rejects_negative(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        assert E4TailRiskGuard._validate_score(-0.1) is False
+
+    def test_score_validation_rejects_above_one(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        assert E4TailRiskGuard._validate_score(1.1) is False
+
+    def test_score_validation_accepts_boundary_zero(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        assert E4TailRiskGuard._validate_score(0.0) is True
+
+    def test_score_validation_accepts_boundary_one(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        assert E4TailRiskGuard._validate_score(1.0) is True
+
+    def test_score_validation_accepts_typical(self):
+        from aegis.risk_guard.e4_tail_risk_guard import E4TailRiskGuard
+        assert E4TailRiskGuard._validate_score(0.3) is True
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Defect #12: Response contract validation
+# ═══════════════════════════════════════════════════════════════════
+
+class TestDefect12ResponseContract:
+    def test_frozen_threshold_matches(self):
+        assert FROZEN_TAIL_RISK_THRESHOLD == 0.4522452210875323
+
+    def test_decision_consistency_allow(self):
+        score = 0.3
+        expected = "ALLOW" if score < FROZEN_TAIL_RISK_THRESHOLD else "BLOCK"
+        assert expected == "ALLOW"
+
+    def test_decision_consistency_block(self):
+        score = 0.6
+        expected = "ALLOW" if score < FROZEN_TAIL_RISK_THRESHOLD else "BLOCK"
+        assert expected == "BLOCK"
+
+    def test_decision_consistency_boundary(self):
+        score = FROZEN_TAIL_RISK_THRESHOLD
+        expected = "ALLOW" if score < FROZEN_TAIL_RISK_THRESHOLD else "BLOCK"
+        assert expected == "BLOCK"

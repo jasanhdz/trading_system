@@ -35,7 +35,7 @@ from .position_manager import (
     AllowOnlyPositionManager,
 )
 from .precompute import E4PrecomputeService, PrecomputedScore, PrecomputeCycleResult
-from .market_snapshot import MarketSnapshot, fetch_snapshot
+from .market_snapshot import MarketSnapshot, fetch_snapshot, get_cache_stats, invalidate_cache
 from .observability import E4EvidenceRecorder
 
 __all__ = [
@@ -64,4 +64,6 @@ __all__ = [
     "RiskGuardVerdict",
     "Signal",
     "fetch_snapshot",
+    "get_cache_stats",
+    "invalidate_cache",
 ]
