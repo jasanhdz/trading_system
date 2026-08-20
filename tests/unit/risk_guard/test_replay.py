@@ -448,9 +448,28 @@ class TestMarketCandlesValidation:
         from datetime import datetime, timezone
         from aegis.risk_guard.feature_bridge import FeatureBridge
         bridge = FeatureBridge(["f1"])
-        with pytest.raises(ValueError, match="MISSING_SYMBOL"):
+        with pytest.raises(ValueError, match="UNIVERSE_MISMATCH"):
             bridge.from_market_candles(
                 candles_by_symbol={"BTCUSDT": pd.DataFrame()},
+                target_symbol="BTCUSDT",
+                side="LONG",
+                decision_at=datetime.now(timezone.utc),
+            )
+
+    def test_rejects_extra_symbols(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1"])
+        all_symbols = {
+            s: pd.DataFrame() for s in [
+                "ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT",
+                "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT",
+            ]
+        }
+        all_symbols["EXTRAUSDT"] = pd.DataFrame()
+        with pytest.raises(ValueError, match="EXTRA"):
+            bridge.from_market_candles(
+                candles_by_symbol=all_symbols,
                 target_symbol="BTCUSDT",
                 side="LONG",
                 decision_at=datetime.now(timezone.utc),
@@ -477,7 +496,7 @@ class TestMarketCandlesValidation:
                 candles_by_symbol=candles,
                 target_symbol="BTCUSDT",
                 side="LONG",
-                decision_at=datetime.now(timezone.utc),
+                decision_at=datetime(2025, 6, 1, 12, 0, tzinfo=timezone.utc),
             )
 
     def test_rejects_minute_gap(self):
@@ -500,7 +519,30 @@ class TestMarketCandlesValidation:
                 candles_by_symbol=candles,
                 target_symbol="BTCUSDT",
                 side="LONG",
-                decision_at=datetime.now(timezone.utc),
+                decision_at=datetime(2025, 6, 1, 12, 0, tzinfo=timezone.utc),
+            )
+
+    def test_rejects_misaligned_decision_at(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1"])
+        candles = {
+            s: pd.DataFrame({
+                "open_time_ms": [1000, 61_000],
+                "open": [1.0, 1.0], "high": [1.0, 1.0],
+                "low": [1.0, 1.0], "close": [1.0, 1.0],
+                "volume": [1.0, 1.0], "taker_buy_volume": [0.5, 0.5],
+            }) for s in [
+                "ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT",
+                "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT",
+            ]
+        }
+        with pytest.raises(ValueError, match="aligned to 5-minute"):
+            bridge.from_market_candles(
+                candles_by_symbol=candles,
+                target_symbol="BTCUSDT",
+                side="LONG",
+                decision_at=datetime(2025, 6, 1, 12, 3, tzinfo=timezone.utc),
             )
 
     def test_build_anchors_generates_window(self):

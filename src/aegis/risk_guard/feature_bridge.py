@@ -232,15 +232,16 @@ class FeatureBridge:
     ) -> FeatureRow:
         """Compute 146 E4 features from 1-minute candle data for ALL symbols.
 
-        The E4 feature builder requires candles from ALL 11 tracked symbols
-        because add_cross_market() computes features from BTC/ETH
-        cross-correlations and market-wide breadth/dispersion.
+        The E4 feature builder requires candles from exactly 11 tracked symbols
+        (no more, no less) because add_cross_market() computes features from
+        BTC/ETH cross-correlations and market-wide breadth/dispersion.
 
         Validates:
-            - All 11 E4 symbols present (fail closed if missing)
+            - Exactly the 11 E4 symbols (fail closed if missing OR extra)
             - Each candle DataFrame passes validate_candles()
             - side is 'LONG' or 'SHORT'
             - target_symbol is in the universe
+            - decision_at is aligned to 5-minute cadence
 
         Uses a window of historical anchors (not just decision_at) so that
         diff() operations in cross-market features produce the same values
@@ -260,13 +261,33 @@ class FeatureBridge:
                 f"Must be one of: {sorted(FROZEN_E4_UNIVERSE)}"
             )
 
-        missing_symbols = FROZEN_E4_UNIVERSE - set(candles_by_symbol.keys())
-        if missing_symbols:
+        provided = set(candles_by_symbol.keys())
+        if provided != FROZEN_E4_UNIVERSE:
+            missing = FROZEN_E4_UNIVERSE - provided
+            extra = provided - FROZEN_E4_UNIVERSE
+            parts = []
+            if missing:
+                parts.append(f"MISSING: {sorted(missing)}")
+            if extra:
+                parts.append(f"EXTRA: {sorted(extra)}")
             raise ValueError(
-                f"MISSING_SYMBOL: {sorted(missing_symbols)} — "
-                f"E4 requires all {len(FROZEN_E4_UNIVERSE)} symbols"
+                f"UNIVERSE_MISMATCH: must be exactly {len(FROZEN_E4_UNIVERSE)} "
+                f"E4 symbols. {'; '.join(parts)}"
             )
 
+        decision_ts = pd.Timestamp(decision_at)
+        if decision_ts.tzinfo is None:
+            decision_ts = decision_ts.tz_localize("UTC")
+        else:
+            decision_ts = decision_ts.tz_convert("UTC")
+
+        if decision_ts.minute % ANCHOR_CADENCE_MINUTES != 0:
+            raise ValueError(
+                f"decision_at must be aligned to {ANCHOR_CADENCE_MINUTES}-minute "
+                f"cadence, got minute={decision_ts.minute}"
+            )
+
+        normalized_decision_at = decision_ts
         anchors = build_anchors(decision_at)
 
         panels = []
@@ -288,11 +309,19 @@ class FeatureBridge:
         all_families.update(oriented_families)
 
         matched = oriented[
-            (oriented["symbol"] == target_symbol) & (oriented["side"] == side)
+            (oriented["symbol"] == target_symbol)
+            & (oriented["side"] == side)
+            & (oriented["decision_at"] == normalized_decision_at)
         ]
         if matched.empty:
             raise ValueError(
-                f"No features computed for {target_symbol}/{side}"
+                f"No features computed for {target_symbol}/{side} "
+                f"at decision_at={normalized_decision_at}"
+            )
+        if len(matched) != 1:
+            raise ValueError(
+                f"Expected exactly 1 row for {target_symbol}/{side} "
+                f"at decision_at={normalized_decision_at}, got {len(matched)}"
             )
 
         row = matched.iloc[0]
