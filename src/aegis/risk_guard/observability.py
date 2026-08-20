@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -214,11 +215,13 @@ class E4EvidenceRecorder:
 
     def __init__(self, jsonl_path: str | Path | None = None) -> None:
         self._jsonl_path = Path(jsonl_path) if jsonl_path else None
+        self._lock = threading.Lock()
         if self._jsonl_path:
             self._jsonl_path.parent.mkdir(parents=True, exist_ok=True)
 
     def record(self, entry: dict[str, Any]) -> None:
         """Record an E4 evidence entry."""
+        entry = dict(entry)
         entry["recorded_at"] = datetime.now(timezone.utc).isoformat()
 
         logger.info(
@@ -227,7 +230,47 @@ class E4EvidenceRecorder:
         )
 
         if self._jsonl_path:
-            self._append_jsonl(entry)
+            with self._lock:
+                self._append_jsonl(entry)
+
+    def record_precompute(
+        self,
+        *,
+        decision_cycle_id: str,
+        decision_at: datetime,
+        symbol: str,
+        side: str,
+        e4_score: float,
+        e4_threshold: float,
+        e4_decision: str,
+        e4_reason: str,
+        e4_model_version: str,
+        feature_snapshot_hash: str,
+        feature_available_at: datetime | None,
+        source_feed_lag_ms: dict[str, float] | None,
+        snapshot_id: str,
+        score_latency_ms: float,
+    ) -> None:
+        """Record published precompute telemetry without synthetic signal IDs."""
+        self.record({
+            "event": "e4_precompute_score",
+            "decision_cycle_id": decision_cycle_id,
+            "decision_at": decision_at.isoformat(),
+            "symbol": symbol,
+            "side": side,
+            "e4_score": e4_score,
+            "e4_threshold": e4_threshold,
+            "e4_decision": e4_decision,
+            "e4_reason": e4_reason,
+            "e4_model_version": e4_model_version,
+            "feature_snapshot_hash": feature_snapshot_hash,
+            "feature_available_at": (
+                feature_available_at.isoformat() if feature_available_at else None
+            ),
+            "source_feed_lag_ms": source_feed_lag_ms,
+            "snapshot_id": snapshot_id,
+            "score_latency_ms": score_latency_ms,
+        })
 
     def record_evaluation(
         self,

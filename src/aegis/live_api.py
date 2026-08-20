@@ -14,7 +14,7 @@ import argparse
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -33,7 +33,10 @@ from aegis.research.dual_side_shadow import build_composite_research_observer
 from aegis.v17_execution_challenger import load_v17_challenger_config
 
 from aegis.risk_guard.domain import FROZEN_TAIL_RISK_THRESHOLD, RiskDecision, RiskGuardConfig
-from aegis.risk_guard.precompute import E4PrecomputeService, STALENESS_TOLERANCE_S
+from aegis.risk_guard.precompute import (
+    E4PrecomputeService,
+    SOURCE_FEED_LAG_TOLERANCE_S,
+)
 from aegis.risk_guard.observability import E4EvidenceRecorder
 
 
@@ -96,10 +99,12 @@ def create_app(
     service: CurrentBrainDecisionService | None = None,
     e4_service: E4PrecomputeService | None = None,
     evidence_recorder: E4EvidenceRecorder | None = None,
+    now_fn: Callable[[], datetime] | None = None,
 ) -> FastAPI:
     runtime = service or build_service()
     e4 = e4_service
     evidence = evidence_recorder or E4EvidenceRecorder()
+    current_time = now_fn or (lambda: datetime.now(timezone.utc))
 
     if e4 is None:
         try:
@@ -145,37 +150,12 @@ def create_app(
         )
 
         if e4 is not None:
-            last_cycle = e4.last_cycle
-            if last_cycle and last_cycle.error is None:
-                now = datetime.now(timezone.utc)
-                decision_at = last_cycle.decision_at
-                cache_age_ms = (now - decision_at).total_seconds() * 1000
-
-                side = _extract_side_from_aegis(result)
-                if side and symbol:
-                    score = e4.lookup(symbol, side, decision_at)
-                    if score is not None:
-                        e4_block = {
-                            "available": True,
-                            "symbol": symbol,
-                            "side": side,
-                            "decision_at": decision_at.isoformat(),
-                            "score": score.score,
-                            "threshold": score.threshold,
-                            "decision": score.risk_decision,
-                            "reason": score.reason,
-                            "model_version": score.model_version,
-                            "feature_snapshot_hash": score.feature_snapshot_hash,
-                            "feature_available_at": (
-                                score.feature_available_at.isoformat()
-                                if score.feature_available_at
-                                else None
-                            ),
-                            "source_feed_lag_ms": score.source_feed_lag_ms,
-                            "computed_at": score.computed_at.isoformat(),
-                            "cache_age_ms": cache_age_ms,
-                            "snapshot_id": score.snapshot_id,
-                        }
+            side = _extract_side_from_aegis(result)
+            if side:
+                decision_at = _cycle_start(current_time())
+                e4_block = _lookup_e4_response(
+                    e4, symbol, side, decision_at, current_time()
+                )
 
         result.setdefault("aegis", {})
         result["aegis"]["e4_tail_risk"] = e4_block
@@ -194,70 +174,18 @@ def create_app(
         if e4 is None:
             return _build_e4_unavailable_response(symbol, side, "", "E4_SERVICE_UNAVAILABLE")
 
-        last_cycle = e4.last_cycle
-        if last_cycle is None:
-            return _build_e4_unavailable_response(symbol, side, "", "E4_NO_CYCLE_COMPLETED")
-
-        if last_cycle.error is not None:
-            return _build_e4_unavailable_response(
-                symbol, side, last_cycle.decision_at.isoformat(),
-                f"E4_CYCLE_ERROR: {last_cycle.error}"
-            )
-
-        # Defect #5: Require decision_at and validate identity match
         try:
             requested_dt = datetime.fromisoformat(request.decision_at.replace("Z", "+00:00"))
         except ValueError:
             return _build_e4_unavailable_response(
                 symbol, side, request.decision_at, "E4_INVALID_DECISION_AT"
             )
-
-        # Defect #6: Apply staleness tolerance
-        now = datetime.now(timezone.utc)
-        staleness_ms = (now - last_cycle.decision_at).total_seconds() * 1000
-        if staleness_ms > STALENESS_TOLERANCE_S * 1000:
+        if requested_dt.tzinfo is None:
             return _build_e4_unavailable_response(
-                symbol, side, requested_dt.isoformat(),
-                f"E4_CYCLE_STALE: staleness={staleness_ms:.0f}ms > tolerance={STALENESS_TOLERANCE_S * 1000}ms"
+                symbol, side, request.decision_at, "E4_INVALID_DECISION_AT_TIMEZONE"
             )
 
-        # Defect #5: Require exact decision_at identity match
-        if requested_dt != last_cycle.decision_at:
-            return _build_e4_unavailable_response(
-                symbol, side, requested_dt.isoformat(),
-                f"E4_DECISION_AT_MISMATCH: requested={requested_dt.isoformat()}, "
-                f"served={last_cycle.decision_at.isoformat()}"
-            )
-
-        score = e4.lookup(symbol, side, requested_dt)
-        if score is None:
-            return _build_e4_unavailable_response(
-                symbol, side, requested_dt.isoformat(), "E4_SCORE_NOT_CACHED"
-            )
-
-        cache_age_ms = (now - score.computed_at).total_seconds() * 1000
-
-        return {
-            "available": True,
-            "symbol": symbol,
-            "side": side,
-            "decision_at": requested_dt.isoformat(),
-            "score": score.score,
-            "threshold": score.threshold,
-            "decision": score.risk_decision,
-            "reason": score.reason,
-            "model_version": score.model_version,
-            "feature_snapshot_hash": score.feature_snapshot_hash,
-            "feature_available_at": (
-                score.feature_available_at.isoformat()
-                if score.feature_available_at
-                else None
-            ),
-            "source_feed_lag_ms": score.source_feed_lag_ms,
-            "computed_at": score.computed_at.isoformat(),
-            "cache_age_ms": cache_age_ms,
-            "snapshot_id": score.snapshot_id,
-        }
+        return _lookup_e4_response(e4, symbol, side, requested_dt, current_time())
 
     @app.post("/ml-v2/exit_signal")
     async def exit_signal(_: PredictRequest) -> dict:
@@ -273,6 +201,88 @@ def create_app(
         return payload
 
     return app
+
+
+def _cycle_start(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.replace(minute=(value.minute // 5) * 5, second=0, microsecond=0)
+
+
+def _lookup_e4_response(
+    service: E4PrecomputeService,
+    symbol: str,
+    side: str,
+    requested_dt: datetime,
+    now: datetime,
+) -> dict[str, Any]:
+    if requested_dt.tzinfo is None:
+        return _build_e4_unavailable_response(
+            symbol, side, str(requested_dt), "E4_INVALID_DECISION_AT_TIMEZONE"
+        )
+    requested_dt = requested_dt.astimezone(timezone.utc)
+    expected_cycle = _cycle_start(now)
+    if requested_dt != expected_cycle:
+        return _build_e4_unavailable_response(
+            symbol,
+            side,
+            requested_dt.isoformat(),
+            f"E4_DECISION_AT_MISMATCH: requested={requested_dt.isoformat()}, "
+            f"expected={expected_cycle.isoformat()}",
+        )
+
+    cycle = service.last_cycle
+    if cycle is None or cycle.decision_at != expected_cycle:
+        return _build_e4_unavailable_response(
+            symbol, side, requested_dt.isoformat(), "E4_EXPECTED_CYCLE_UNAVAILABLE"
+        )
+    attempt = service.last_attempt
+    if attempt and attempt.decision_at == expected_cycle and attempt.error is not None:
+        return _build_e4_unavailable_response(
+            symbol,
+            side,
+            requested_dt.isoformat(),
+            f"E4_CYCLE_ERROR: {attempt.error}",
+        )
+
+    score = service.lookup(symbol, side, requested_dt)
+    if score is None:
+        return _build_e4_unavailable_response(
+            symbol, side, requested_dt.isoformat(), "E4_SCORE_NOT_CACHED"
+        )
+    lags = list((score.source_feed_lag_ms or {}).values())
+    if any(
+        not isinstance(lag, (int, float))
+        or lag != lag
+        or lag > SOURCE_FEED_LAG_TOLERANCE_S * 1000
+        for lag in lags
+    ):
+        return _build_e4_unavailable_response(
+            symbol, side, requested_dt.isoformat(), "E4_SOURCE_FEED_LAG"
+        )
+
+    cache_age_ms = max(0.0, (now - score.computed_at).total_seconds() * 1000)
+    return {
+        "available": True,
+        "symbol": symbol,
+        "side": side,
+        "decision_at": requested_dt.isoformat(),
+        "score": score.score,
+        "threshold": score.threshold,
+        "decision": score.risk_decision,
+        "reason": score.reason,
+        "model_version": score.model_version,
+        "feature_snapshot_hash": score.feature_snapshot_hash,
+        "feature_available_at": (
+            score.feature_available_at.isoformat() if score.feature_available_at else None
+        ),
+        "source_feed_lag_ms": score.source_feed_lag_ms,
+        "computed_at": score.computed_at.isoformat(),
+        "cache_age_ms": cache_age_ms,
+        "snapshot_id": score.snapshot_id,
+    }
 
 
 def _extract_side_from_aegis(result: dict) -> str | None:

@@ -24,10 +24,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -37,14 +37,14 @@ from .domain import (
     RiskGuardConfig,
 )
 from .e4_tail_risk_guard import E4TailRiskGuard
-from .feature_bridge import FROZEN_E4_UNIVERSE, FROZEN_E4_TIMEFROZEN, FeatureBridge, FeatureRow
+from .feature_bridge import FROZEN_E4_UNIVERSE, FROZEN_E4_TIMEFROZEN
 from .market_snapshot import MarketSnapshot, fetch_snapshot
 from .observability import E4EvidenceRecorder
 
 logger = logging.getLogger(__name__)
 
 CADENCE_SECONDS = 300  # 5 minutes
-STALENESS_TOLERANCE_S = 60  # allow 1 minute of staleness before rejecting
+SOURCE_FEED_LAG_TOLERANCE_S = 60
 
 
 @dataclass(frozen=True)
@@ -93,16 +93,24 @@ class E4PrecomputeService:
         self,
         config: RiskGuardConfig,
         evidence_recorder: E4EvidenceRecorder | None = None,
+        now_fn: Callable[[], datetime] | None = None,
+        sleep_fn: Callable[[float], None] | None = None,
+        snapshot_provider: Callable[[datetime], MarketSnapshot] | None = None,
     ) -> None:
         self._config = config
         self._guard: E4TailRiskGuard | None = None
         self._lock = threading.Lock()
+        self._cycle_lock = threading.Lock()
         self._cache: dict[str, PrecomputedScore] = {}  # key: "decision_at|symbol|side"
-        self._last_cycle: PrecomputeCycleResult | None = None
+        self._last_successful_cycle: PrecomputeCycleResult | None = None
+        self._last_attempt: PrecomputeCycleResult | None = None
         self._running = False
         self._thread: threading.Thread | None = None
         self._cycle_count = 0
         self._evidence_recorder = evidence_recorder or E4EvidenceRecorder()
+        self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+        self._sleep_fn = sleep_fn or time.sleep
+        self._snapshot_provider = snapshot_provider or fetch_snapshot
 
     def initialize(self) -> None:
         """Load frozen artifacts and run initial computation.
@@ -121,7 +129,7 @@ class E4PrecomputeService:
         self._verify_frozen_invariants()
 
         # Defect #10: First cycle must succeed with 22/22 valid scores
-        result = self._run_cycle()
+        result = self._run_cycle(self.target_decision_at())
 
         if result.error is not None:
             raise RuntimeError(
@@ -171,21 +179,27 @@ class E4PrecomputeService:
 
     def start_background(self) -> None:
         """Start the background precompute loop."""
-        if self._running:
-            return
-        self._running = True
-        self._thread = threading.Thread(
-            target=self._background_loop, daemon=True, name="e4-precompute"
-        )
-        self._thread.start()
+        with self._lock:
+            if self._running:
+                return
+            self._running = True
+            self._thread = threading.Thread(
+                target=self._background_loop, daemon=True, name="e4-precompute"
+            )
+            thread = self._thread
+        thread.start()
         logger.info("E4 precompute background loop started")
 
     def stop_background(self) -> None:
         """Stop the background precompute loop."""
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=10)
-            self._thread = None
+        with self._lock:
+            self._running = False
+            thread = self._thread
+        if thread:
+            thread.join(timeout=10)
+            with self._lock:
+                if self._thread is thread:
+                    self._thread = None
         logger.info("E4 precompute background loop stopped")
 
     def _background_loop(self) -> None:
@@ -194,50 +208,70 @@ class E4PrecomputeService:
         Prevents duplicate cycles per T by tracking last completed decision_at.
         Sleeps until the next 5-minute boundary after cycle completion.
         """
-        last_completed_decision_at: datetime | None = None
-
-        while self._running:
+        while True:
+            with self._lock:
+                if not self._running:
+                    return
+            target = self.target_decision_at()
             try:
-                result = self._run_cycle()
-
-                # Prevent duplicate cycles for same decision_at
-                if result.decision_at == last_completed_decision_at:
-                    logger.debug(
-                        "Skipping duplicate cycle for decision_at=%s",
-                        result.decision_at.isoformat(),
-                    )
-                else:
-                    last_completed_decision_at = result.decision_at
-
+                if not self.has_published_cycle(target):
+                    self._run_cycle(target)
             except Exception:
                 logger.exception("E4 precompute cycle failed")
+            self._sleep_fn(self.seconds_until_next_cycle())
 
-            # Sleep until next 5-minute boundary
-            now = datetime.now(timezone.utc)
-            seconds_since_boundary = (now.minute % 5) * 60 + now.second
-            sleep_seconds = CADENCE_SECONDS - seconds_since_boundary
-            if sleep_seconds <= 0:
-                sleep_seconds = CADENCE_SECONDS
-            time.sleep(sleep_seconds)
+    def target_decision_at(self, now: datetime | None = None) -> datetime:
+        now = now or self._now_fn()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+        return now.replace(minute=(now.minute // 5) * 5, second=0, microsecond=0)
 
-    def _run_cycle(self) -> PrecomputeCycleResult:
+    def seconds_until_next_cycle(self, now: datetime | None = None) -> float:
+        now = now or self._now_fn()
+        target = self.target_decision_at(now)
+        next_cycle = target.timestamp() + CADENCE_SECONDS
+        return max(0.001, next_cycle - now.timestamp())
+
+    def has_published_cycle(self, decision_at: datetime) -> bool:
+        with self._lock:
+            return (
+                self._last_successful_cycle is not None
+                and self._last_successful_cycle.decision_at == decision_at
+            )
+
+    def _run_cycle(self, decision_at: datetime | None = None) -> PrecomputeCycleResult:
         """Execute one precompute cycle. Thread-safe, atomic publish."""
-        cycle_started = datetime.now(timezone.utc)
-        self._cycle_count += 1
+        decision_at = decision_at or self.target_decision_at()
+        with self._cycle_lock:
+            with self._lock:
+                if (
+                    self._last_successful_cycle is not None
+                    and self._last_successful_cycle.decision_at == decision_at
+                ):
+                    return self._last_successful_cycle
+                self._cycle_count += 1
+                cycle_number = self._cycle_count
+            cycle_started = self._now_fn()
+            return self._execute_cycle(decision_at, cycle_started, cycle_number)
 
-        decision_at = cycle_started.replace(
-            minute=(cycle_started.minute // 5) * 5, second=0, microsecond=0
-        )
+    def _execute_cycle(
+        self,
+        decision_at: datetime,
+        cycle_started: datetime,
+        cycle_number: int,
+    ) -> PrecomputeCycleResult:
 
         logger.info(
             "E4 precompute cycle %d starting",
-            self._cycle_count,
+            cycle_number,
             extra={"decision_at": decision_at.isoformat()},
         )
 
         try:
             snapshot_start = time.monotonic()
-            snapshot = fetch_snapshot(decision_at)
+            snapshot = self._snapshot_provider(decision_at)
             snapshot_ms = (time.monotonic() - snapshot_start) * 1000
 
             feature_start = time.monotonic()
@@ -250,11 +284,14 @@ class E4PrecomputeService:
 
             new_cache: dict[str, PrecomputedScore] = {}
             score_start = time.monotonic()
+            score_latencies: dict[str, float] = {}
 
             for (symbol, side), feature_row in feature_rows.items():
+                score_one_start = time.monotonic()
                 score = self._guard.score(
                     pd.DataFrame([feature_row.features])
                 )
+                score_one_ms = (time.monotonic() - score_one_start) * 1000
 
                 # Defect #11: Validate score range
                 if not (0.0 <= score <= 1.0):
@@ -294,33 +331,12 @@ class E4PrecomputeService:
                     feature_snapshot_hash=feature_row.feature_hash,
                     feature_available_at=feature_row.max_available_at,
                     source_feed_lag_ms=feature_row.source_feed_lag_ms,
-                    computed_at=datetime.now(timezone.utc),
+                    computed_at=self._now_fn(),
                     snapshot_id=snapshot.snapshot_id,
                 )
                 cache_key = _cache_key(decision_at, symbol, side)
                 new_cache[cache_key] = computed
-
-                # Defect #16: Wire evidence recorder
-                self._evidence_recorder.record_evaluation(
-                    signal_id=f"precompute_{decision_at.strftime('%Y%m%dT%H%M%SZ')}_{symbol}_{side}",
-                    decision_id=cache_key,
-                    decision_cycle_id=snapshot.snapshot_id,
-                    decision_at=decision_at,
-                    symbol=symbol,
-                    side=side,
-                    direction_source="precompute",
-                    e4_score=score,
-                    e4_threshold=FROZEN_TAIL_RISK_THRESHOLD,
-                    e4_decision=risk_decision,
-                    e4_reason=reason,
-                    e4_model_version=self._guard.version(),
-                    feature_snapshot_hash=feature_row.feature_hash,
-                    feature_available_at=feature_row.max_available_at,
-                    source_feed_lag_ms=feature_row.source_feed_lag_ms,
-                    snapshot_id=snapshot.snapshot_id,
-                    cache_age_ms=0.0,
-                    python_latency_ms=score_ms,
-                )
+                score_latencies[cache_key] = score_one_ms
 
             score_ms = (time.monotonic() - score_start) * 1000
 
@@ -345,7 +361,7 @@ class E4PrecomputeService:
                         f"Refusing to publish partial results."
                     )
 
-            cycle_completed = datetime.now(timezone.utc)
+            cycle_completed = self._now_fn()
             cycle_latency_ms = (cycle_completed - cycle_started).total_seconds() * 1000
 
             result = PrecomputeCycleResult(
@@ -365,11 +381,30 @@ class E4PrecomputeService:
 
             with self._lock:
                 self._cache = new_cache
-                self._last_cycle = result
+                self._last_successful_cycle = result
+                self._last_attempt = result
+
+            for cache_key, computed in new_cache.items():
+                self._evidence_recorder.record_precompute(
+                    decision_cycle_id=snapshot.snapshot_id,
+                    decision_at=decision_at,
+                    symbol=computed.symbol,
+                    side=computed.side,
+                    e4_score=computed.score,
+                    e4_threshold=computed.threshold,
+                    e4_decision=computed.risk_decision,
+                    e4_reason=computed.reason,
+                    e4_model_version=computed.model_version,
+                    feature_snapshot_hash=computed.feature_snapshot_hash,
+                    feature_available_at=computed.feature_available_at,
+                    source_feed_lag_ms=computed.source_feed_lag_ms,
+                    snapshot_id=computed.snapshot_id,
+                    score_latency_ms=score_latencies[cache_key],
+                )
 
             logger.info(
                 "E4 precompute cycle %d completed",
-                self._cycle_count,
+                cycle_number,
                 extra={
                     "decision_at": decision_at.isoformat(),
                     "cycle_latency_ms": cycle_latency_ms,
@@ -384,7 +419,7 @@ class E4PrecomputeService:
             return result
 
         except Exception as e:
-            cycle_completed = datetime.now(timezone.utc)
+            cycle_completed = self._now_fn()
             cycle_latency_ms = (cycle_completed - cycle_started).total_seconds() * 1000
 
             result = PrecomputeCycleResult(
@@ -401,11 +436,11 @@ class E4PrecomputeService:
             )
 
             with self._lock:
-                self._last_cycle = result
+                self._last_attempt = result
 
             logger.error(
                 "E4 precompute cycle %d failed: %s",
-                self._cycle_count,
+                cycle_number,
                 e,
                 extra={
                     "decision_at": decision_at.isoformat(),
@@ -433,7 +468,12 @@ class E4PrecomputeService:
     @property
     def last_cycle(self) -> PrecomputeCycleResult | None:
         with self._lock:
-            return self._last_cycle
+            return self._last_successful_cycle
+
+    @property
+    def last_attempt(self) -> PrecomputeCycleResult | None:
+        with self._lock:
+            return self._last_attempt
 
     @property
     def cycle_count(self) -> int:
@@ -442,15 +482,20 @@ class E4PrecomputeService:
     def health(self) -> dict[str, Any]:
         """Return service health status."""
         with self._lock:
-            last = self._last_cycle
+            last = self._last_successful_cycle
+            attempt = self._last_attempt
+            cache_entries = len(self._cache)
+            running = self._running
         return {
             "available": self._guard is not None and self._guard.is_available(),
             "cycle_count": self._cycle_count,
             "last_cycle_at": last.cycle_completed_at.isoformat() if last else None,
             "last_cycle_latency_ms": last.cycle_latency_ms if last else None,
             "last_cycle_error": last.error if last else None,
-            "cache_entries": len(self._cache),
-            "running": self._running,
+            "last_attempt_at": attempt.cycle_completed_at.isoformat() if attempt else None,
+            "last_attempt_error": attempt.error if attempt else None,
+            "cache_entries": cache_entries,
+            "running": running,
         }
 
 

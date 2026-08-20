@@ -21,7 +21,7 @@ import hashlib
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -79,64 +79,55 @@ class RollingCandleCache:
         If cache exists and covers enough history, only fetch recent candles.
         Otherwise, do a full paginated fetch.
         """
+        decision_at = _normalize_decision_at(decision_at)
         with self._lock:
             cached = self._cache.get(symbol)
-            last_fetch = self._last_fetch_time.get(symbol)
+            cached_copy = cached.copy(deep=True) if cached is not None else None
 
-            if cached is not None and not cached.empty and last_fetch is not None:
-                # Check if cache is sufficient
-                cache_minutes = len(cached)
-                cache_oldest = cached["open_time"].min()
-                cache_newest = cached["open_time"].max()
+        if cached_copy is None or cached_copy.empty:
+            updated = self._fetch_full(symbol, decision_at, required_minutes)
+        else:
+            causal_cached = _filter_through_decision(cached_copy, decision_at)
+            trimmed_cached = _trim_causal(causal_cached, decision_at, required_minutes)
+            if _has_required_coverage(trimmed_cached, decision_at, required_minutes):
+                updated = trimmed_cached
+            elif not causal_cached.empty:
+                updated = self._fetch_incremental(
+                    symbol, causal_cached, decision_at, required_minutes
+                )
+            else:
+                updated = self._fetch_full(symbol, decision_at, required_minutes)
 
-                # If cache covers enough history and is recent enough, fetch incrementally
-                if (cache_minutes >= required_minutes and
-                    cache_newest >= decision_at - pd.Timedelta(minutes=5)):
-                    return self._fetch_incremental(symbol, cached, decision_at)
-
-            # Full fetch needed
-            return self._fetch_full(symbol, decision_at, required_minutes)
+        _assert_causal(updated, decision_at)
+        with self._lock:
+            self._cache[symbol] = updated.copy(deep=True)
+            self._last_fetch_time[symbol] = datetime.now(timezone.utc)
+        return updated
 
     def _fetch_incremental(
         self,
         symbol: str,
         cached: pd.DataFrame,
         decision_at: datetime,
+        required_minutes: int,
     ) -> pd.DataFrame:
         """Fetch only new candles since cache ended, merge, and trim old."""
-        cache_newest_ms = int(cached["open_time_ms"].max())
         decision_ms = int(decision_at.timestamp() * 1000)
+        start_time_ms = int(cached["open_time_ms"].max()) + 60_000
+        if start_time_ms >= decision_ms:
+            return _trim_causal(cached, decision_at, required_minutes)
 
-        if cache_newest_ms >= decision_ms:
-            # Cache already covers decision_at, just trim old data
-            cutoff_ms = decision_ms - (WARMUP_MINUTES * 60 * 1000)
-            trimmed = cached[cached["open_time_ms"] >= cutoff_ms].copy()
-            self._cache[symbol] = trimmed
-            return trimmed
-
-        # Fetch new candles from cache end to decision_at
-        new_data_start_ms = cache_newest_ms + 60_000  # 1 minute after last candle
-        minutes_to_fetch = max(0, (decision_ms - new_data_start_ms) // 60_000)
-
-        if minutes_to_fetch > 0:
-            new_df = _fetch_klines_paginated(symbol, minutes_to_fetch + 10)  # +10 margin
-            if not new_df.empty:
-                combined = pd.concat([cached, new_df], ignore_index=True)
-                combined = combined.drop_duplicates(subset=["open_time_ms"], keep="last")
-                combined = combined.sort_values("open_time_ms").reset_index(drop=True)
-            else:
-                combined = cached
-        else:
-            combined = cached
-
-        # Trim old data beyond warmup window
-        cutoff_ms = decision_ms - (WARMUP_MINUTES * 60 * 1000)
-        trimmed = combined[combined["open_time_ms"] >= cutoff_ms].copy()
-
-        with self._lock:
-            self._cache[symbol] = trimmed
-            self._last_fetch_time[symbol] = datetime.now(timezone.utc)
-
+        new_df = _fetch_klines_forward(
+            symbol=symbol,
+            start_time_ms=start_time_ms,
+            end_time_ms=decision_ms - 1,
+        )
+        combined = pd.concat([cached, new_df], ignore_index=True)
+        combined = combined.drop_duplicates(subset=["open_time_ms"], keep="last")
+        combined = combined.sort_values("open_time_ms").reset_index(drop=True)
+        trimmed = _trim_causal(combined, decision_at, required_minutes)
+        if not _has_required_coverage(trimmed, decision_at, required_minutes):
+            return self._fetch_full(symbol, decision_at, required_minutes)
         return trimmed
 
     def _fetch_full(
@@ -146,13 +137,18 @@ class RollingCandleCache:
         required_minutes: int,
     ) -> pd.DataFrame:
         """Full paginated fetch for cold start."""
-        df = _fetch_klines_paginated(symbol, required_minutes)
-
-        with self._lock:
-            self._cache[symbol] = df
-            self._last_fetch_time[symbol] = datetime.now(timezone.utc)
-
-        return df
+        decision_ms = int(decision_at.timestamp() * 1000)
+        df = _fetch_klines_paginated(
+            symbol,
+            required_minutes,
+            end_time_ms=decision_ms - 1,
+        )
+        causal = _trim_causal(df, decision_at, required_minutes)
+        if not _has_required_coverage(causal, decision_at, required_minutes):
+            raise ValueError(
+                f"INSUFFICIENT_WARMUP:{symbol}:{len(causal)}/{required_minutes}"
+            )
+        return causal
 
     def invalidate(self, symbol: str | None = None) -> None:
         """Invalidate cache for a symbol or all symbols."""
@@ -188,6 +184,7 @@ def _fetch_klines_page(
     symbol: str,
     interval: str = "1m",
     limit: int = BINANCE_LIMIT_PER_REQUEST,
+    start_time_ms: int | None = None,
     end_time_ms: int | None = None,
 ) -> pd.DataFrame:
     """Fetch a single page of 1m klines from Binance Futures REST.
@@ -203,6 +200,8 @@ def _fetch_klines_page(
     """
     url = f"{BINANCE_FUTURES_REST}{KLINE_ENDPOINT}"
     params: dict[str, Any] = {"symbol": symbol, "interval": interval, "limit": limit}
+    if start_time_ms is not None:
+        params["startTime"] = start_time_ms
     if end_time_ms is not None:
         params["endTime"] = end_time_ms
 
@@ -223,11 +222,10 @@ def _fetch_klines_page(
                  "quote_volume", "taker_buy_quote_volume", "open_time_ms", "close_time_ms"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df = df[["open_time_ms", "open", "high", "low", "close", "volume",
-             "taker_buy_volume", "quote_volume"]].copy()
-
     df["open_time"] = pd.to_datetime(df["open_time_ms"], unit="ms", utc=True)
     df["close_time"] = pd.to_datetime(df["close_time_ms"], unit="ms", utc=True)
+    df = df[["open_time_ms", "open", "high", "low", "close", "volume",
+             "taker_buy_volume", "quote_volume", "open_time", "close_time"]].copy()
 
     return df
 
@@ -236,6 +234,7 @@ def _fetch_klines_paginated(
     symbol: str,
     required_minutes: int,
     interval: str = "1m",
+    end_time_ms: int | None = None,
 ) -> pd.DataFrame:
     """Fetch enough 1m klines to cover required_minutes, using pagination.
 
@@ -244,13 +243,18 @@ def _fetch_klines_paginated(
     """
     pages_needed = -(-required_minutes // BINANCE_LIMIT_PER_REQUEST)  # ceil division
     all_pages: list[pd.DataFrame] = []
-    end_time_ms: int | None = None
+    page_end_time_ms = end_time_ms
 
     for page_idx in range(pages_needed):
         if page_idx > 0:
             time.sleep(INTER_REQUEST_GAP_MS / 1000.0)
 
-        df = _fetch_klines_page(symbol, interval, BINANCE_LIMIT_PER_REQUEST, end_time_ms)
+        df = _fetch_klines_page(
+            symbol,
+            interval,
+            BINANCE_LIMIT_PER_REQUEST,
+            end_time_ms=page_end_time_ms,
+        )
         if df.empty:
             break
 
@@ -258,7 +262,7 @@ def _fetch_klines_paginated(
 
         # Next page ends before the earliest candle in this page
         earliest_ms = int(df["open_time_ms"].min())
-        end_time_ms = earliest_ms - 1  # 1ms before earliest
+        page_end_time_ms = earliest_ms - 1
 
         # Stop if we have enough data
         total_minutes = sum(len(p) for p in all_pages)
@@ -280,6 +284,97 @@ def _fetch_klines_paginated(
     return result
 
 
+def _fetch_klines_forward(
+    symbol: str,
+    start_time_ms: int,
+    end_time_ms: int,
+    interval: str = "1m",
+) -> pd.DataFrame:
+    """Fetch the exact missing interval without reading beyond decision_at."""
+    pages: list[pd.DataFrame] = []
+    cursor = start_time_ms
+    while cursor <= end_time_ms:
+        if pages:
+            time.sleep(INTER_REQUEST_GAP_MS / 1000.0)
+        page = _fetch_klines_page(
+            symbol,
+            interval,
+            BINANCE_LIMIT_PER_REQUEST,
+            start_time_ms=cursor,
+            end_time_ms=end_time_ms,
+        )
+        if page.empty:
+            break
+        pages.append(page)
+        next_cursor = int(page["open_time_ms"].max()) + 60_000
+        if next_cursor <= cursor:
+            raise ValueError(f"NON_ADVANCING_PAGINATION:{symbol}:{cursor}")
+        cursor = next_cursor
+        if len(page) < BINANCE_LIMIT_PER_REQUEST:
+            break
+    if not pages:
+        return pd.DataFrame()
+    return (
+        pd.concat(pages, ignore_index=True)
+        .drop_duplicates(subset=["open_time_ms"], keep="last")
+        .sort_values("open_time_ms")
+        .reset_index(drop=True)
+    )
+
+
+def _normalize_decision_at(decision_at: datetime) -> datetime:
+    if decision_at.tzinfo is None:
+        return decision_at.replace(tzinfo=timezone.utc)
+    return decision_at.astimezone(timezone.utc)
+
+
+def _trim_causal(
+    candles: pd.DataFrame,
+    decision_at: datetime,
+    required_minutes: int,
+) -> pd.DataFrame:
+    decision_at = _normalize_decision_at(decision_at)
+    cutoff = pd.Timestamp(decision_at) - pd.Timedelta(minutes=required_minutes)
+    close_time = pd.to_datetime(candles["close_time"], utc=True)
+    open_time = pd.to_datetime(candles["open_time"], utc=True)
+    mask = close_time.le(pd.Timestamp(decision_at)) & open_time.ge(cutoff)
+    return candles.loc[mask].sort_values("open_time_ms").reset_index(drop=True).copy()
+
+
+def _filter_through_decision(
+    candles: pd.DataFrame,
+    decision_at: datetime,
+) -> pd.DataFrame:
+    close_time = pd.to_datetime(candles["close_time"], utc=True)
+    return (
+        candles.loc[close_time.le(pd.Timestamp(_normalize_decision_at(decision_at)))]
+        .sort_values("open_time_ms")
+        .reset_index(drop=True)
+        .copy()
+    )
+
+
+def _has_required_coverage(
+    candles: pd.DataFrame,
+    decision_at: datetime,
+    required_minutes: int,
+) -> bool:
+    if len(candles) < required_minutes:
+        return False
+    expected_last_open_ms = int(decision_at.timestamp() * 1000) - 60_000
+    return int(candles["open_time_ms"].iloc[-1]) == expected_last_open_ms
+
+
+def _assert_causal(candles: pd.DataFrame, decision_at: datetime) -> None:
+    if candles.empty:
+        raise ValueError("EMPTY_CAUSAL_CANDLES")
+    latest_close = pd.to_datetime(candles["close_time"], utc=True).max()
+    if latest_close > pd.Timestamp(_normalize_decision_at(decision_at)):
+        raise ValueError(
+            f"NON_CAUSAL_SNAPSHOT: latest_close={latest_close} decision_at={decision_at}"
+        )
+
+
 def fetch_snapshot(decision_at: datetime | None = None) -> MarketSnapshot:
     """Fetch a complete snapshot of all 11 E4 symbols.
 
@@ -298,6 +393,7 @@ def fetch_snapshot(decision_at: datetime | None = None) -> MarketSnapshot:
             minute=(now.minute // 5) * 5, second=0, microsecond=0
         )
 
+    decision_at = _normalize_decision_at(decision_at)
     captured_at = datetime.now(timezone.utc)
     universe = _frozen_universe()
     candles_by_symbol: dict[str, pd.DataFrame] = {}
@@ -306,6 +402,7 @@ def fetch_snapshot(decision_at: datetime | None = None) -> MarketSnapshot:
 
     for symbol in universe:
         df = _rolling_cache.get_or_fetch(symbol, decision_at, WARMUP_MINUTES)
+        _assert_causal(df, decision_at)
         candles_by_symbol[symbol] = df
 
         if len(df) == 0:
@@ -321,7 +418,9 @@ def fetch_snapshot(decision_at: datetime | None = None) -> MarketSnapshot:
             last_close = pd.Timestamp(last_close, tz="UTC")
         source_timestamps[symbol] = last_close.to_pydatetime()
 
-        lag_ms = max(0.0, (decision_at - last_close.to_pydatetime()).total_seconds() * 1000)
+        lag_ms = (decision_at - last_close.to_pydatetime()).total_seconds() * 1000
+        if lag_ms < 0:
+            raise ValueError(f"NON_CAUSAL_SNAPSHOT:{symbol}:lag_ms={lag_ms}")
         source_feed_lag_ms[symbol] = lag_ms
 
     if len(candles_by_symbol) != len(universe):
@@ -362,18 +461,22 @@ def _compute_snapshot_hash(
     candles_by_symbol: dict[str, pd.DataFrame],
     decision_at: datetime,
 ) -> str:
-    """Compute SHA-256 hash of the snapshot for immutability verification.
-
-    Hashes actual OHLCV values (not just row counts) to ensure the hash
-    represents the actual data content. Uses last 100 candles per symbol
-    for efficiency while maintaining data integrity.
-    """
-    parts = [f"decision_at={decision_at.isoformat()}"]
+    """Hash every causal feature-driving candle field in deterministic order."""
+    decision_at = _normalize_decision_at(decision_at)
+    digest = hashlib.sha256(f"decision_at={decision_at.isoformat()}\n".encode())
+    columns = [
+        "open_time_ms", "open", "high", "low", "close", "volume",
+        "taker_buy_volume",
+    ]
     for symbol in sorted(candles_by_symbol.keys()):
-        df = candles_by_symbol[symbol]
-        # Hash last 100 candles' OHLCV values for efficiency
-        tail = df.tail(100)
-        ohlcv_str = tail[["open", "high", "low", "close", "volume"]].to_string(index=False)
-        parts.append(f"{symbol}:{len(df)}:{hashlib.sha256(ohlcv_str.encode()).hexdigest()[:16]}")
-    content = "|".join(parts)
-    return hashlib.sha256(content.encode()).hexdigest()
+        df = candles_by_symbol[symbol].sort_values("open_time_ms")
+        _assert_causal(df, decision_at)
+        digest.update(f"symbol={symbol}\n".encode())
+        canonical = df[columns].to_csv(
+            index=False,
+            header=False,
+            float_format="%.17g",
+            lineterminator="\n",
+        )
+        digest.update(canonical.encode())
+    return digest.hexdigest()

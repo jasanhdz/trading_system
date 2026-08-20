@@ -446,13 +446,13 @@ class TestDefect5DecisionAtIdentity:
 # ═══════════════════════════════════════════════════════════════════
 
 class TestDefect6StalenessTolerance:
-    def test_staleness_tolerance_constant_exists(self):
-        from aegis.risk_guard.precompute import STALENESS_TOLERANCE_S
-        assert STALENESS_TOLERANCE_S == 60
+    def test_feed_lag_tolerance_constant_exists(self):
+        from aegis.risk_guard.precompute import SOURCE_FEED_LAG_TOLERANCE_S
+        assert SOURCE_FEED_LAG_TOLERANCE_S == 60
 
-    def test_staleness_tolerance_positive(self):
-        from aegis.risk_guard.precompute import STALENESS_TOLERANCE_S
-        assert STALENESS_TOLERANCE_S > 0
+    def test_feed_lag_tolerance_positive(self):
+        from aegis.risk_guard.precompute import SOURCE_FEED_LAG_TOLERANCE_S
+        assert SOURCE_FEED_LAG_TOLERANCE_S > 0
 
 
 # ═══════════════════════════════════════════════════════════════════
