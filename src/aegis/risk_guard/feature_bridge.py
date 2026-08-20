@@ -371,8 +371,6 @@ class FeatureBridge:
             if tf_key:
                 tf_delta = expected_by_tf[tf_key]
                 expected_avail = normalized_decision_at.floor(tf_delta)
-                if expected_avail == normalized_decision_at:
-                    expected_avail = normalized_decision_at - tf_delta
                 lag_ms = max(0.0, (expected_avail - avail_ts).total_seconds() * 1000)
                 source_feed_lag_ms[col] = lag_ms
             else:

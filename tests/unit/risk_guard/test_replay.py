@@ -667,3 +667,59 @@ class TestEvaluateFromCandles:
         assert row.source_feed_lag_ms is not None
         assert row.source_feed_lag_ms["available_at__tf5m"] == 0.0
         assert row.source_feed_lag_ms["available_at__tf60m"] == 0.0
+
+
+class TestFeedLagBoundaries:
+    """Test expected_available_at boundary computation per timeframe."""
+
+    def _compute_lag(self, decision_at_str: str, avail_at_str: str, tf_minutes: int) -> float:
+        import pandas as pd
+        from datetime import timedelta
+        from aegis.risk_guard.feature_bridge import FROZEN_E4_TIMEFROZEN
+
+        decision_at = pd.Timestamp(decision_at_str, tz="UTC")
+        avail_ts = pd.Timestamp(avail_at_str, tz="UTC")
+        tf_delta = timedelta(minutes=tf_minutes)
+        expected_avail = decision_at.floor(tf_delta)
+        lag_s = max(0.0, (expected_avail - avail_ts).total_seconds())
+        return lag_s * 1000
+
+    def test_tf5m_on_boundary_lag_zero(self):
+        lag = self._compute_lag("2023-11-07T12:00:00Z", "2023-11-07T12:00:00Z", 5)
+        assert lag == 0.0
+
+    def test_tf5m_off_boundary_lag_5m(self):
+        lag = self._compute_lag("2023-11-07T12:00:00Z", "2023-11-07T11:55:00Z", 5)
+        assert lag == 5 * 60 * 1000
+
+    def test_tf15m_on_boundary_lag_zero(self):
+        lag = self._compute_lag("2023-11-07T12:00:00Z", "2023-11-07T12:00:00Z", 15)
+        assert lag == 0.0
+
+    def test_tf15m_off_boundary_lag_15m(self):
+        lag = self._compute_lag("2023-11-07T12:00:00Z", "2023-11-07T11:45:00Z", 15)
+        assert lag == 15 * 60 * 1000
+
+    def test_tf15m_mid_candle_lag_zero(self):
+        lag = self._compute_lag("2023-11-07T12:05:00Z", "2023-11-07T12:00:00Z", 15)
+        assert lag == 0.0
+
+    def test_tf60m_on_boundary_lag_zero(self):
+        lag = self._compute_lag("2023-11-07T15:00:00Z", "2023-11-07T15:00:00Z", 60)
+        assert lag == 0.0
+
+    def test_tf60m_mid_hour_lag_zero(self):
+        lag = self._compute_lag("2023-11-07T15:35:00Z", "2023-11-07T15:00:00Z", 60)
+        assert lag == 0.0
+
+    def test_tf240m_on_boundary_lag_zero(self):
+        lag = self._compute_lag("2023-11-07T12:00:00Z", "2023-11-07T12:00:00Z", 240)
+        assert lag == 0.0
+
+    def test_tf240m_old_source_lag_zero(self):
+        lag = self._compute_lag("2023-11-07T15:00:00Z", "2023-11-07T12:00:00Z", 240)
+        assert lag == 0.0
+
+    def test_tf240m_stale_source_lag_4h(self):
+        lag = self._compute_lag("2023-11-07T15:00:00Z", "2023-11-07T08:00:00Z", 240)
+        assert lag == 4 * 60 * 60 * 1000
