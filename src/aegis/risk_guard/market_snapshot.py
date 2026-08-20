@@ -128,8 +128,7 @@ class RollingCandleCache:
         """
         decision_at = _normalize_decision_at(decision_at)
         with self._lock:
-            cached = self._cache.get(symbol)
-            cached_copy = cached.copy(deep=True) if cached is not None else None
+            cached_copy = self._cache.get(symbol)
 
         if cached_copy is None:
             cached_copy = self._load_durable_history(symbol)
@@ -152,7 +151,7 @@ class RollingCandleCache:
 
         _assert_causal(updated, decision_at)
         with self._lock:
-            self._cache[symbol] = updated.copy(deep=True)
+            self._cache[symbol] = updated
             self._last_fetch_time[symbol] = datetime.now(timezone.utc)
         return updated
 
@@ -167,7 +166,7 @@ class RollingCandleCache:
         decision_ms = int(decision_at.timestamp() * 1000)
         start_time_ms = int(cached["open_time_ms"].max()) + 60_000
         if start_time_ms >= decision_ms:
-            return _trim_causal(cached, decision_at, required_minutes)
+            return _filter_through_decision(cached, decision_at)
 
         new_df = _fetch_klines_forward(
             symbol=symbol,
@@ -216,6 +215,11 @@ class RollingCandleCache:
                 parts.extend(pd.read_parquet(path) for path in sorted(symbol_root.glob("*.parquet")))
         if not parts:
             return None
+        from .bootstrap import merge_candles
+
+        checked = pd.DataFrame()
+        for index, part in enumerate(parts):
+            checked, _ = merge_candles(checked, part, f"cache-load:{symbol}:{index}")
         combined = (
             pd.concat(parts, ignore_index=True)
             .drop_duplicates(subset=["open_time_ms"], keep="last")
@@ -243,20 +247,23 @@ class RollingCandleCache:
             working["open_time_ms"], unit="ms", utc=True
         ).dt.strftime("%Y-%m")
         symbol_root = self._durable_root / symbol
-        symbol_root.mkdir(parents=True, exist_ok=True)
-        for month, chunk in working.groupby("_month", sort=True):
-            path = symbol_root / f"{month}.parquet"
-            chunk = chunk.drop(columns="_month")
-            if path.exists():
-                chunk = pd.concat([pd.read_parquet(path), chunk], ignore_index=True)
-            chunk = (
-                chunk.drop_duplicates(subset=["open_time_ms"], keep="last")
-                .sort_values("open_time_ms")
-                .reset_index(drop=True)
-            )
-            temporary = path.with_suffix(".parquet.tmp")
-            chunk.to_parquet(temporary, index=False, compression="zstd")
-            temporary.replace(path)
+        # Bootstrap owns the strict overlap and crash-safe publication contract.
+        from .bootstrap import atomic_write_parquet, merge_candles, process_lock
+
+        with process_lock(self._durable_root):
+            symbol_root.mkdir(parents=True, exist_ok=True)
+            for month, chunk in working.groupby("_month", sort=True):
+                path = symbol_root / f"{month}.parquet"
+                chunk = chunk.drop(columns="_month")
+                existing = pd.read_parquet(path) if path.exists() else pd.DataFrame()
+                merge_candles(existing, chunk, f"live-cache:{symbol}:{month}")
+                merged = pd.concat([existing, chunk], ignore_index=True)
+                merged = (
+                    merged.drop_duplicates(subset=["open_time_ms"], keep="first")
+                    .sort_values("open_time_ms")
+                    .reset_index(drop=True)
+                )
+                atomic_write_parquet(path, merged)
 
     def invalidate(self, symbol: str | None = None) -> None:
         """Invalidate cache for a symbol or all symbols."""
