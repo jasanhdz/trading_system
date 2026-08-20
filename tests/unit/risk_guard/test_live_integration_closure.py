@@ -152,9 +152,23 @@ def real_e4_cycle(tmp_path_factory):
     now = DECISION_AT + timedelta(seconds=10)
     metrics: dict[str, float] = {}
     try:
-        start = time.monotonic()
+        cold_start = time.monotonic()
         snapshot = fetch_snapshot(DECISION_AT)
-        metrics["cold_start_ms"] = (time.monotonic() - start) * 1000
+        metrics["cold_snapshot_ms"] = (time.monotonic() - cold_start) * 1000
+
+        recorder = E4EvidenceRecorder(evidence_path)
+        service = E4PrecomputeService(
+            _build_e4_config(),
+            evidence_recorder=recorder,
+            now_fn=lambda: now,
+            snapshot_provider=lambda _decision_at: snapshot,
+        )
+        service.initialize()
+        metrics["cold_start_ms"] = (time.monotonic() - cold_start) * 1000
+        cycle = service.last_cycle
+        assert cycle is not None
+        metrics["panel_build_ms"] = cycle.feature_build_latency_ms
+        metrics["score_22_ms"] = cycle.score_latency_ms
         incremental_start = time.monotonic()
         incremental_snapshot = fetch_snapshot(DECISION_AT + timedelta(minutes=5))
         metrics["incremental_snapshot_ms"] = (
@@ -165,19 +179,6 @@ def real_e4_cycle(tmp_path_factory):
             <= pd.Timestamp(DECISION_AT + timedelta(minutes=5))
             for frame in incremental_snapshot.candles_by_symbol.values()
         )
-
-        recorder = E4EvidenceRecorder(evidence_path)
-        service = E4PrecomputeService(
-            _build_e4_config(),
-            evidence_recorder=recorder,
-            now_fn=lambda: now,
-            snapshot_provider=lambda _decision_at: snapshot,
-        )
-        service.initialize()
-        cycle = service.last_cycle
-        assert cycle is not None
-        metrics["panel_build_ms"] = cycle.feature_build_latency_ms
-        metrics["score_22_ms"] = cycle.score_latency_ms
 
         from aegis.live_api import _lookup_e4_response
         lookup_start = time.monotonic()
