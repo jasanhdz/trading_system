@@ -34,19 +34,27 @@ from .position_manager import (
     PositionManagerResult,
     AllowOnlyPositionManager,
 )
+from .precompute import E4PrecomputeService, PrecomputedScore, PrecomputeCycleResult
+from .market_snapshot import MarketSnapshot, fetch_snapshot
+from .observability import E4EvidenceRecorder
 
 __all__ = [
     "Direction",
     "DirectionProvider",
     "EntryDecision",
     "EntryDecisionOrchestrator",
+    "E4EvidenceRecorder",
     "E4TailRiskGuard",
+    "E4PrecomputeService",
     "FeatureBridge",
     "FeatureRow",
     "FROZEN_TAIL_RISK_THRESHOLD",
+    "MarketSnapshot",
     "PositionManagerContract",
     "PositionManagerResult",
     "AllowOnlyPositionManager",
+    "PrecomputedScore",
+    "PrecomputeCycleResult",
     "RiskDecision",
     "RiskGuard",
     "RiskGuardConfig",
@@ -55,4 +63,5 @@ __all__ = [
     "RiskGuardResult",
     "RiskGuardVerdict",
     "Signal",
+    "fetch_snapshot",
 ]

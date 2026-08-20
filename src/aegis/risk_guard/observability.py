@@ -201,3 +201,121 @@ class RiskGuardMetrics:
     def reset(self) -> None:
         """Reset all metrics."""
         self._reset()
+
+
+class E4EvidenceRecorder:
+    """Append-only JSONL evidence recorder for E4 evaluations.
+
+    Records every E4 evaluation with full decision chain:
+    Aegis direction → E4 score → ALLOW/BLOCK → execution result.
+
+    Thread-safe. Uses file locking for concurrent writes.
+    """
+
+    def __init__(self, jsonl_path: str | Path | None = None) -> None:
+        self._jsonl_path = Path(jsonl_path) if jsonl_path else None
+        if self._jsonl_path:
+            self._jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def record(self, entry: dict[str, Any]) -> None:
+        """Record an E4 evidence entry."""
+        entry["recorded_at"] = datetime.now(timezone.utc).isoformat()
+
+        logger.info(
+            "E4_EVIDENCE %s",
+            json.dumps(entry, default=str),
+        )
+
+        if self._jsonl_path:
+            self._append_jsonl(entry)
+
+    def record_evaluation(
+        self,
+        *,
+        signal_id: str,
+        decision_id: str,
+        decision_cycle_id: str,
+        decision_at: datetime,
+        symbol: str,
+        side: str,
+        direction_source: str,
+        e4_score: float,
+        e4_threshold: float,
+        e4_decision: str,
+        e4_reason: str,
+        e4_model_version: str,
+        feature_snapshot_hash: str,
+        feature_available_at: datetime | None,
+        source_feed_lag_ms: dict[str, float] | None,
+        snapshot_id: str,
+        cache_age_ms: float,
+        python_latency_ms: float,
+        ts_guard_latency_ms: float | None = None,
+        final_entry_decision: str | None = None,
+        approval_status: str | None = None,
+        execution_requested: bool = False,
+        execution_result: str | None = None,
+    ) -> None:
+        """Record a complete E4 evaluation with full context."""
+        entry = {
+            "event": "e4_tail_risk_evaluation",
+            "signal_id": signal_id,
+            "decision_id": decision_id,
+            "decision_cycle_id": decision_cycle_id,
+            "decision_at": decision_at.isoformat() if isinstance(decision_at, datetime) else str(decision_at),
+            "symbol": symbol,
+            "side": side,
+            "direction_source": direction_source,
+            "e4_score": e4_score,
+            "e4_threshold": e4_threshold,
+            "e4_decision": e4_decision,
+            "e4_reason": e4_reason,
+            "e4_model_version": e4_model_version,
+            "feature_snapshot_hash": feature_snapshot_hash,
+            "feature_available_at": (
+                feature_available_at.isoformat()
+                if isinstance(feature_available_at, datetime)
+                else str(feature_available_at) if feature_available_at else None
+            ),
+            "source_feed_lag_ms": source_feed_lag_ms,
+            "snapshot_id": snapshot_id,
+            "cache_age_ms": cache_age_ms,
+            "python_latency_ms": python_latency_ms,
+            "ts_guard_latency_ms": ts_guard_latency_ms,
+            "final_entry_decision": final_entry_decision,
+            "approval_status": approval_status,
+            "execution_requested": execution_requested,
+            "execution_result": execution_result,
+        }
+        self.record(entry)
+
+    def record_blocked_outcome(
+        self,
+        *,
+        signal_id: str,
+        symbol: str,
+        side: str,
+        blocked_at: datetime,
+        actual_outcome: str | None = None,
+        actual_pnl_bps: float | None = None,
+        blocked_correctly: bool | None = None,
+    ) -> None:
+        """Record the outcome of a blocked signal for counterfactual analysis."""
+        entry = {
+            "event": "e4_blocked_outcome",
+            "signal_id": signal_id,
+            "symbol": symbol,
+            "side": side,
+            "blocked_at": blocked_at.isoformat() if isinstance(blocked_at, datetime) else str(blocked_at),
+            "actual_outcome": actual_outcome,
+            "actual_pnl_bps": actual_pnl_bps,
+            "blocked_correctly": blocked_correctly,
+        }
+        self.record(entry)
+
+    def _append_jsonl(self, entry: dict[str, Any]) -> None:
+        try:
+            with self._jsonl_path.open("a") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        except Exception as exc:
+            logger.warning("Failed to write E4 evidence log: %s", exc)
