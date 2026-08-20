@@ -70,6 +70,7 @@ class FeatureRow:
     timestamp: datetime
     feature_hash: str = ""
     max_available_at: datetime | None = None
+    source_staleness_ms: dict[str, float] | None = None
 
     def to_dataframe(self) -> pd.DataFrame:
         """Convert to a single-row DataFrame for model input."""
@@ -310,6 +311,11 @@ class FeatureBridge:
         oriented, oriented_families = orient_sides(combined, all_families)
         all_families.update(oriented_families)
 
+        try:
+            assert_causal_availability(oriented)
+        except ValueError as exc:
+            raise ValueError(f"NON_CAUSAL_DATA:{exc}") from exc
+
         matched = oriented[
             (oriented["symbol"] == target_symbol)
             & (oriented["side"] == side)
@@ -330,24 +336,32 @@ class FeatureBridge:
 
         avail_cols = [c for c in row.index if c.startswith("available_at__")]
         max_avail = None
-        causal_errors = []
+        source_staleness: dict[str, float] = {}
         for col in avail_cols:
             avail_val = row[col]
             if pd.isna(avail_val):
+                source_staleness[col] = float("inf")
                 continue
             avail_ts = pd.Timestamp(avail_val)
             if avail_ts.tzinfo is None:
                 avail_ts = avail_ts.tz_localize("UTC")
             else:
                 avail_ts = avail_ts.tz_convert("UTC")
+            staleness_s = (normalized_decision_at - avail_ts).total_seconds()
+            source_staleness[col] = max(0.0, staleness_s * 1000)
             if avail_ts > normalized_decision_at:
-                causal_errors.append(f"{col}={avail_ts} > decision_at={normalized_decision_at}")
+                raise ValueError(
+                    f"NON_CAUSAL_DATA: {col}={avail_ts} > decision_at={normalized_decision_at}"
+                )
             if max_avail is None or avail_ts > max_avail:
                 max_avail = avail_ts
 
-        if causal_errors:
-            raise ValueError(
-                f"NON_CAUSAL_DATA: {'; '.join(causal_errors[:3])}"
+        max_staleness_ms = max(source_staleness.values()) if source_staleness else 0.0
+        if max_staleness_ms > 0:
+            stale_sources = {k: v for k, v in source_staleness.items() if v > 0}
+            logger.warning(
+                "Feature staleness for %s/%s: max=%.0fms, sources=%s",
+                target_symbol, side, max_staleness_ms, stale_sources,
             )
 
         features = {
@@ -358,18 +372,15 @@ class FeatureBridge:
 
         feature_row = self.from_feature_dict(features, symbol=target_symbol, side=side, timestamp=decision_at)
 
-        if max_avail is not None:
-            max_avail_dt = max_avail.to_pydatetime()
-            return FeatureRow(
-                features=feature_row.features,
-                symbol=feature_row.symbol,
-                side=feature_row.side,
-                timestamp=feature_row.timestamp,
-                feature_hash=feature_row.feature_hash,
-                max_available_at=max_avail_dt,
-            )
-
-        return feature_row
+        return FeatureRow(
+            features=feature_row.features,
+            symbol=feature_row.symbol,
+            side=feature_row.side,
+            timestamp=feature_row.timestamp,
+            feature_hash=feature_row.feature_hash,
+            max_available_at=max_avail.to_pydatetime() if max_avail else None,
+            source_staleness_ms=source_staleness,
+        )
 
     @property
     def feature_names(self) -> list[str]:

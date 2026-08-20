@@ -117,7 +117,8 @@ class RiskGuardConfig:
     """Configuration for the risk guard system.
 
     tail_risk_threshold is FROZEN at V1 value (0.4522452210875323).
-    Any attempt to set a different value will raise ValueError.
+    fail_closed is FROZEN at True for V1 — no fail-open allowed.
+    Any attempt to set different values will raise ValueError.
     """
     enabled: bool = False
     mode: str = "observe_only"
@@ -137,6 +138,11 @@ class RiskGuardConfig:
                 f"tail_risk_threshold must be FROZEN at {FROZEN_TAIL_RISK_THRESHOLD}, "
                 f"got {self.tail_risk_threshold}. "
                 f"Threshold cannot be changed in V1."
+            )
+        if self.fail_closed is not True:
+            raise ValueError(
+                "fail_closed must be True for E4 V1. "
+                "Fail-open is not permitted."
             )
         if self.mode not in self._VALID_MODES:
             raise ValueError(
