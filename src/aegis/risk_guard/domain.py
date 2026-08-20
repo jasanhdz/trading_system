@@ -66,6 +66,7 @@ class RiskGuardResult:
     metadata: dict[str, Any] = field(default_factory=dict)
     feature_available_at: datetime | None = None
     feature_build_latency_ms: float = 0.0
+    feature_staleness_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ class EntryDecision:
             "evaluation_time_ms": self.risk_result.evaluation_time_ms,
             "feature_available_at": self.risk_result.feature_available_at.isoformat() if self.risk_result.feature_available_at else None,
             "feature_build_latency_ms": self.risk_result.feature_build_latency_ms,
+            "feature_staleness_ms": self.risk_result.feature_staleness_ms,
         }
 
 

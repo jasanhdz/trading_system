@@ -99,7 +99,10 @@ class EntryDecisionOrchestrator:
         if risk_result.decision == RiskDecision.ALLOW:
             verdict = RiskGuardVerdict.ALLOW
         elif risk_result.decision in _feature_error_states:
-            verdict = RiskGuardVerdict.ALLOW
+            if self._config.enforce:
+                verdict = RiskGuardVerdict.BLOCK
+            else:
+                verdict = RiskGuardVerdict.ALLOW
         elif self._config.enforce:
             verdict = RiskGuardVerdict.BLOCK
         else:

@@ -69,6 +69,7 @@ class FeatureRow:
     side: str
     timestamp: datetime
     feature_hash: str = ""
+    max_available_at: datetime | None = None
 
     def to_dataframe(self) -> pd.DataFrame:
         """Convert to a single-row DataFrame for model input."""
@@ -251,6 +252,7 @@ class FeatureBridge:
             build_neutral_symbol_panel,
             add_cross_market,
             orient_sides,
+            assert_causal_availability,
         )
 
         if side not in ("LONG", "SHORT"):
@@ -325,13 +327,49 @@ class FeatureBridge:
             )
 
         row = matched.iloc[0]
+
+        avail_cols = [c for c in row.index if c.startswith("available_at__")]
+        max_avail = None
+        causal_errors = []
+        for col in avail_cols:
+            avail_val = row[col]
+            if pd.isna(avail_val):
+                continue
+            avail_ts = pd.Timestamp(avail_val)
+            if avail_ts.tzinfo is None:
+                avail_ts = avail_ts.tz_localize("UTC")
+            else:
+                avail_ts = avail_ts.tz_convert("UTC")
+            if avail_ts > normalized_decision_at:
+                causal_errors.append(f"{col}={avail_ts} > decision_at={normalized_decision_at}")
+            if max_avail is None or avail_ts > max_avail:
+                max_avail = avail_ts
+
+        if causal_errors:
+            raise ValueError(
+                f"NON_CAUSAL_DATA: {'; '.join(causal_errors[:3])}"
+            )
+
         features = {
             name: float(row[name])
             for name in self._feature_names
             if name in row.index
         }
 
-        return self.from_feature_dict(features, symbol=target_symbol, side=side, timestamp=decision_at)
+        feature_row = self.from_feature_dict(features, symbol=target_symbol, side=side, timestamp=decision_at)
+
+        if max_avail is not None:
+            max_avail_dt = max_avail.to_pydatetime()
+            return FeatureRow(
+                features=feature_row.features,
+                symbol=feature_row.symbol,
+                side=feature_row.side,
+                timestamp=feature_row.timestamp,
+                feature_hash=feature_row.feature_hash,
+                max_available_at=max_avail_dt,
+            )
+
+        return feature_row
 
     @property
     def feature_names(self) -> list[str]:

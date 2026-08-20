@@ -123,16 +123,11 @@ class E4TailRiskGuard(RiskGuard):
     def evaluate(self, signal: Signal, context: dict[str, Any] | None = None) -> RiskGuardResult:
         """Evaluate tail risk for a signal.
 
-        Args:
-            signal: The Aegis signal to evaluate.
-            context: Optional dict with:
-                - "features": pre-computed feature row (dict or pd.Series)
-                - "_replay_pre_computed_score": ONLY for replay/test, never operational
-                - "candles_by_symbol": dict of {SYMBOL: 1m candle DataFrame} for live
-                - "decision_at": datetime for live feature building
-
-        Returns:
-            RiskGuardResult with ALLOW, BLOCK, or feature availability states.
+        Dispatches based on context contents:
+            - context["candles_by_symbol"] + context["decision_at"] → live path
+            - context["features"] → pre-computed features path
+            - context["_replay_pre_computed_score"] → replay path
+            - otherwise → FEATURES_UNAVAILABLE
         """
         if not self._loaded:
             return self._fail_closed(signal, "E4_MODELS_NOT_LOADED")
@@ -154,6 +149,13 @@ class E4TailRiskGuard(RiskGuard):
                 model_version=self.version(),
                 feature_snapshot_hash="REPLAY_PRE_COMPUTED",
                 reason=reason,
+            )
+
+        if context and "candles_by_symbol" in context and "decision_at" in context:
+            return self.evaluate_from_candles(
+                signal,
+                context["candles_by_symbol"],
+                context["decision_at"],
             )
 
         features = self._extract_features(signal, context)
@@ -271,6 +273,15 @@ class E4TailRiskGuard(RiskGuard):
                     feature_snapshot_hash="",
                     reason=f"STALE_DATA:{exc}",
                 )
+            if "NON_CAUSAL_DATA" in exc_str:
+                return RiskGuardResult(
+                    decision=RiskDecision.NON_CAUSAL_DATA,
+                    score=float("nan"),
+                    threshold=self._threshold,
+                    model_version=self.version(),
+                    feature_snapshot_hash="",
+                    reason=f"NON_CAUSAL_DATA:{exc}",
+                )
             if "CANDLE_DUPLICATE_MINUTE" in exc_str or "CANDLE_MINUTE_GAP" in exc_str:
                 return RiskGuardResult(
                     decision=RiskDecision.STALE_DATA,
@@ -328,6 +339,14 @@ class E4TailRiskGuard(RiskGuard):
             decision = RiskDecision.ALLOW
             reason = f"TAIL_RISK_SCORE={score:.6f} < THRESHOLD={self._threshold:.6f}"
 
+        staleness_ms = 0.0
+        if feature_row.max_available_at is not None:
+            decision_ts = pd.Timestamp(decision_at)
+            if decision_ts.tzinfo is None:
+                decision_ts = decision_ts.tz_localize("UTC")
+            avail_ts = pd.Timestamp(feature_row.max_available_at)
+            staleness_ms = max(0.0, (decision_ts - avail_ts).total_seconds() * 1000)
+
         return RiskGuardResult(
             decision=decision,
             score=score,
@@ -336,8 +355,9 @@ class E4TailRiskGuard(RiskGuard):
             feature_snapshot_hash=feature_row.feature_hash,
             reason=reason,
             evaluation_time_ms=feature_build_ms + score_ms,
-            feature_available_at=feature_row.timestamp,
+            feature_available_at=feature_row.max_available_at,
             feature_build_latency_ms=feature_build_ms,
+            feature_staleness_ms=staleness_ms,
         )
 
     def _extract_features(
