@@ -19,16 +19,23 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import requests
 
-from .feature_bridge import FROZEN_E4_UNIVERSE
+from .feature_bridge import (
+    ANCHOR_CADENCE_MINUTES,
+    ANCHOR_COUNT,
+    FROZEN_E4_TIMEFROZEN,
+    FROZEN_E4_UNIVERSE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +44,43 @@ KLINE_ENDPOINT = "/fapi/v1/klines"
 REQUEST_TIMEOUT_S = 10
 INTER_REQUEST_GAP_MS = 50
 
-# Real warmup: EMA99 on tf240m = 99 * 240 = 23,760 minutes of 1m candles
-# Add margin for other indicators (rolling windows up to 96 periods on tf240m)
-WARMUP_MINUTES = 24_000  # 24,000 minutes (~16.67 days)
+MAX_INDICATOR_WARMUP_BARS = 99
+
+
+def _derive_minimum_warmup_minutes() -> int:
+    """Find the smallest window that supplies 99 tf240 bars at every anchor."""
+    timeframe = max(FROZEN_E4_TIMEFROZEN)
+    anchor_lookback = ANCHOR_COUNT * ANCHOR_CADENCE_MINUTES
+    base = pd.Timestamp("2024-01-01T00:00:00Z")
+
+    def complete_bars(window: int, phase: int) -> int:
+        decision_at = base + pd.Timedelta(minutes=phase)
+        earliest_anchor = decision_at - pd.Timedelta(minutes=anchor_lookback)
+        first_open = (decision_at - pd.Timedelta(minutes=window)).ceil(
+            f"{timeframe}min"
+        )
+        last_close = earliest_anchor.floor(f"{timeframe}min")
+        return max(0, int((last_close - first_open) / pd.Timedelta(minutes=timeframe)))
+
+    phases = range(0, timeframe, ANCHOR_CADENCE_MINUTES)
+    candidate = timeframe * MAX_INDICATOR_WARMUP_BARS
+    while min(complete_bars(candidate, phase) for phase in phases) < MAX_INDICATOR_WARMUP_BARS:
+        candidate += 1
+    return candidate
+
+
+WARMUP_MINUTES = _derive_minimum_warmup_minutes()
 BINANCE_LIMIT_PER_REQUEST = 1500
-PAGES_PER_SYMBOL = -(-WARMUP_MINUTES // BINANCE_LIMIT_PER_REQUEST)  # ceil division = 16
+PAGES_PER_SYMBOL = -(-WARMUP_MINUTES // BINANCE_LIMIT_PER_REQUEST)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_HISTORY_SEED_ROOT = Path(os.environ.get(
+    "E4_HISTORY_SEED_ROOT",
+    REPO_ROOT / "data/independent_entry_quality_discovery_v1/candles_1m",
+))
+DEFAULT_DURABLE_CACHE_ROOT = Path(os.environ.get(
+    "E4_DURABLE_CACHE_ROOT",
+    REPO_ROOT / "data/e4_live_candle_cache",
+))
 
 
 @dataclass(frozen=True)
@@ -63,10 +102,18 @@ class RollingCandleCache:
     Only fetches new candles since last cycle (incremental update).
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        seed_root: Path | None = None,
+        durable_root: Path | None = None,
+        require_history: bool = False,
+    ) -> None:
         self._cache: dict[str, pd.DataFrame] = {}
         self._last_fetch_time: dict[str, datetime] = {}
         self._lock = threading.Lock()
+        self._seed_root = seed_root
+        self._durable_root = durable_root
+        self._require_history = require_history
 
     def get_or_fetch(
         self,
@@ -84,13 +131,18 @@ class RollingCandleCache:
             cached = self._cache.get(symbol)
             cached_copy = cached.copy(deep=True) if cached is not None else None
 
+        if cached_copy is None:
+            cached_copy = self._load_durable_history(symbol)
+
         if cached_copy is None or cached_copy.empty:
+            if self._require_history:
+                raise ValueError(f"E4_HISTORY_SEED_UNAVAILABLE:{symbol}")
             updated = self._fetch_full(symbol, decision_at, required_minutes)
         else:
             causal_cached = _filter_through_decision(cached_copy, decision_at)
             trimmed_cached = _trim_causal(causal_cached, decision_at, required_minutes)
             if _has_required_coverage(trimmed_cached, decision_at, required_minutes):
-                updated = trimmed_cached
+                updated = causal_cached
             elif not causal_cached.empty:
                 updated = self._fetch_incremental(
                     symbol, causal_cached, decision_at, required_minutes
@@ -122,13 +174,15 @@ class RollingCandleCache:
             start_time_ms=start_time_ms,
             end_time_ms=decision_ms - 1,
         )
+        self._persist_delta(symbol, new_df)
         combined = pd.concat([cached, new_df], ignore_index=True)
         combined = combined.drop_duplicates(subset=["open_time_ms"], keep="last")
         combined = combined.sort_values("open_time_ms").reset_index(drop=True)
-        trimmed = _trim_causal(combined, decision_at, required_minutes)
-        if not _has_required_coverage(trimmed, decision_at, required_minutes):
+        causal = _filter_through_decision(combined, decision_at)
+        recent = _trim_causal(causal, decision_at, required_minutes)
+        if not _has_required_coverage(recent, decision_at, required_minutes):
             return self._fetch_full(symbol, decision_at, required_minutes)
-        return trimmed
+        return causal
 
     def _fetch_full(
         self,
@@ -149,6 +203,60 @@ class RollingCandleCache:
                 f"INSUFFICIENT_WARMUP:{symbol}:{len(causal)}/{required_minutes}"
             )
         return causal
+
+    def _load_durable_history(self, symbol: str) -> pd.DataFrame | None:
+        parts: list[pd.DataFrame] = []
+        if self._seed_root is not None:
+            seed = self._seed_root / f"{symbol}_1m.parquet"
+            if seed.exists():
+                parts.append(pd.read_parquet(seed))
+        if self._durable_root is not None:
+            symbol_root = self._durable_root / symbol
+            if symbol_root.exists():
+                parts.extend(pd.read_parquet(path) for path in sorted(symbol_root.glob("*.parquet")))
+        if not parts:
+            return None
+        combined = (
+            pd.concat(parts, ignore_index=True)
+            .drop_duplicates(subset=["open_time_ms"], keep="last")
+            .sort_values("open_time_ms")
+            .reset_index(drop=True)
+        )
+        if "open_time" not in combined:
+            combined["open_time"] = pd.to_datetime(
+                combined["open_time_ms"], unit="ms", utc=True
+            )
+        if "close_time" not in combined:
+            if "close_time_ms" in combined:
+                combined["close_time"] = pd.to_datetime(
+                    combined["close_time_ms"], unit="ms", utc=True
+                )
+            else:
+                combined["close_time"] = combined["open_time"] + pd.Timedelta(minutes=1)
+        return combined
+
+    def _persist_delta(self, symbol: str, candles: pd.DataFrame) -> None:
+        if self._durable_root is None or candles.empty:
+            return
+        working = candles.copy()
+        working["_month"] = pd.to_datetime(
+            working["open_time_ms"], unit="ms", utc=True
+        ).dt.strftime("%Y-%m")
+        symbol_root = self._durable_root / symbol
+        symbol_root.mkdir(parents=True, exist_ok=True)
+        for month, chunk in working.groupby("_month", sort=True):
+            path = symbol_root / f"{month}.parquet"
+            chunk = chunk.drop(columns="_month")
+            if path.exists():
+                chunk = pd.concat([pd.read_parquet(path), chunk], ignore_index=True)
+            chunk = (
+                chunk.drop_duplicates(subset=["open_time_ms"], keep="last")
+                .sort_values("open_time_ms")
+                .reset_index(drop=True)
+            )
+            temporary = path.with_suffix(".parquet.tmp")
+            chunk.to_parquet(temporary, index=False, compression="zstd")
+            temporary.replace(path)
 
     def invalidate(self, symbol: str | None = None) -> None:
         """Invalidate cache for a symbol or all symbols."""
@@ -173,7 +281,11 @@ class RollingCandleCache:
 
 
 # Module-level singleton cache
-_rolling_cache = RollingCandleCache()
+_rolling_cache = RollingCandleCache(
+    seed_root=DEFAULT_HISTORY_SEED_ROOT,
+    durable_root=DEFAULT_DURABLE_CACHE_ROOT,
+    require_history=True,
+)
 
 
 def _frozen_universe() -> list[str]:

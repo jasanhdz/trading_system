@@ -18,6 +18,7 @@ from aegis.risk_guard.feature_bridge import FROZEN_E4_UNIVERSE
 from aegis.risk_guard.feature_bridge import FeatureRow
 from aegis.risk_guard.market_snapshot import (
     RollingCandleCache,
+    WARMUP_MINUTES,
     _compute_snapshot_hash,
     fetch_snapshot,
 )
@@ -28,7 +29,7 @@ from aegis.risk_guard.precompute import E4PrecomputeService
 DECISION_AT = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
 
 
-def _candles(symbol_index: int, minutes: int = 24_000, future: int = 5) -> pd.DataFrame:
+def _candles(symbol_index: int, minutes: int = WARMUP_MINUTES, future: int = 5) -> pd.DataFrame:
     start = DECISION_AT - timedelta(minutes=minutes)
     count = minutes + future
     open_time = pd.date_range(start, periods=count, freq="1min", tz="UTC")
@@ -93,6 +94,36 @@ def test_rolling_cache_cold_and_incremental_do_not_deadlock(monkeypatch):
         result = pool.submit(cache.get_or_fetch, "BTCUSDT", next_cycle, 3).result(1.0)
     assert result["close_time"].max() <= pd.Timestamp(next_cycle)
     assert int(result["open_time_ms"].iloc[-1]) == int(next_cycle.timestamp() * 1000) - 60_000
+
+
+def test_rolling_cache_reuses_seed_and_persisted_increment(monkeypatch, tmp_path):
+    seed_root = tmp_path / "seed"
+    durable_root = tmp_path / "durable"
+    seed_root.mkdir()
+    seed = _small_candles(DECISION_AT - timedelta(minutes=3), 3)
+    seed.to_parquet(seed_root / "BTCUSDT_1m.parquet", index=False)
+    incremental = _small_candles(DECISION_AT, 5)
+    calls = 0
+
+    def fetch_forward(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return incremental.copy()
+
+    monkeypatch.setattr(
+        "aegis.risk_guard.market_snapshot._fetch_klines_forward", fetch_forward
+    )
+    cache = RollingCandleCache(seed_root=seed_root, durable_root=durable_root)
+    decision_at = DECISION_AT + timedelta(minutes=5)
+    result = cache.get_or_fetch("BTCUSDT", decision_at, 3)
+    assert calls == 1
+    assert len(result) == 8
+    assert list((durable_root / "BTCUSDT").glob("*.parquet"))
+
+    restarted = RollingCandleCache(seed_root=seed_root, durable_root=durable_root)
+    restored = restarted.get_or_fetch("BTCUSDT", decision_at, 3)
+    assert calls == 1
+    pd.testing.assert_frame_equal(restored, result)
 
 
 def test_snapshot_hash_covers_old_history_timestamp_and_taker_volume():
