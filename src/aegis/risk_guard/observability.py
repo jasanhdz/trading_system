@@ -70,6 +70,7 @@ class RiskGuardObserver:
             "feature_available_at": decision.risk_result.feature_available_at.isoformat() if decision.risk_result.feature_available_at else None,
             "feature_build_latency_ms": decision.risk_result.feature_build_latency_ms,
             "feature_staleness_ms": decision.risk_result.feature_staleness_ms,
+            "source_feed_lag_ms": decision.risk_result.source_feed_lag_ms,
         }
 
     def _append_jsonl(self, entry: dict[str, Any]) -> None:

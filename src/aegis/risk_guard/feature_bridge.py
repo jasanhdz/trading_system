@@ -70,7 +70,8 @@ class FeatureRow:
     timestamp: datetime
     feature_hash: str = ""
     max_available_at: datetime | None = None
-    source_staleness_ms: dict[str, float] | None = None
+    source_age_ms: dict[str, float] | None = None
+    source_feed_lag_ms: dict[str, float] | None = None
 
     def to_dataframe(self) -> pd.DataFrame:
         """Convert to a single-row DataFrame for model input."""
@@ -336,19 +337,47 @@ class FeatureBridge:
 
         avail_cols = [c for c in row.index if c.startswith("available_at__")]
         max_avail = None
-        source_staleness: dict[str, float] = {}
+        source_age_ms: dict[str, float] = {}
+        source_feed_lag_ms: dict[str, float] = {}
+
+        expected_by_tf = {
+            "tf5m": timedelta(minutes=5),
+            "tf15m": timedelta(minutes=15),
+            "tf60m": timedelta(minutes=60),
+            "tf240m": timedelta(minutes=240),
+            "flow": timedelta(minutes=5),
+        }
+
         for col in avail_cols:
             avail_val = row[col]
             if pd.isna(avail_val):
-                source_staleness[col] = float("inf")
+                source_age_ms[col] = float("inf")
+                source_feed_lag_ms[col] = float("inf")
                 continue
             avail_ts = pd.Timestamp(avail_val)
             if avail_ts.tzinfo is None:
                 avail_ts = avail_ts.tz_localize("UTC")
             else:
                 avail_ts = avail_ts.tz_convert("UTC")
-            staleness_s = (normalized_decision_at - avail_ts).total_seconds()
-            source_staleness[col] = max(0.0, staleness_s * 1000)
+
+            age_ms = (normalized_decision_at - avail_ts).total_seconds() * 1000
+            source_age_ms[col] = max(0.0, age_ms)
+
+            tf_key = None
+            for tf in expected_by_tf:
+                if tf in col:
+                    tf_key = tf
+                    break
+            if tf_key:
+                tf_delta = expected_by_tf[tf_key]
+                expected_avail = normalized_decision_at.floor(tf_delta)
+                if expected_avail == normalized_decision_at:
+                    expected_avail = normalized_decision_at - tf_delta
+                lag_ms = max(0.0, (expected_avail - avail_ts).total_seconds() * 1000)
+                source_feed_lag_ms[col] = lag_ms
+            else:
+                source_feed_lag_ms[col] = max(0.0, age_ms)
+
             if avail_ts > normalized_decision_at:
                 raise ValueError(
                     f"NON_CAUSAL_DATA: {col}={avail_ts} > decision_at={normalized_decision_at}"
@@ -356,12 +385,12 @@ class FeatureBridge:
             if max_avail is None or avail_ts > max_avail:
                 max_avail = avail_ts
 
-        max_staleness_ms = max(source_staleness.values()) if source_staleness else 0.0
-        if max_staleness_ms > 0:
-            stale_sources = {k: v for k, v in source_staleness.items() if v > 0}
+        max_lag_ms = max((v for v in source_feed_lag_ms.values() if v != float("inf")), default=0.0)
+        if max_lag_ms > 0:
+            laggy = {k: v for k, v in source_feed_lag_ms.items() if v > 0 and v != float("inf")}
             logger.warning(
-                "Feature staleness for %s/%s: max=%.0fms, sources=%s",
-                target_symbol, side, max_staleness_ms, stale_sources,
+                "Feed lag for %s/%s: max=%.0fms, sources=%s",
+                target_symbol, side, max_lag_ms, laggy,
             )
 
         features = {
@@ -379,7 +408,8 @@ class FeatureBridge:
             timestamp=feature_row.timestamp,
             feature_hash=feature_row.feature_hash,
             max_available_at=max_avail.to_pydatetime() if max_avail else None,
-            source_staleness_ms=source_staleness,
+            source_age_ms=source_age_ms,
+            source_feed_lag_ms=source_feed_lag_ms,
         )
 
     @property

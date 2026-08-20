@@ -339,13 +339,9 @@ class E4TailRiskGuard(RiskGuard):
             decision = RiskDecision.ALLOW
             reason = f"TAIL_RISK_SCORE={score:.6f} < THRESHOLD={self._threshold:.6f}"
 
-        staleness_ms = 0.0
-        if feature_row.max_available_at is not None:
-            decision_ts = pd.Timestamp(decision_at)
-            if decision_ts.tzinfo is None:
-                decision_ts = decision_ts.tz_localize("UTC")
-            avail_ts = pd.Timestamp(feature_row.max_available_at)
-            staleness_ms = max(0.0, (decision_ts - avail_ts).total_seconds() * 1000)
+        feed_lag = feature_row.source_feed_lag_ms or {}
+        valid_lags = [v for v in feed_lag.values() if v != float("inf")]
+        max_feed_lag_ms = max(valid_lags) if valid_lags else 0.0
 
         return RiskGuardResult(
             decision=decision,
@@ -357,7 +353,8 @@ class E4TailRiskGuard(RiskGuard):
             evaluation_time_ms=feature_build_ms + score_ms,
             feature_available_at=feature_row.max_available_at,
             feature_build_latency_ms=feature_build_ms,
-            feature_staleness_ms=staleness_ms,
+            feature_staleness_ms=max_feed_lag_ms,
+            source_feed_lag_ms=feed_lag,
         )
 
     def _extract_features(

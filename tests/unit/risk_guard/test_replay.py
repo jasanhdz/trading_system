@@ -642,3 +642,28 @@ class TestEvaluateFromCandles:
         )
         assert result.feature_build_latency_ms == 15.5
         assert result.feature_available_at is None
+        assert result.source_feed_lag_ms is None
+
+    def test_fail_closed_rejects_false(self):
+        from aegis.risk_guard.domain import RiskGuardConfig
+        with pytest.raises(ValueError, match="fail_closed must be True"):
+            RiskGuardConfig(fail_closed=False)
+
+    def test_fail_closed_accepts_true(self):
+        from aegis.risk_guard.domain import RiskGuardConfig
+        config = RiskGuardConfig(fail_closed=True)
+        assert config.fail_closed is True
+
+    def test_feature_row_has_feed_lag_fields(self):
+        from aegis.risk_guard.feature_bridge import FeatureRow
+        from datetime import datetime, timezone
+        row = FeatureRow(
+            features={"f1": 1.0}, symbol="BTCUSDT", side="LONG",
+            timestamp=datetime.now(timezone.utc),
+            source_age_ms={"available_at__tf5m": 0.0, "available_at__tf60m": 35 * 60 * 1000},
+            source_feed_lag_ms={"available_at__tf5m": 0.0, "available_at__tf60m": 0.0},
+        )
+        assert row.source_age_ms is not None
+        assert row.source_feed_lag_ms is not None
+        assert row.source_feed_lag_ms["available_at__tf5m"] == 0.0
+        assert row.source_feed_lag_ms["available_at__tf60m"] == 0.0
