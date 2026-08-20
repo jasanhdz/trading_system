@@ -31,13 +31,34 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Frozen E4 universe — exactly 11 symbols. If any is missing, fail closed.
+FROZEN_E4_UNIVERSE: frozenset[str] = frozenset({
+    "ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT",
+    "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT",
+})
+
+# Frozen E4 timeframes — not configurable.
+FROZEN_E4_TIMEFROZEN: list[int] = [5, 15, 60, 240]
+
+# Required candle columns (matches dataset.py load_candles).
+REQUIRED_CANDLE_COLUMNS: frozenset[str] = frozenset({
+    "open_time_ms", "open", "high", "low", "close", "volume", "taker_buy_volume",
+})
+
+# Anchor window: how many historical anchors before decision_at.
+# diff(3) in cross__breadth_acceleration needs at least 4 anchors.
+# diff(2) in cross__btc_impulse_acceleration needs at least 3.
+# We use 5 anchors (20 min at 5-min cadence) for safety margin.
+ANCHOR_COUNT = 5
+ANCHOR_CADENCE_MINUTES = 5
 
 
 @dataclass(frozen=True)
@@ -52,6 +73,49 @@ class FeatureRow:
     def to_dataframe(self) -> pd.DataFrame:
         """Convert to a single-row DataFrame for model input."""
         return pd.DataFrame([self.features])
+
+
+def validate_candles(candles: pd.DataFrame, symbol: str) -> None:
+    """Validate 1-minute candle DataFrame before feature construction.
+
+    Enforces the same invariants as the original E4 dataset builder:
+        - Required columns present
+        - No duplicate minutes
+        - Exact 60-second gaps between candles
+
+    Raises ValueError on any violation.
+    """
+    missing = REQUIRED_CANDLE_COLUMNS - set(candles.columns)
+    if missing:
+        raise ValueError(f"CANDLE_COLUMNS_MISSING:{symbol}:{sorted(missing)}")
+
+    if candles.open_time_ms.duplicated().any():
+        raise ValueError(f"CANDLE_DUPLICATE_MINUTE:{symbol}")
+
+    gaps = np.diff(candles.open_time_ms.to_numpy(np.int64))
+    if len(gaps) and not np.all(gaps == 60_000):
+        raise ValueError(f"CANDLE_MINUTE_GAP:{symbol}")
+
+
+def build_anchors(decision_at: datetime) -> pd.DatetimeIndex:
+    """Build a window of historical anchors ending at decision_at.
+
+    E4 features like cross__breadth_acceleration use diff(3) and
+    cross__btc_impulse_acceleration use diff(2). With a single anchor
+    these would always be 0. We provide ANCHOR_COUNT anchors spaced
+    at ANCHOR_CADENCE_MINUTES intervals so the diff operations
+    produce the same values as during training.
+    """
+    decision_ts = pd.Timestamp(decision_at)
+    if decision_ts.tzinfo is None:
+        decision_ts = decision_ts.tz_localize("UTC")
+    else:
+        decision_ts = decision_ts.tz_convert("UTC")
+    start = decision_ts - timedelta(minutes=ANCHOR_COUNT * ANCHOR_CADENCE_MINUTES)
+    anchors = pd.date_range(
+        start, decision_ts, freq=f"{ANCHOR_CADENCE_MINUTES}min", inclusive="both", tz="UTC"
+    )
+    return anchors
 
 
 class FeatureBridge:
@@ -72,7 +136,7 @@ class FeatureBridge:
             candles_by_symbol={"BTCUSDT": btc_df, "ETHUSDT": eth_df, ...},
             target_symbol="BTCUSDT",
             side="SHORT",
-            decision_at=datetime.now(timezone.utc),
+            decision_at=datetime(2025, 6, 1, 12, 0, tzinfo=timezone.utc),
         )
     """
 
@@ -89,16 +153,22 @@ class FeatureBridge:
     def from_feature_dict(
         self,
         features: dict[str, Any],
-        symbol: str = "",
-        side: str = "",
-        timestamp: datetime | None = None,
+        symbol: str,
+        side: str,
+        timestamp: datetime,
     ) -> FeatureRow:
         """Create a FeatureRow from a pre-computed feature dictionary.
 
         Validates:
             - All required features are present
             - All values are finite (no NaN, no inf)
+            - symbol and side are non-empty
         """
+        if not symbol:
+            raise ValueError("symbol is required")
+        if side not in ("LONG", "SHORT"):
+            raise ValueError(f"side must be 'LONG' or 'SHORT', got '{side}'")
+
         missing = [f for f in self._feature_names if f not in features]
         if missing:
             raise ValueError(
@@ -129,15 +199,15 @@ class FeatureBridge:
             features=feature_dict,
             symbol=symbol,
             side=side,
-            timestamp=timestamp or datetime.now(timezone.utc),
+            timestamp=timestamp,
             feature_hash=feature_hash,
         )
 
     def from_dataframe_row(
         self,
         row: pd.Series,
-        symbol: str = "",
-        side: str = "",
+        symbol: str,
+        side: str,
     ) -> FeatureRow:
         """Create a FeatureRow from a pandas Series (e.g., from parquet)."""
         features = {}
@@ -147,40 +217,34 @@ class FeatureBridge:
             else:
                 raise ValueError(f"Feature '{name}' not found in row")
 
-        return self.from_feature_dict(
-            features,
-            symbol=symbol or str(row.get("symbol", "")),
-            side=side or str(row.get("side", "")),
-            timestamp=row.get("decision_at") or row.get("signal_timestamp"),
-        )
+        ts = row.get("decision_at") or row.get("signal_timestamp")
+        if ts is None:
+            raise ValueError("No timestamp found in row")
+
+        return self.from_feature_dict(features, symbol=symbol, side=side, timestamp=ts)
 
     def from_market_candles(
         self,
         candles_by_symbol: dict[str, pd.DataFrame],
         target_symbol: str,
         side: str,
-        decision_at: datetime | None = None,
-        timeframes: list[int] | None = None,
+        decision_at: datetime,
     ) -> FeatureRow:
         """Compute 146 E4 features from 1-minute candle data for ALL symbols.
 
-        The E4 feature builder requires candles from ALL tracked symbols
-        (not just the target) because add_cross_market() computes features
-        from BTC/ETH cross-correlations and market-wide breadth/dispersion.
+        The E4 feature builder requires candles from ALL 11 tracked symbols
+        because add_cross_market() computes features from BTC/ETH
+        cross-correlations and market-wide breadth/dispersion.
 
-        Args:
-            candles_by_symbol: {SYMBOL: one_minute_candle_DataFrame} for all symbols.
-            target_symbol: The symbol to extract features for.
-            side: "LONG" or "SHORT".
-            decision_at: Timestamp of the decision (UTC).
-            timeframes: Candle aggregation timeframes (default: [5, 15, 60, 240]).
+        Validates:
+            - All 11 E4 symbols present (fail closed if missing)
+            - Each candle DataFrame passes validate_candles()
+            - side is 'LONG' or 'SHORT'
+            - target_symbol is in the universe
 
-        Returns:
-            FeatureRow with the 146 features for the target symbol/side.
-
-        Raises:
-            ImportError: If E4 feature builder is not available.
-            ValueError: If no features computed for the target.
+        Uses a window of historical anchors (not just decision_at) so that
+        diff() operations in cross-market features produce the same values
+        as during training.
         """
         from sandbox.aegis_strategy_router.experiments.aegis_e4_robust_training.src.aegis_e4.features import (
             build_neutral_symbol_panel,
@@ -188,51 +252,57 @@ class FeatureBridge:
             orient_sides,
         )
 
-        ts = decision_at or datetime.now(timezone.utc)
-        tfs = timeframes or [5, 15, 60, 240]
-        anchors = pd.DatetimeIndex([ts])
+        if side not in ("LONG", "SHORT"):
+            raise ValueError(f"side must be 'LONG' or 'SHORT', got '{side}'")
+        if target_symbol not in FROZEN_E4_UNIVERSE:
+            raise ValueError(
+                f"target_symbol '{target_symbol}' not in E4 universe. "
+                f"Must be one of: {sorted(FROZEN_E4_UNIVERSE)}"
+            )
+
+        missing_symbols = FROZEN_E4_UNIVERSE - set(candles_by_symbol.keys())
+        if missing_symbols:
+            raise ValueError(
+                f"MISSING_SYMBOL: {sorted(missing_symbols)} — "
+                f"E4 requires all {len(FROZEN_E4_UNIVERSE)} symbols"
+            )
+
+        anchors = build_anchors(decision_at)
 
         panels = []
         all_families: dict[str, str] = {}
         for symbol, candles in candles_by_symbol.items():
-            if candles is None or candles.empty:
-                logger.warning("No candles for %s, skipping", symbol)
-                continue
-            panel, families = build_neutral_symbol_panel(candles, anchors, timeframes=tfs)
+            validate_candles(candles, symbol)
+            panel, families = build_neutral_symbol_panel(
+                candles, anchors, timeframes=FROZEN_E4_TIMEFROZEN
+            )
             panel["symbol"] = symbol
             panels.append(panel)
             all_families.update(families)
 
-        if not panels:
-            raise ValueError("No panels computed from any symbol")
-
         combined = pd.concat(panels, ignore_index=True)
-
         combined, cross_families = add_cross_market(combined)
         all_families.update(cross_families)
 
         oriented, oriented_families = orient_sides(combined, all_families)
         all_families.update(oriented_families)
 
-        if side.upper() == "SHORT":
-            matched = oriented[oriented["side"] == "SHORT"]
-        else:
-            matched = oriented[oriented["side"] == "LONG"]
-
-        matched = matched[matched["symbol"] == target_symbol]
+        matched = oriented[
+            (oriented["symbol"] == target_symbol) & (oriented["side"] == side)
+        ]
         if matched.empty:
             raise ValueError(
-                f"No features computed for {target_symbol}/{side} "
-                f"(available symbols: {oriented['symbol'].unique().tolist()})"
+                f"No features computed for {target_symbol}/{side}"
             )
 
         row = matched.iloc[0]
-        features = {}
-        for name in self._feature_names:
-            if name in row.index:
-                features[name] = float(row[name])
+        features = {
+            name: float(row[name])
+            for name in self._feature_names
+            if name in row.index
+        }
 
-        return self.from_feature_dict(features, symbol=target_symbol, side=side, timestamp=ts)
+        return self.from_feature_dict(features, symbol=target_symbol, side=side, timestamp=decision_at)
 
     @property
     def feature_names(self) -> list[str]:

@@ -256,12 +256,16 @@ class TestRealE4Inference:
         train = dev[dev["split"] == "TRAIN"].head(50)
 
         for _, row in train.iterrows():
-            feature_row = bridge.from_dataframe_row(row, symbol=str(row.get("symbol", "")), side="SHORT")
+            feature_row = bridge.from_dataframe_row(
+                row,
+                symbol=str(row["symbol"]),
+                side=str(row["side"]),
+            )
 
             signal = Signal(
                 signal_id="parity-test",
                 timestamp=datetime.now(timezone.utc),
-                symbol=feature_row.symbol or "BTCUSDT",
+                symbol=feature_row.symbol,
                 side=Direction.SHORT,
                 direction_source="TEST",
                 direction_model_version="TEST",
@@ -336,7 +340,7 @@ class TestRealE4Inference:
 
 
 class TestFeatureBridgeValidation:
-    """Test FeatureBridge input validation."""
+    """Test FeatureBridge input validation contracts."""
 
     def test_requires_feature_names(self):
         from aegis.risk_guard.feature_bridge import FeatureBridge
@@ -344,26 +348,181 @@ class TestFeatureBridgeValidation:
             FeatureBridge([])
 
     def test_rejects_nan_features(self):
+        from datetime import datetime, timezone
         from aegis.risk_guard.feature_bridge import FeatureBridge
         bridge = FeatureBridge(["f1", "f2", "f3"])
         with pytest.raises(ValueError, match="Non-finite"):
-            bridge.from_feature_dict({"f1": 1.0, "f2": float("nan"), "f3": 3.0})
+            bridge.from_feature_dict(
+                {"f1": 1.0, "f2": float("nan"), "f3": 3.0},
+                symbol="BTCUSDT", side="LONG",
+                timestamp=datetime.now(timezone.utc),
+            )
 
     def test_rejects_inf_features(self):
+        from datetime import datetime, timezone
         from aegis.risk_guard.feature_bridge import FeatureBridge
         bridge = FeatureBridge(["f1", "f2", "f3"])
         with pytest.raises(ValueError, match="Non-finite"):
-            bridge.from_feature_dict({"f1": 1.0, "f2": float("inf"), "f3": 3.0})
+            bridge.from_feature_dict(
+                {"f1": 1.0, "f2": float("inf"), "f3": 3.0},
+                symbol="BTCUSDT", side="LONG",
+                timestamp=datetime.now(timezone.utc),
+            )
 
     def test_rejects_missing_features(self):
+        from datetime import datetime, timezone
         from aegis.risk_guard.feature_bridge import FeatureBridge
         bridge = FeatureBridge(["f1", "f2", "f3"])
         with pytest.raises(ValueError, match="Missing"):
-            bridge.from_feature_dict({"f1": 1.0})
+            bridge.from_feature_dict(
+                {"f1": 1.0},
+                symbol="BTCUSDT", side="LONG",
+                timestamp=datetime.now(timezone.utc),
+            )
 
-    def test_accepts_valid_features(self):
+    def test_rejects_empty_symbol(self):
+        from datetime import datetime, timezone
         from aegis.risk_guard.feature_bridge import FeatureBridge
         bridge = FeatureBridge(["f1", "f2", "f3"])
-        row = bridge.from_feature_dict({"f1": 0.5, "f2": -1.0, "f3": 3.14})
+        with pytest.raises(ValueError, match="symbol is required"):
+            bridge.from_feature_dict(
+                {"f1": 0.5, "f2": -1.0, "f3": 3.14},
+                symbol="", side="LONG",
+                timestamp=datetime.now(timezone.utc),
+            )
+
+    def test_rejects_invalid_side(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1", "f2", "f3"])
+        with pytest.raises(ValueError, match="side must be 'LONG' or 'SHORT'"):
+            bridge.from_feature_dict(
+                {"f1": 0.5, "f2": -1.0, "f3": 3.14},
+                symbol="BTCUSDT", side="MEDIUM",
+                timestamp=datetime.now(timezone.utc),
+            )
+
+    def test_accepts_valid_features(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1", "f2", "f3"])
+        row = bridge.from_feature_dict(
+            {"f1": 0.5, "f2": -1.0, "f3": 3.14},
+            symbol="BTCUSDT", side="SHORT",
+            timestamp=datetime.now(timezone.utc),
+        )
         assert len(row.features) == 3
         assert row.feature_hash != ""
+        assert row.symbol == "BTCUSDT"
+        assert row.side == "SHORT"
+
+
+class TestMarketCandlesValidation:
+    """Test from_market_candles() contracts."""
+
+    def test_rejects_invalid_side(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1"])
+        with pytest.raises(ValueError, match="side must be 'LONG' or 'SHORT'"):
+            bridge.from_market_candles(
+                candles_by_symbol={"BTCUSDT": pd.DataFrame()},
+                target_symbol="BTCUSDT",
+                side="MEDIUM",
+                decision_at=datetime.now(timezone.utc),
+            )
+
+    def test_rejects_out_of_universe_symbol(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1"])
+        with pytest.raises(ValueError, match="not in E4 universe"):
+            bridge.from_market_candles(
+                candles_by_symbol={"BTCUSDT": pd.DataFrame()},
+                target_symbol="FAKEUSDT",
+                side="LONG",
+                decision_at=datetime.now(timezone.utc),
+            )
+
+    def test_rejects_missing_symbols(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1"])
+        with pytest.raises(ValueError, match="MISSING_SYMBOL"):
+            bridge.from_market_candles(
+                candles_by_symbol={"BTCUSDT": pd.DataFrame()},
+                target_symbol="BTCUSDT",
+                side="LONG",
+                decision_at=datetime.now(timezone.utc),
+            )
+
+    def test_rejects_duplicate_minutes(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        import numpy as np
+        bridge = FeatureBridge(["f1"])
+
+        bad_candle = pd.DataFrame({
+            "open_time_ms": [1000, 1000],
+            "open": [1.0, 1.0], "high": [1.0, 1.0],
+            "low": [1.0, 1.0], "close": [1.0, 1.0],
+            "volume": [1.0, 1.0], "taker_buy_volume": [0.5, 0.5],
+        })
+        candles = {s: bad_candle.copy() for s in [
+            "ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT",
+            "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT",
+        ]}
+        with pytest.raises(ValueError, match="CANDLE_DUPLICATE_MINUTE"):
+            bridge.from_market_candles(
+                candles_by_symbol=candles,
+                target_symbol="BTCUSDT",
+                side="LONG",
+                decision_at=datetime.now(timezone.utc),
+            )
+
+    def test_rejects_minute_gap(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import FeatureBridge
+        bridge = FeatureBridge(["f1"])
+
+        gap_candle = pd.DataFrame({
+            "open_time_ms": [1000, 120_000],
+            "open": [1.0, 1.0], "high": [1.0, 1.0],
+            "low": [1.0, 1.0], "close": [1.0, 1.0],
+            "volume": [1.0, 1.0], "taker_buy_volume": [0.5, 0.5],
+        })
+        candles = {s: gap_candle.copy() for s in [
+            "ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT",
+            "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT",
+        ]}
+        with pytest.raises(ValueError, match="CANDLE_MINUTE_GAP"):
+            bridge.from_market_candles(
+                candles_by_symbol=candles,
+                target_symbol="BTCUSDT",
+                side="LONG",
+                decision_at=datetime.now(timezone.utc),
+            )
+
+    def test_build_anchors_generates_window(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.feature_bridge import build_anchors, ANCHOR_COUNT, ANCHOR_CADENCE_MINUTES
+        import pandas as pd
+
+        decision_at = datetime(2025, 6, 1, 12, 0, tzinfo=timezone.utc)
+        anchors = build_anchors(decision_at)
+
+        assert len(anchors) == ANCHOR_COUNT + 1
+        expected_ts = pd.Timestamp(decision_at).tz_convert("UTC")
+        assert anchors[-1] == expected_ts
+        expected_start = expected_ts - pd.Timedelta(minutes=ANCHOR_COUNT * ANCHOR_CADENCE_MINUTES)
+        assert anchors[0] == expected_start
+
+    def test_frozen_universe_has_11_symbols(self):
+        from aegis.risk_guard.feature_bridge import FROZEN_E4_UNIVERSE
+        assert len(FROZEN_E4_UNIVERSE) == 11
+        assert "BTCUSDT" in FROZEN_E4_UNIVERSE
+        assert "ETHUSDT" in FROZEN_E4_UNIVERSE
+
+    def test_frozen_timeframes(self):
+        from aegis.risk_guard.feature_bridge import FROZEN_E4_TIMEFROZEN
+        assert FROZEN_E4_TIMEFROZEN == [5, 15, 60, 240]
