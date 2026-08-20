@@ -568,3 +568,77 @@ class TestMarketCandlesValidation:
     def test_frozen_timeframes(self):
         from aegis.risk_guard.feature_bridge import FROZEN_E4_TIMEFROZEN
         assert FROZEN_E4_TIMEFROZEN == [5, 15, 60, 240]
+
+
+@pytest.mark.skipif(not _artifacts_exist(), reason="E4 artifacts not available")
+class TestEvaluateFromCandles:
+    """Test evaluate_from_candles() integration with FeatureBridge."""
+
+    def _load_guard(self):
+        thresholds = json.loads(THRESHOLDS_PATH.read_text())
+        tail_threshold = thresholds["thresholds"]["tail_risk_guard"]["threshold"]
+        models_hash = E4TailRiskGuard._sha256_file(E4_MODELS_PATH)
+        config = RiskGuardConfig(
+            enabled=True, mode="observe_only",
+            tail_risk_threshold=tail_threshold,
+            models_joblib_path=str(E4_MODELS_PATH),
+            models_joblib_sha256=models_hash,
+            feature_schema_path=str(E4_SCHEMA_PATH),
+            feature_schema_sha256=SCHEMA_SHA256,
+            fail_closed=True,
+        )
+        guard = E4TailRiskGuard(config)
+        guard.load()
+        return guard
+
+    def test_evaluate_from_candles_empty(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.domain import Signal, Direction
+        guard = self._load_guard()
+        signal = Signal(
+            signal_id="test-empty", timestamp=datetime.now(timezone.utc),
+            symbol="BTCUSDT", side=Direction.LONG,
+            direction_source="TEST", direction_model_version="TEST",
+        )
+        result = guard.evaluate_from_candles(signal, {}, datetime.now(timezone.utc))
+        assert result.decision == RiskDecision.FEATURES_UNAVAILABLE
+
+    def test_evaluate_from_candles_stale(self):
+        from datetime import datetime, timezone
+        from aegis.risk_guard.domain import Signal, Direction
+        guard = self._load_guard()
+        signal = Signal(
+            signal_id="test-stale", timestamp=datetime.now(timezone.utc),
+            symbol="BTCUSDT", side=Direction.LONG,
+            direction_source="TEST", direction_model_version="TEST",
+        )
+        dummy = {s: pd.DataFrame() for s in [
+            "ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT",
+            "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT",
+        ]}
+        result = guard.evaluate_from_candles(
+            signal, dummy,
+            datetime(2025, 6, 1, 12, 3, tzinfo=timezone.utc),
+        )
+        assert result.decision == RiskDecision.STALE_DATA
+        assert result.feature_build_latency_ms == 0.0
+
+    def test_risk_decision_includes_feature_states(self):
+        from aegis.risk_guard.domain import RiskDecision
+        states = {d.value for d in RiskDecision}
+        assert "FEATURES_UNAVAILABLE" in states
+        assert "STALE_DATA" in states
+        assert "NON_CAUSAL_DATA" in states
+        assert "FEATURE_BUILD_ERROR" in states
+        assert "ALLOW" in states
+        assert "BLOCK" in states
+
+    def test_risk_guard_result_has_telemetry_fields(self):
+        from aegis.risk_guard.domain import RiskGuardResult
+        result = RiskGuardResult(
+            decision=RiskDecision.ALLOW, score=0.3, threshold=0.45,
+            model_version="V1", feature_snapshot_hash="abc",
+            reason="test", feature_build_latency_ms=15.5,
+        )
+        assert result.feature_build_latency_ms == 15.5
+        assert result.feature_available_at is None

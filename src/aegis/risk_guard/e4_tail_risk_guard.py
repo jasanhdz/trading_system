@@ -1,4 +1,4 @@
-"""E4 Tail Risk Guard — frozen model implementation."""
+"""E4 Tail Risk Guard — frozen model implementation with FeatureBridge integration."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from .domain import RiskDecision, RiskGuardConfig, RiskGuardResult, Signal, FROZEN_TAIL_RISK_THRESHOLD
+from .feature_bridge import FeatureBridge
 from .risk_guard import RiskGuard
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ class E4TailRiskGuard(RiskGuard):
         self._tail_bundle: dict[str, Any] | None = None
         self._threshold = config.tail_risk_threshold
         self._loaded = False
+        self._bridge: FeatureBridge | None = None
 
     def name(self) -> str:
         return "E4_TAIL_RISK_GUARD"
@@ -110,6 +113,7 @@ class E4TailRiskGuard(RiskGuard):
             )
 
         self._loaded = True
+        self._bridge = FeatureBridge(self._tail_bundle["features"])
         logger.info(
             "E4 Tail Risk Guard loaded: threshold=%.6f, features=%d",
             self._threshold,
@@ -124,9 +128,11 @@ class E4TailRiskGuard(RiskGuard):
             context: Optional dict with:
                 - "features": pre-computed feature row (dict or pd.Series)
                 - "_replay_pre_computed_score": ONLY for replay/test, never operational
+                - "candles_by_symbol": dict of {SYMBOL: 1m candle DataFrame} for live
+                - "decision_at": datetime for live feature building
 
         Returns:
-            RiskGuardResult with ALLOW or BLOCK.
+            RiskGuardResult with ALLOW, BLOCK, or feature availability states.
         """
         if not self._loaded:
             return self._fail_closed(signal, "E4_MODELS_NOT_LOADED")
@@ -202,6 +208,137 @@ class E4TailRiskGuard(RiskGuard):
                 reason=f"E4_SCORING_ERROR_ALLOW_OPEN:{exc}",
                 evaluation_time_ms=elapsed_ms,
             )
+
+    def evaluate_from_candles(
+        self,
+        signal: Signal,
+        candles_by_symbol: dict[str, pd.DataFrame],
+        decision_at: datetime,
+    ) -> RiskGuardResult:
+        """Evaluate tail risk by building features from raw candles.
+
+        This is the live-path entry point. It:
+            1. Validates candle availability and freshness
+            2. Builds features via FeatureBridge
+            3. Scores with frozen E4 model
+            4. Returns ALLOW/BLOCK with full telemetry
+
+        Feature availability states:
+            - FEATURES_UNAVAILABLE: no candles provided
+            - STALE_DATA: candles too old (decision_at not aligned to 5m)
+            - FEATURE_BUILD_ERROR: exception during feature construction
+        """
+        if not self._loaded:
+            return self._fail_closed(signal, "E4_MODELS_NOT_LOADED")
+
+        if not candles_by_symbol:
+            return RiskGuardResult(
+                decision=RiskDecision.FEATURES_UNAVAILABLE,
+                score=float("nan"),
+                threshold=self._threshold,
+                model_version=self.version(),
+                feature_snapshot_hash="",
+                reason="FEATURES_UNAVAILABLE:no_candles_provided",
+            )
+
+        try:
+            feature_build_start = time.monotonic()
+            feature_row = self._bridge.from_market_candles(
+                candles_by_symbol=candles_by_symbol,
+                target_symbol=signal.symbol,
+                side=signal.side.value,
+                decision_at=decision_at,
+            )
+            feature_build_ms = (time.monotonic() - feature_build_start) * 1000
+
+        except ValueError as exc:
+            exc_str = str(exc)
+            if "UNIVERSE_MISMATCH" in exc_str:
+                return RiskGuardResult(
+                    decision=RiskDecision.FEATURES_UNAVAILABLE,
+                    score=float("nan"),
+                    threshold=self._threshold,
+                    model_version=self.version(),
+                    feature_snapshot_hash="",
+                    reason=f"FEATURES_UNAVAILABLE:{exc}",
+                )
+            if "aligned to 5-minute" in exc_str:
+                return RiskGuardResult(
+                    decision=RiskDecision.STALE_DATA,
+                    score=float("nan"),
+                    threshold=self._threshold,
+                    model_version=self.version(),
+                    feature_snapshot_hash="",
+                    reason=f"STALE_DATA:{exc}",
+                )
+            if "CANDLE_DUPLICATE_MINUTE" in exc_str or "CANDLE_MINUTE_GAP" in exc_str:
+                return RiskGuardResult(
+                    decision=RiskDecision.STALE_DATA,
+                    score=float("nan"),
+                    threshold=self._threshold,
+                    model_version=self.version(),
+                    feature_snapshot_hash="",
+                    reason=f"STALE_DATA:{exc}",
+                )
+            return RiskGuardResult(
+                decision=RiskDecision.FEATURE_BUILD_ERROR,
+                score=float("nan"),
+                threshold=self._threshold,
+                model_version=self.version(),
+                feature_snapshot_hash="",
+                reason=f"FEATURE_BUILD_ERROR:{exc}",
+            )
+        except Exception as exc:
+            return RiskGuardResult(
+                decision=RiskDecision.FEATURE_BUILD_ERROR,
+                score=float("nan"),
+                threshold=self._threshold,
+                model_version=self.version(),
+                feature_snapshot_hash="",
+                reason=f"FEATURE_BUILD_ERROR:{exc}",
+            )
+
+        features_df = feature_row.to_dataframe()
+        score_start = time.monotonic()
+        try:
+            score = self._score_tail_risk(features_df)
+            score_ms = (time.monotonic() - score_start) * 1000
+        except Exception as exc:
+            score_ms = (time.monotonic() - score_start) * 1000
+            logger.error("E4 scoring error for %s: %s", signal.signal_id, exc)
+            return RiskGuardResult(
+                decision=RiskDecision.FEATURE_BUILD_ERROR,
+                score=float("nan"),
+                threshold=self._threshold,
+                model_version=self.version(),
+                feature_snapshot_hash=feature_row.feature_hash,
+                reason=f"E4_SCORING_ERROR:{exc}",
+                evaluation_time_ms=feature_build_ms + score_ms,
+                feature_available_at=feature_row.timestamp,
+                feature_build_latency_ms=feature_build_ms,
+            )
+
+        if not self._validate_score(score):
+            return self._fail_closed(signal, f"INVALID_SCORE:{score}")
+
+        if score >= self._threshold:
+            decision = RiskDecision.BLOCK
+            reason = f"TAIL_RISK_SCORE={score:.6f} >= THRESHOLD={self._threshold:.6f}"
+        else:
+            decision = RiskDecision.ALLOW
+            reason = f"TAIL_RISK_SCORE={score:.6f} < THRESHOLD={self._threshold:.6f}"
+
+        return RiskGuardResult(
+            decision=decision,
+            score=score,
+            threshold=self._threshold,
+            model_version=self.version(),
+            feature_snapshot_hash=feature_row.feature_hash,
+            reason=reason,
+            evaluation_time_ms=feature_build_ms + score_ms,
+            feature_available_at=feature_row.timestamp,
+            feature_build_latency_ms=feature_build_ms,
+        )
 
     def _extract_features(
         self, signal: Signal, context: dict[str, Any] | None

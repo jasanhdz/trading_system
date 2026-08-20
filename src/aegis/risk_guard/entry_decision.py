@@ -89,7 +89,16 @@ class EntryDecisionOrchestrator:
 
         risk_result = self._risk_guard.evaluate(signal, context)
 
+        _feature_error_states = {
+            RiskDecision.FEATURES_UNAVAILABLE,
+            RiskDecision.STALE_DATA,
+            RiskDecision.NON_CAUSAL_DATA,
+            RiskDecision.FEATURE_BUILD_ERROR,
+        }
+
         if risk_result.decision == RiskDecision.ALLOW:
+            verdict = RiskGuardVerdict.ALLOW
+        elif risk_result.decision in _feature_error_states:
             verdict = RiskGuardVerdict.ALLOW
         elif self._config.enforce:
             verdict = RiskGuardVerdict.BLOCK

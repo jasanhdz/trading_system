@@ -20,9 +20,13 @@ class Direction(Enum):
 
 
 class RiskDecision(Enum):
-    """Binary risk guard decision."""
+    """Risk guard decision with feature availability states."""
     ALLOW = "ALLOW"
     BLOCK = "BLOCK"
+    FEATURES_UNAVAILABLE = "FEATURES_UNAVAILABLE"
+    STALE_DATA = "STALE_DATA"
+    NON_CAUSAL_DATA = "NON_CAUSAL_DATA"
+    FEATURE_BUILD_ERROR = "FEATURE_BUILD_ERROR"
 
 
 class RiskGuardVerdict(Enum):
@@ -60,6 +64,8 @@ class RiskGuardResult:
     reason: str
     evaluation_time_ms: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
+    feature_available_at: datetime | None = None
+    feature_build_latency_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -99,6 +105,8 @@ class EntryDecision:
             "model_version": self.risk_result.model_version,
             "feature_snapshot_hash": self.risk_result.feature_snapshot_hash,
             "evaluation_time_ms": self.risk_result.evaluation_time_ms,
+            "feature_available_at": self.risk_result.feature_available_at.isoformat() if self.risk_result.feature_available_at else None,
+            "feature_build_latency_ms": self.risk_result.feature_build_latency_ms,
         }
 
 

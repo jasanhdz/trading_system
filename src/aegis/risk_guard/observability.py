@@ -67,6 +67,8 @@ class RiskGuardObserver:
             "model_version": decision.risk_result.model_version,
             "feature_snapshot_hash": decision.risk_result.feature_snapshot_hash,
             "evaluation_time_ms": decision.risk_result.evaluation_time_ms,
+            "feature_available_at": decision.risk_result.feature_available_at.isoformat() if decision.risk_result.feature_available_at else None,
+            "feature_build_latency_ms": decision.risk_result.feature_build_latency_ms,
         }
 
     def _append_jsonl(self, entry: dict[str, Any]) -> None:
@@ -99,7 +101,11 @@ class RiskGuardMetrics:
         self.total_enforced_blocks = 0
         self.total_skip = 0
         self.total_guard_disabled = 0
+        self.total_feature_errors = 0
+        self.total_stale_data = 0
+        self.total_features_unavailable = 0
         self.scores: list[float] = []
+        self.feature_build_latencies: list[float] = []
         self.per_symbol: dict[str, dict[str, int]] = {}
         self.per_side: dict[str, dict[str, int]] = {}
         self._start_time = time.monotonic()
@@ -115,6 +121,17 @@ class RiskGuardMetrics:
         if decision.risk_result.reason == "RISK_GUARD_DISABLED":
             self.total_guard_disabled += 1
             return
+
+        if decision.risk_result.feature_build_latency_ms > 0:
+            self.feature_build_latencies.append(decision.risk_result.feature_build_latency_ms)
+
+        rd = decision.risk_result.decision
+        if rd == RiskDecision.FEATURE_BUILD_ERROR:
+            self.total_feature_errors += 1
+        elif rd == RiskDecision.STALE_DATA:
+            self.total_stale_data += 1
+        elif rd == RiskDecision.FEATURES_UNAVAILABLE:
+            self.total_features_unavailable += 1
 
         if not decision.risk_result.score != decision.risk_result.score:
             self.scores.append(decision.risk_result.score)
@@ -161,6 +178,9 @@ class RiskGuardMetrics:
             "total_enforced_blocks": self.total_enforced_blocks,
             "total_skip": self.total_skip,
             "total_guard_disabled": self.total_guard_disabled,
+            "total_feature_errors": self.total_feature_errors,
+            "total_stale_data": self.total_stale_data,
+            "total_features_unavailable": self.total_features_unavailable,
             "block_rate_pct": (
                 (self.total_blocked / max(1, self.total_evaluated - self.total_skip - self.total_guard_disabled)) * 100.0
             ),
@@ -169,6 +189,8 @@ class RiskGuardMetrics:
             "score_p50": float(np.nanpercentile(scores_arr, 50)),
             "score_p90": float(np.nanpercentile(scores_arr, 90)),
             "score_p95": float(np.nanpercentile(scores_arr, 95)),
+            "feature_build_latency_mean_ms": float(np.mean(self.feature_build_latencies)) if self.feature_build_latencies else 0.0,
+            "feature_build_latency_p95_ms": float(np.percentile(self.feature_build_latencies, 95)) if self.feature_build_latencies else 0.0,
             "elapsed_seconds": elapsed,
             "per_symbol": self.per_symbol,
             "per_side": self.per_side,
