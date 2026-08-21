@@ -653,6 +653,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--validate", action="store_true", help="strictly validate after synchronization")
     parser.add_argument("--validate-only", action="store_true", help="validate local parquet without network access")
     parser.add_argument("--status", action="store_true", help="print diagnostics without modifying data")
+    parser.add_argument(
+        "--decision-at",
+        help="explicit UTC five-minute target; defaults to current cycle",
+    )
     return parser
 
 
@@ -662,10 +666,17 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     args = _parser().parse_args(argv)
-    target = target_decision_at()
+    target = target_decision_at(
+        pd.Timestamp(args.decision_at).to_pydatetime() if args.decision_at else None
+    )
     if args.status:
         result = read_status(args.durable_root)
     elif args.validate_only:
+        if not args.decision_at:
+            status = read_status(args.durable_root)
+            completed_target = status.get("target_decision_at")
+            if completed_target:
+                target = target_decision_at(pd.Timestamp(completed_target).to_pydatetime())
         result = validate_bootstrap(args.seed_root, args.durable_root, target)
     else:
         with process_lock(args.durable_root):

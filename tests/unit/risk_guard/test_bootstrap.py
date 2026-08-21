@@ -186,6 +186,26 @@ def test_validate_only_never_constructs_network_clients(tmp_path, monkeypatch, c
     assert '"ready": false' in capsys.readouterr().out
 
 
+def test_validate_only_uses_completed_manifest_target(tmp_path, monkeypatch):
+    durable = tmp_path / "durable"
+    durable.mkdir()
+    bootstrap._atomic_json(
+        durable / bootstrap.MANIFEST_NAME,
+        {"ready": True, "target_decision_at": "2026-01-01T00:05:00+00:00"},
+    )
+    seen = []
+    monkeypatch.setattr(
+        bootstrap,
+        "validate_bootstrap",
+        lambda _seed, _durable, target: seen.append(target) or {"ready": True},
+    )
+    assert bootstrap.main([
+        "--validate-only", "--seed-root", str(tmp_path / "seed"),
+        "--durable-root", str(durable),
+    ]) == 0
+    assert seen == [datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc)]
+
+
 def test_status_does_not_modify_root(tmp_path, capsys):
     root = tmp_path / "absent"
     assert bootstrap.main(["--status", "--durable-root", str(root)]) == 1

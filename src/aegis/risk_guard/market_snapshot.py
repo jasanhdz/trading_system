@@ -149,6 +149,7 @@ class RollingCandleCache:
             else:
                 updated = self._fetch_full(symbol, decision_at, required_minutes)
 
+        updated = _canonical_runtime_candles(updated)
         _assert_causal(updated, decision_at)
         with self._lock:
             self._cache[symbol] = updated
@@ -220,24 +221,11 @@ class RollingCandleCache:
         checked = pd.DataFrame()
         for index, part in enumerate(parts):
             checked, _ = merge_candles(checked, part, f"cache-load:{symbol}:{index}")
-        combined = (
-            pd.concat(parts, ignore_index=True)
-            .drop_duplicates(subset=["open_time_ms"], keep="last")
-            .sort_values("open_time_ms")
-            .reset_index(drop=True)
+        checked["open_time"] = pd.to_datetime(
+            checked["open_time_ms"], unit="ms", utc=True
         )
-        if "open_time" not in combined:
-            combined["open_time"] = pd.to_datetime(
-                combined["open_time_ms"], unit="ms", utc=True
-            )
-        if "close_time" not in combined:
-            if "close_time_ms" in combined:
-                combined["close_time"] = pd.to_datetime(
-                    combined["close_time_ms"], unit="ms", utc=True
-                )
-            else:
-                combined["close_time"] = combined["open_time"] + pd.Timedelta(minutes=1)
-        return combined
+        checked["close_time"] = checked["open_time"] + pd.Timedelta(minutes=1)
+        return checked
 
     def _persist_delta(self, symbol: str, candles: pd.DataFrame) -> None:
         if self._durable_root is None or candles.empty:
@@ -445,6 +433,19 @@ def _normalize_decision_at(decision_at: datetime) -> datetime:
     if decision_at.tzinfo is None:
         return decision_at.replace(tzinfo=timezone.utc)
     return decision_at.astimezone(timezone.utc)
+
+
+def _canonical_runtime_candles(candles: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "open_time_ms", "open", "high", "low", "close", "volume",
+        "taker_buy_volume",
+    ]
+    result = candles.loc[:, columns].copy()
+    result["open_time"] = pd.to_datetime(
+        result["open_time_ms"], unit="ms", utc=True
+    )
+    result["close_time"] = result["open_time"] + pd.Timedelta(minutes=1)
+    return result
 
 
 def _trim_causal(
