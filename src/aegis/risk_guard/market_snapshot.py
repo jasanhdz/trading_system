@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -43,6 +44,8 @@ BINANCE_FUTURES_REST = "https://fapi.binance.com"
 KLINE_ENDPOINT = "/fapi/v1/klines"
 REQUEST_TIMEOUT_S = 10
 INTER_REQUEST_GAP_MS = 50
+REQUEST_MAX_ATTEMPTS = 4
+REQUEST_BACKOFF_S = 1.0
 
 MAX_INDICATOR_WARMUP_BARS = 99
 
@@ -218,9 +221,23 @@ class RollingCandleCache:
             return None
         from .bootstrap import merge_candles
 
-        checked = pd.DataFrame()
-        for index, part in enumerate(parts):
-            checked, _ = merge_candles(checked, part, f"cache-load:{symbol}:{index}")
+        disjoint = all(
+            not part["open_time_ms"].duplicated().any()
+            and (
+                index == 0
+                or parts[index - 1]["open_time_ms"].max()
+                < part["open_time_ms"].min()
+            )
+            for index, part in enumerate(parts)
+        )
+        if disjoint:
+            checked, _ = merge_candles(
+                pd.DataFrame(), pd.concat(parts, ignore_index=True), f"cache-load:{symbol}"
+            )
+        else:
+            checked = pd.DataFrame()
+            for index, part in enumerate(parts):
+                checked, _ = merge_candles(checked, part, f"cache-load:{symbol}:{index}")
         checked["open_time"] = pd.to_datetime(
             checked["open_time_ms"], unit="ms", utc=True
         )
@@ -312,8 +329,42 @@ def _fetch_klines_page(
     if end_time_ms is not None:
         params["endTime"] = end_time_ms
 
-    resp = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
-    resp.raise_for_status()
+    resp: requests.Response | None = None
+    for attempt in range(REQUEST_MAX_ATTEMPTS):
+        try:
+            resp = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt + 1 == REQUEST_MAX_ATTEMPTS:
+                raise
+            delay = REQUEST_BACKOFF_S * (2**attempt)
+            logger.warning(
+                "Binance kline request failed for %s; retrying in %.1fs (%d/%d)",
+                symbol, delay, attempt + 1, REQUEST_MAX_ATTEMPTS,
+            )
+            time.sleep(delay)
+            continue
+
+        retryable = resp.status_code in (418, 429) or resp.status_code >= 500
+        if not retryable or attempt + 1 == REQUEST_MAX_ATTEMPTS:
+            resp.raise_for_status()
+            break
+        retry_after = resp.headers.get("Retry-After")
+        try:
+            delay = (
+                float(retry_after)
+                if retry_after is not None
+                else REQUEST_BACKOFF_S * (2**attempt)
+            )
+        except ValueError:
+            delay = REQUEST_BACKOFF_S * (2**attempt)
+        logger.warning(
+            "Binance kline request returned %d for %s; retrying in %.1fs (%d/%d)",
+            resp.status_code, symbol, delay, attempt + 1, REQUEST_MAX_ATTEMPTS,
+        )
+        time.sleep(max(0.0, delay))
+
+    if resp is None:  # pragma: no cover - loop always returns or raises
+        raise RuntimeError(f"BINANCE_REQUEST_EXHAUSTED:{symbol}")
     raw = resp.json()
 
     if not raw:
@@ -589,14 +640,16 @@ def _compute_snapshot_hash(
         "taker_buy_volume",
     ]
     for symbol in sorted(candles_by_symbol.keys()):
-        df = candles_by_symbol[symbol].sort_values("open_time_ms")
+        df = candles_by_symbol[symbol]
+        if not df["open_time_ms"].is_monotonic_increasing:
+            df = df.sort_values("open_time_ms")
         _assert_causal(df, decision_at)
         digest.update(f"symbol={symbol}\n".encode())
-        canonical = df[columns].to_csv(
-            index=False,
-            header=False,
-            float_format="%.17g",
-            lineterminator="\n",
-        )
-        digest.update(canonical.encode())
+        for column in columns:
+            dtype = "<i8" if column == "open_time_ms" else "<f8"
+            values = np.ascontiguousarray(
+                pd.to_numeric(df[column], errors="raise").to_numpy(dtype=dtype)
+            )
+            digest.update(f"{column}:{dtype}:{len(values)}\n".encode())
+            digest.update(values.tobytes())
     return digest.hexdigest()

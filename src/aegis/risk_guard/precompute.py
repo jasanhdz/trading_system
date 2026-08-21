@@ -489,8 +489,12 @@ class E4PrecomputeService:
         return {
             "available": self._guard is not None and self._guard.is_available(),
             "cycle_count": self._cycle_count,
+            "last_decision_at": last.decision_at.isoformat() if last else None,
             "last_cycle_at": last.cycle_completed_at.isoformat() if last else None,
             "last_cycle_latency_ms": last.cycle_latency_ms if last else None,
+            "last_snapshot_fetch_ms": last.snapshot_fetch_ms if last else None,
+            "last_feature_build_ms": last.feature_build_latency_ms if last else None,
+            "last_score_ms": last.score_latency_ms if last else None,
             "last_cycle_error": last.error if last else None,
             "last_attempt_at": attempt.cycle_completed_at.isoformat() if attempt else None,
             "last_attempt_error": attempt.error if attempt else None,

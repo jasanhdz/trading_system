@@ -465,10 +465,11 @@ class FeatureBridge:
         normalized_decision_at = decision_ts
         anchors = build_anchors(decision_at)
 
-        # Build all symbol panels
+        # Build all symbol panels.
         panels = []
         all_families: dict[str, str] = {}
-        for symbol, candles in candles_by_symbol.items():
+        for symbol in sorted(provided):
+            candles = candles_by_symbol[symbol]
             validate_candles(candles, symbol)
             panel, families = build_neutral_symbol_panel(
                 candles, anchors, timeframes=FROZEN_E4_TIMEFROZEN

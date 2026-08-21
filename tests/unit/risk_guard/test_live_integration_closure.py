@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import pytest
+import requests
 
 from aegis.live_api import _build_e4_config, create_app
 from aegis.risk_guard.domain import FROZEN_TAIL_RISK_THRESHOLD
@@ -20,6 +21,7 @@ from aegis.risk_guard.market_snapshot import (
     RollingCandleCache,
     WARMUP_MINUTES,
     _compute_snapshot_hash,
+    _fetch_klines_page,
     fetch_snapshot,
 )
 from aegis.risk_guard.observability import E4EvidenceRecorder
@@ -96,6 +98,38 @@ def test_rolling_cache_cold_and_incremental_do_not_deadlock(monkeypatch):
     assert int(result["open_time_ms"].iloc[-1]) == int(next_cycle.timestamp() * 1000) - 60_000
 
 
+def test_kline_page_retries_transient_timeout(monkeypatch):
+    calls = 0
+    sleeps = []
+
+    class Response:
+        status_code = 200
+        headers = {}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[
+                1_700_000_000_000, "1", "2", "0.5", "1.5", "10",
+                1_700_000_059_999, "15", 2, "6", "9", "0",
+            ]]
+
+    def get(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise requests.ReadTimeout("transient")
+        return Response()
+
+    monkeypatch.setattr("aegis.risk_guard.market_snapshot.requests.get", get)
+    monkeypatch.setattr("aegis.risk_guard.market_snapshot.time.sleep", sleeps.append)
+    result = _fetch_klines_page("BTCUSDT")
+    assert calls == 2
+    assert sleeps == [1.0]
+    assert len(result) == 1
+
+
 def test_rolling_cache_reuses_seed_and_persisted_increment(monkeypatch, tmp_path):
     seed_root = tmp_path / "seed"
     durable_root = tmp_path / "durable"
@@ -124,6 +158,21 @@ def test_rolling_cache_reuses_seed_and_persisted_increment(monkeypatch, tmp_path
     restored = restarted.get_or_fetch("BTCUSDT", decision_at, 3)
     assert calls == 1
     pd.testing.assert_frame_equal(restored, result)
+
+
+def test_rolling_cache_accepts_identical_overlap_between_parts(tmp_path):
+    seed_root = tmp_path / "seed"
+    durable_root = tmp_path / "durable"
+    symbol_root = durable_root / "BTCUSDT"
+    seed_root.mkdir()
+    symbol_root.mkdir(parents=True)
+    candles = _small_candles(DECISION_AT - timedelta(minutes=3), 3)
+    candles.iloc[:2].to_parquet(seed_root / "BTCUSDT_1m.parquet", index=False)
+    candles.iloc[1:].to_parquet(symbol_root / "2025-01.parquet", index=False)
+
+    cache = RollingCandleCache(seed_root=seed_root, durable_root=durable_root)
+    restored = cache.get_or_fetch("BTCUSDT", DECISION_AT, 3)
+    assert restored["open_time_ms"].tolist() == candles["open_time_ms"].tolist()
 
 
 def test_snapshot_hash_covers_old_history_timestamp_and_taker_volume():
