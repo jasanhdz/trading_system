@@ -117,6 +117,12 @@ def test_zero_volume_candle_is_valid():
     bootstrap._validate_frame(frame, "BTCUSDT")
 
 
+def test_finite_taker_volume_above_total_preserves_frozen_source():
+    frame = candles(0, 1)
+    frame.loc[0, "taker_buy_volume"] = frame.loc[0, "volume"] + 1.0
+    bootstrap._validate_frame(frame, "SUIUSDT")
+
+
 def test_atomic_write_cleans_temp_on_failure(tmp_path, monkeypatch):
     def fail(*_args, **_kwargs):
         raise RuntimeError("write failed")

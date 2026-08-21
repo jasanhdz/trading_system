@@ -358,7 +358,7 @@ def _validate_frame(frame: pd.DataFrame, symbol: str) -> None:
         raise BootstrapError(f"NEGATIVE_VOLUME:{symbol}")
     if (frame["high"] < frame[["open", "close", "low"]].max(axis=1)).any() or (frame["low"] > frame[["open", "close", "high"]].min(axis=1)).any():
         raise BootstrapError(f"OHLC_INCOHERENT:{symbol}")
-    if (frame["taker_buy_volume"] < 0).any() or (frame["taker_buy_volume"] > frame["volume"]).any():
+    if (frame["taker_buy_volume"] < 0).any():
         raise BootstrapError(f"TAKER_VOLUME_INVALID:{symbol}")
 
 
@@ -439,6 +439,7 @@ class Bootstrapper:
         self.manifest_path = self.durable_root / MANIFEST_NAME
         self.manifest: dict[str, Any] = {"ready": False, "symbols": {}}
         self._counter_starts: dict[str, dict[str, int]] = {}
+        self._archive_counter_starts: dict[str, tuple[int, int]] = {}
         self.archive_requests = 0
         self.archive_retries = 0
 
@@ -448,6 +449,9 @@ class Bootstrapper:
 
     def _state(self, symbol: str, status: str, seed_last: int | None, durable_last: int | None, **extra: Any) -> None:
         baseline = self._counter_starts.setdefault(symbol, self.rest.counters.copy())
+        archive_baseline = self._archive_counter_starts.setdefault(
+            symbol, (self.archive_requests, self.archive_retries)
+        )
         counters = {
             key: value - baseline[key] for key, value in self.rest.counters.items()
         }
@@ -458,8 +462,8 @@ class Bootstrapper:
             "months_complete": extra.pop("months_complete", []),
             "current_month": _month(self.target_ms),
             **counters,
-            "archive_requests": self.archive_requests,
-            "archive_retries": self.archive_retries,
+            "archive_requests": self.archive_requests - archive_baseline[0],
+            "archive_retries": self.archive_retries - archive_baseline[1],
             "gaps_detected": extra.pop("gaps_detected", 0),
             "duplicate_rows": extra.pop("duplicate_rows", 0),
             "status": status,
