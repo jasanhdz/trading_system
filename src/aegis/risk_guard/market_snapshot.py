@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import requests
 
 from .feature_bridge import (
@@ -75,6 +76,10 @@ def _derive_minimum_warmup_minutes() -> int:
 WARMUP_MINUTES = _derive_minimum_warmup_minutes()
 BINANCE_LIMIT_PER_REQUEST = 1500
 PAGES_PER_SYMBOL = -(-WARMUP_MINUTES // BINANCE_LIMIT_PER_REQUEST)
+_PERSISTED_CANDLE_COLUMNS = [
+    "open_time_ms", "open", "high", "low", "close", "volume",
+    "taker_buy_volume",
+]
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_HISTORY_SEED_ROOT = Path(os.environ.get(
     "E4_HISTORY_SEED_ROOT",
@@ -84,6 +89,59 @@ DEFAULT_DURABLE_CACHE_ROOT = Path(os.environ.get(
     "E4_DURABLE_CACHE_ROOT",
     REPO_ROOT / "data/e4_live_candle_cache",
 ))
+
+
+def _parquet_time_bounds(path: Path) -> tuple[int, int] | None:
+    """Read timestamp bounds from Parquet metadata without loading candle rows."""
+    parquet = pq.ParquetFile(path)
+    column_index = parquet.schema_arrow.get_field_index("open_time_ms")
+    if column_index < 0:
+        return None
+    minima: list[int] = []
+    maxima: list[int] = []
+    for index in range(parquet.metadata.num_row_groups):
+        statistics = parquet.metadata.row_group(index).column(column_index).statistics
+        if statistics is None or not statistics.has_min_max:
+            return None
+        minima.append(int(statistics.min))
+        maxima.append(int(statistics.max))
+    if not minima:
+        return None
+    return min(minima), max(maxima)
+
+
+def _read_parquet_tail_before(path: Path, decision_ms: int) -> pd.DataFrame:
+    """Read only the row group(s) that can contain the latest causal candle."""
+    parquet = pq.ParquetFile(path)
+    column_index = parquet.schema_arrow.get_field_index("open_time_ms")
+    candidates: list[tuple[int, int]] = []
+    if column_index >= 0:
+        for index in range(parquet.metadata.num_row_groups):
+            statistics = parquet.metadata.row_group(index).column(column_index).statistics
+            if statistics is None or not statistics.has_min_max:
+                candidates = []
+                break
+            minimum = int(statistics.min)
+            if minimum < decision_ms:
+                candidates.append((min(int(statistics.max), decision_ms - 1), index))
+    if candidates:
+        best_upper_bound = max(bound for bound, _index in candidates)
+        row_groups = [
+            index for bound, index in candidates if bound == best_upper_bound
+        ]
+        frame = parquet.read_row_groups(
+            row_groups, columns=_PERSISTED_CANDLE_COLUMNS
+        ).to_pandas()
+    else:
+        # Statistics-free legacy files cannot support safe row-group pruning.
+        frame = pd.read_parquet(
+            path,
+            columns=_PERSISTED_CANDLE_COLUMNS,
+            filters=[("open_time_ms", "<", decision_ms)],
+        )
+    return frame.loc[frame["open_time_ms"] < decision_ms].nlargest(
+        1, "open_time_ms"
+    )
 
 
 @dataclass(frozen=True)
@@ -134,7 +192,9 @@ class RollingCandleCache:
             cached_copy = self._cache.get(symbol)
 
         if cached_copy is None:
-            cached_copy = self._load_durable_history(symbol)
+            cached_copy = self._load_durable_history(
+                symbol, decision_at, required_minutes
+            )
 
         if cached_copy is None or cached_copy.empty:
             if self._require_history:
@@ -144,7 +204,7 @@ class RollingCandleCache:
             causal_cached = _filter_through_decision(cached_copy, decision_at)
             trimmed_cached = _trim_causal(causal_cached, decision_at, required_minutes)
             if _has_required_coverage(trimmed_cached, decision_at, required_minutes):
-                updated = causal_cached
+                updated = trimmed_cached
             elif not causal_cached.empty:
                 updated = self._fetch_incremental(
                     symbol, causal_cached, decision_at, required_minutes
@@ -152,7 +212,13 @@ class RollingCandleCache:
             else:
                 updated = self._fetch_full(symbol, decision_at, required_minutes)
 
-        updated = _canonical_runtime_candles(updated)
+        updated = _canonical_runtime_candles(
+            _trim_causal(updated, decision_at, required_minutes)
+        )
+        if not _has_required_coverage(updated, decision_at, required_minutes):
+            raise ValueError(
+                f"INSUFFICIENT_WARMUP:{symbol}:{len(updated)}/{required_minutes}"
+            )
         _assert_causal(updated, decision_at)
         with self._lock:
             self._cache[symbol] = updated
@@ -170,7 +236,10 @@ class RollingCandleCache:
         decision_ms = int(decision_at.timestamp() * 1000)
         start_time_ms = int(cached["open_time_ms"].max()) + 60_000
         if start_time_ms >= decision_ms:
-            return _filter_through_decision(cached, decision_at)
+            recent = _trim_causal(cached, decision_at, required_minutes)
+            if _has_required_coverage(recent, decision_at, required_minutes):
+                return recent
+            return self._fetch_full(symbol, decision_at, required_minutes)
 
         new_df = _fetch_klines_forward(
             symbol=symbol,
@@ -185,7 +254,7 @@ class RollingCandleCache:
         recent = _trim_causal(causal, decision_at, required_minutes)
         if not _has_required_coverage(recent, decision_at, required_minutes):
             return self._fetch_full(symbol, decision_at, required_minutes)
-        return causal
+        return recent
 
     def _fetch_full(
         self,
@@ -207,37 +276,69 @@ class RollingCandleCache:
             )
         return causal
 
-    def _load_durable_history(self, symbol: str) -> pd.DataFrame | None:
-        parts: list[pd.DataFrame] = []
+    def _load_durable_history(
+        self,
+        symbol: str,
+        decision_at: datetime,
+        required_minutes: int,
+    ) -> pd.DataFrame | None:
+        paths: list[Path] = []
         if self._seed_root is not None:
             seed = self._seed_root / f"{symbol}_1m.parquet"
             if seed.exists():
-                parts.append(pd.read_parquet(seed))
+                paths.append(seed)
         if self._durable_root is not None:
             symbol_root = self._durable_root / symbol
             if symbol_root.exists():
-                parts.extend(pd.read_parquet(path) for path in sorted(symbol_root.glob("*.parquet")))
+                paths.extend(sorted(symbol_root.glob("*.parquet")))
+        if not paths:
+            return None
+
+        decision_ms = int(decision_at.timestamp() * 1000)
+        cutoff_ms = decision_ms - required_minutes * 60_000
+        parts: list[pd.DataFrame] = []
+        older_paths: list[tuple[int | None, Path]] = []
+        for path in paths:
+            bounds = _parquet_time_bounds(path)
+            if bounds is None or (bounds[1] >= cutoff_ms and bounds[0] < decision_ms):
+                part = pd.read_parquet(
+                    path,
+                    columns=_PERSISTED_CANDLE_COLUMNS,
+                    filters=[
+                        ("open_time_ms", ">=", cutoff_ms),
+                        ("open_time_ms", "<", decision_ms),
+                    ],
+                )
+                if not part.empty:
+                    parts.append(part)
+            if bounds is None or bounds[0] < decision_ms:
+                older_paths.append((None if bounds is None else bounds[1], path))
+
+        # During an outage the persisted tail can predate the E4 window. Load one
+        # row so forward reconciliation still starts after the durable candle.
+        if not parts:
+            known_maximum = max(
+                (maximum for maximum, _path in older_paths if maximum is not None),
+                default=None,
+            )
+            tail_paths = [
+                path
+                for maximum, path in older_paths
+                if maximum is None or maximum == known_maximum
+            ]
+            for path in tail_paths:
+                tail = _read_parquet_tail_before(path, decision_ms)
+                if not tail.empty:
+                    parts.append(tail)
         if not parts:
             return None
         from .bootstrap import merge_candles
 
-        disjoint = all(
-            not part["open_time_ms"].duplicated().any()
-            and (
-                index == 0
-                or parts[index - 1]["open_time_ms"].max()
-                < part["open_time_ms"].min()
-            )
-            for index, part in enumerate(parts)
-        )
-        if disjoint:
+        checked = pd.DataFrame()
+        for index, part in enumerate(parts):
             checked, _ = merge_candles(
-                pd.DataFrame(), pd.concat(parts, ignore_index=True), f"cache-load:{symbol}"
+                checked, part, f"cache-load:{symbol}:{index}"
             )
-        else:
-            checked = pd.DataFrame()
-            for index, part in enumerate(parts):
-                checked, _ = merge_candles(checked, part, f"cache-load:{symbol}:{index}")
         checked["open_time"] = pd.to_datetime(
             checked["open_time_ms"], unit="ms", utc=True
         )
@@ -487,11 +588,7 @@ def _normalize_decision_at(decision_at: datetime) -> datetime:
 
 
 def _canonical_runtime_candles(candles: pd.DataFrame) -> pd.DataFrame:
-    columns = [
-        "open_time_ms", "open", "high", "low", "close", "volume",
-        "taker_buy_volume",
-    ]
-    result = candles.loc[:, columns].copy()
+    result = candles.loc[:, _PERSISTED_CANDLE_COLUMNS].copy()
     result["open_time"] = pd.to_datetime(
         result["open_time_ms"], unit="ms", utc=True
     )
@@ -532,8 +629,16 @@ def _has_required_coverage(
 ) -> bool:
     if len(candles) < required_minutes:
         return False
+    expected_first_open_ms = int(decision_at.timestamp() * 1000) - required_minutes * 60_000
     expected_last_open_ms = int(decision_at.timestamp() * 1000) - 60_000
-    return int(candles["open_time_ms"].iloc[-1]) == expected_last_open_ms
+    actual = candles["open_time_ms"].to_numpy(dtype=np.int64)
+    expected = np.arange(
+        expected_first_open_ms,
+        expected_last_open_ms + 60_000,
+        60_000,
+        dtype=np.int64,
+    )
+    return np.array_equal(actual, expected)
 
 
 def _assert_causal(candles: pd.DataFrame, decision_at: datetime) -> None:

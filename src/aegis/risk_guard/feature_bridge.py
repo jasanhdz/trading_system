@@ -301,6 +301,7 @@ class FeatureBridge:
             panel, families = build_neutral_symbol_panel(
                 candles, anchors, timeframes=FROZEN_E4_TIMEFROZEN
             )
+            panel = panel.copy()
             panel["symbol"] = symbol
             panels.append(panel)
             all_families.update(families)
@@ -474,6 +475,7 @@ class FeatureBridge:
             panel, families = build_neutral_symbol_panel(
                 candles, anchors, timeframes=FROZEN_E4_TIMEFROZEN
             )
+            panel = panel.copy()
             panel["symbol"] = symbol
             panels.append(panel)
             all_families.update(families)

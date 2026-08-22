@@ -6,6 +6,7 @@ module.exports = {
       script: 'scripts/run_aegis_shadow_cohort_1.sh',
       interpreter: '/bin/bash',
       autorestart: true,
+      stop_exit_codes: [0],
       restart_delay: 1000,
       exp_backoff_restart_delay: 1000,
       max_restarts: 5,

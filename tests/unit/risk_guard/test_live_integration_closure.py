@@ -45,7 +45,7 @@ def _candles(symbol_index: int, minutes: int = WARMUP_MINUTES, future: int = 5) 
     volume = 1_000.0 + (index % 53) * (2.0 + symbol_index / 10.0)
     taker = volume * (0.45 + (index % 11) / 100.0)
     return pd.DataFrame({
-        "open_time_ms": (open_time.astype("int64") // 1_000_000).astype("int64"),
+        "open_time_ms": open_time.as_unit("ms").astype("int64"),
         "open": open_,
         "high": high,
         "low": low,
@@ -62,7 +62,7 @@ def _small_candles(start: datetime, count: int) -> pd.DataFrame:
     open_time = pd.date_range(start, periods=count, freq="1min", tz="UTC")
     values = np.arange(count, dtype=float) + 1.0
     return pd.DataFrame({
-        "open_time_ms": (open_time.astype("int64") // 1_000_000).astype("int64"),
+        "open_time_ms": open_time.as_unit("ms").astype("int64"),
         "open": values,
         "high": values + 1,
         "low": values - 1,
@@ -151,13 +151,102 @@ def test_rolling_cache_reuses_seed_and_persisted_increment(monkeypatch, tmp_path
     decision_at = DECISION_AT + timedelta(minutes=5)
     result = cache.get_or_fetch("BTCUSDT", decision_at, 3)
     assert calls == 1
-    assert len(result) == 8
+    assert len(result) == 3
     assert list((durable_root / "BTCUSDT").glob("*.parquet"))
 
     restarted = RollingCandleCache(seed_root=seed_root, durable_root=durable_root)
     restored = restarted.get_or_fetch("BTCUSDT", decision_at, 3)
     assert calls == 1
     pd.testing.assert_frame_equal(restored, result)
+
+
+def test_startup_reads_and_retains_only_disjoint_causal_window(monkeypatch, tmp_path):
+    seed_root = tmp_path / "seed"
+    symbol_root = tmp_path / "durable" / "BTCUSDT"
+    seed_root.mkdir()
+    symbol_root.mkdir(parents=True)
+    seed = _small_candles(DECISION_AT - timedelta(minutes=50_010), 50_005)
+    durable = _small_candles(DECISION_AT - timedelta(minutes=5), 6)
+    seed.to_parquet(seed_root / "BTCUSDT_1m.parquet", index=False)
+    durable.to_parquet(symbol_root / "2026-08.parquet", index=False)
+
+    original_read = pd.read_parquet
+    loaded_rows = []
+
+    def bounded_read(*args, **kwargs):
+        result = original_read(*args, **kwargs)
+        loaded_rows.append(len(result))
+        return result
+
+    monkeypatch.setattr(pd, "read_parquet", bounded_read)
+    cache = RollingCandleCache(seed_root=seed_root, durable_root=tmp_path / "durable")
+    monkeypatch.setattr(
+        "aegis.risk_guard.market_snapshot._fetch_klines_forward",
+        lambda **_kwargs: pytest.fail("complete persisted coverage must not fetch Binance"),
+    )
+    result = cache.get_or_fetch("BTCUSDT", DECISION_AT, 10)
+
+    assert loaded_rows == [5, 5]
+    assert len(result) == cache.stats()["candle_counts"]["BTCUSDT"] == 10
+    assert result["open_time_ms"].is_unique
+    assert int(result["open_time_ms"].iloc[0]) == int(
+        (DECISION_AT - timedelta(minutes=10)).timestamp() * 1000
+    )
+    assert result["close_time"].max() == pd.Timestamp(DECISION_AT)
+    assert int(DECISION_AT.timestamp() * 1000) not in result["open_time_ms"].tolist()
+
+
+def test_outage_tail_fetches_after_latest_persisted_and_persists_gap(monkeypatch, tmp_path):
+    seed_root = tmp_path / "seed"
+    durable_root = tmp_path / "durable"
+    seed_root.mkdir()
+    seed = _small_candles(DECISION_AT - timedelta(minutes=10), 2)
+    seed.to_parquet(seed_root / "BTCUSDT_1m.parquet", index=False)
+    expected_start_ms = int(seed["open_time_ms"].max()) + 60_000
+    fetched = _small_candles(
+        datetime.fromtimestamp(expected_start_ms / 1000, tz=timezone.utc), 8
+    )
+    calls = []
+
+    def fetch_forward(**kwargs):
+        calls.append(kwargs)
+        return fetched.copy()
+
+    monkeypatch.setattr(
+        "aegis.risk_guard.market_snapshot._fetch_klines_forward", fetch_forward
+    )
+    cache = RollingCandleCache(seed_root=seed_root, durable_root=durable_root)
+    result = cache.get_or_fetch("BTCUSDT", DECISION_AT, 3)
+
+    assert calls[0]["start_time_ms"] == expected_start_ms
+    assert calls[0]["end_time_ms"] == int(DECISION_AT.timestamp() * 1000) - 1
+    persisted = pd.read_parquet(durable_root / "BTCUSDT" / "2026-08.parquet")
+    assert persisted["open_time_ms"].tolist() == fetched["open_time_ms"].tolist()
+    assert len(result) == cache.stats()["candle_counts"]["BTCUSDT"] == 3
+    assert result["close_time"].max() == pd.Timestamp(DECISION_AT)
+
+
+def test_runtime_gap_is_not_accepted_as_coverage(monkeypatch, tmp_path):
+    seed_root = tmp_path / "seed"
+    seed_root.mkdir()
+    complete = _small_candles(DECISION_AT - timedelta(minutes=3), 3)
+    gapped = complete.drop(index=1).reset_index(drop=True)
+    gapped.to_parquet(seed_root / "BTCUSDT_1m.parquet", index=False)
+    full_fetches = []
+
+    def fetch_full(*_args, **_kwargs):
+        full_fetches.append(True)
+        return complete.copy()
+
+    monkeypatch.setattr(
+        "aegis.risk_guard.market_snapshot._fetch_klines_paginated", fetch_full
+    )
+    cache = RollingCandleCache(seed_root=seed_root)
+    result = cache.get_or_fetch("BTCUSDT", DECISION_AT, 3)
+
+    assert full_fetches == [True]
+    assert result["open_time_ms"].tolist() == complete["open_time_ms"].tolist()
+    assert len(result) == cache.stats()["candle_counts"]["BTCUSDT"] == 3
 
 
 def test_rolling_cache_accepts_identical_overlap_between_parts(tmp_path):
