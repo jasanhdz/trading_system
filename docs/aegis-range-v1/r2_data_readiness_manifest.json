@@ -1,0 +1,124 @@
+{
+  "schema_version": "aegis-range-r2-data-readiness-manifest-v1",
+  "created_date": "2026-08-24",
+  "status": "AEGIS_RANGE_R2_DATA_READINESS_BLOCKED_BY_SOURCE_INTEGRITY",
+  "hash_algorithm": "sha256",
+  "repository": {
+    "path": "/home/jasan/Develop/trading_system",
+    "branch": "work/entry-quality-evidence-20260726",
+    "head_base": "b6907f30f8488d75658ccf5c3842e1a8d5691dbe",
+    "typescript_gitlink_mismatch_preserved": true
+  },
+  "frozen_lineage": {
+    "r1_implementation_manifest": {
+      "path": "docs/aegis-range-v1/r1_implementation_manifest.json",
+      "sha256": "5b93160123aa7a8059e92ce256df135e7bdfe71ae055bc195ce6854a1c16ac81",
+      "verified_files": 40,
+      "mismatches": 0
+    },
+    "m1a_archive_manifest": {
+      "path": "data/market_event_fast_track_m1a/archive_manifest.jsonl",
+      "sha256": "ce638d06f20f298f5be74c6b1c7648ad3df5abb1006b3861088302bd5da9f095"
+    },
+    "m1b_archive_manifest": {
+      "path": "data/market_event_economic_path_m1b/archive_manifest.jsonl",
+      "sha256": "1cc559055937f3d2432f0559a6badda6865495fdfd26f52f3f02c0943836f92b"
+    }
+  },
+  "source_integrity": {
+    "interval_semantics": "half_open",
+    "start_inclusive": "2024-01-01T00:00:00Z",
+    "end_exclusive": "2026-08-01T00:00:00Z",
+    "symbols": 11,
+    "ohlcv_archives": {"expected": 341, "verified": 341, "absent": 0, "conflicts": 0},
+    "fundingRate_archives": {"expected": 341, "verified": 341, "absent": 0, "conflicts": 0},
+    "markPriceKlines_archives": {"expected": 341, "verified": 341, "absent": 0, "conflicts": 0},
+    "checks": ["sha256", "byte_size", "zip_crc", "single_declared_csv_member"]
+  },
+  "derived_dataset": {
+    "manifest_path": "sandbox/aegis_range_strategy_v1/artifacts/r2_data_readiness/derived_dataset_manifest.json",
+    "manifest_sha256": "55605c09e3f3de0d3f4d8b335beeac0eab4b0728a0f267512a6429ee8e2186b0",
+    "logical_sha256": "00ff950ae0c2605a941172a52b83a460f89b195093a2f9c444fd4050a27e24c1",
+    "artifacts": 682,
+    "ohlcv_5m_rows": 2987424,
+    "ohlcv_segments": 11,
+    "ohlcv_integrity_gap_blocks": 0,
+    "funding_events_total": 31108,
+    "funding_events_mapped": 31075,
+    "funding_events_missing_mark_price": 33,
+    "mark_price_missing_minutes": 15862,
+    "status": "BLOCKED_NOT_ADMISSIBLE_FOR_R2_BACKTEST"
+  },
+  "source_integrity_blocker": {
+    "uniform_across_symbols": true,
+    "symbols_affected": 11,
+    "non_funding_gap": {
+      "start_inclusive": "2024-08-12T10:02:00Z",
+      "end_inclusive": "2024-08-12T10:03:00Z",
+      "minutes_per_symbol": 2
+    },
+    "funding_critical_gap": {
+      "start_inclusive": "2026-06-29T00:00:00Z",
+      "end_inclusive": "2026-06-29T23:59:00Z",
+      "minutes_per_symbol": 1440,
+      "funding_events_missing_per_symbol": 3
+    },
+    "imputation_performed": false,
+    "substitute_source_used": false
+  },
+  "partition_guards": {
+    "TRAIN_ACCESS": false,
+    "CALIBRATION_ACCESS": false,
+    "VALIDATION_ACCESS": false,
+    "HOLDOUT_ACCESS": false,
+    "unknown_partition_policy": "FAIL_CLOSED"
+  },
+  "parity": {
+    "frozen_typescript_head": "bb034431e0ce05c8e0f978453c46dcff6efb981c",
+    "RegimeEngineV2.ts": "3726e28badfdba5acc81d87ccd3202fc43310a04d4b3cff2597f38acb2913134",
+    "RegimeEngineV2.types.ts": "3b3972153f7c977d50ec864a5d8a4c4b3d8d2e73822453eaed1a25391211d10c",
+    "RegimeEngineV2.test.ts": "80aa2619efdcb74fa8722f79ce62a01a4028bb213856f3a5b7fc0ea32e091cf1",
+    "synthetic_cases": 3,
+    "market_absent": true,
+    "candles_per_case": 160,
+    "timeframe": "5m",
+    "full_decision_exact": "PASS",
+    "published_numbers_6dp": "PASS",
+    "atr_binary64_roundtrip_without_epsilon": "PASS"
+  },
+  "implementation_files": {
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/readiness.py": "03389660bcc64d11c41eb087faa5cf5843ded878e98ddf52b503efb0cdec6611",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/regime_bridge.py": "9b2b37bda94251793035de0a8a09dc557c231d0a58f914e8be54db0c381d276d",
+    "sandbox/aegis_range_strategy_v1/scripts/regime_v2_bridge.cjs": "cf3d59083ec5b6f1a3c705d84fa885df0b3ca0e80a8291aedadec4ae8b4188c0",
+    "sandbox/aegis_range_strategy_v1/scripts/run_data_readiness.py": "f93b83ac22bd89c8c4abfa3faa2362a1054653df534453ced747193a3839f536",
+    "sandbox/aegis_range_strategy_v1/scripts/generate_regime_parity_fixture.py": "0340daedd33c51fc8126d2d98ab045a0fe877a4e561abebfb870a6c209773af1"
+  },
+  "test_and_evidence_files": {
+    "sandbox/aegis_range_strategy_v1/tests/test_readiness.py": "4916360987da87850bdc09ed2741e8e42f43b8bd565385d660e6283e58eebe57",
+    "sandbox/aegis_range_strategy_v1/tests/test_regime_parity.py": "fb5dcf93b2a0f018bf7e33a0b604ca50810823c4c9bb6ed4ced0b56447e4bb55",
+    "sandbox/aegis_range_strategy_v1/fixtures/regime_parity_golden_v1.json": "ad6983a6da415d9b0cea6565616a24ecc38fe51b435ad6df82bd56f0c1374f92",
+    "docs/aegis-range-v1/AEGIS_RANGE_R2_DATA_READINESS_REPORT.md": "538835bbee6a6c54ee342574cace1dd05233746c5943ed21dff499ee9319ddc1"
+  },
+  "verification": {
+    "python_tests_total": 67,
+    "python_tests_passed": 67,
+    "typescript_tests_total": 17,
+    "typescript_tests_passed": 17,
+    "child_repo_clean": true
+  },
+  "phase_boundary": {
+    "range_engine_executed_on_market_data": false,
+    "backtest_executed": false,
+    "train_opened": false,
+    "calibration_opened": false,
+    "validation_opened": false,
+    "holdout_opened": false,
+    "economic_metrics_computed": false,
+    "candidate_selection_executed": false,
+    "production_modified": false,
+    "e4_modified": false,
+    "regime_engine_v2_modified": false,
+    "child_repo_modified": false
+  },
+  "self_hash_policy": "This manifest intentionally excludes its own hash; report it from final read-only verification."
+}

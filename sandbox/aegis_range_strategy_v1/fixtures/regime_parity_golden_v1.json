@@ -1,0 +1,267 @@
+{
+  "cases": [
+    {
+      "atr14_raw_hex": "0x1.bc6553c717733p-1",
+      "expected_decision": {
+        "confidence": 0.907218,
+        "indicators": {
+          "adx": 12.917886,
+          "adxSlope": 1.823492,
+          "atrPercentile": 0.75,
+          "bodySizePercentile": 0.73,
+          "bollingerWidthPercentile": 1,
+          "breakdownCloseBeyondRangePct": -0.007021,
+          "breakoutBodyConfirmation": 0.0625,
+          "breakoutTooExtendedFromEma25": 0,
+          "breakoutVolumePersistence": 1.044574,
+          "choppiness": 66.883398,
+          "closeLocation": 0.5,
+          "distanceFromEma25Pct": -0.002115,
+          "distanceFromEma99Pct": -0.002189,
+          "ema25": 99.911347,
+          "ema25Slope": -0.000133,
+          "ema7": 99.792108,
+          "ema7Slope": -0.002775,
+          "ema99": 99.918674,
+          "emaStackAge": 1,
+          "failedBreakoutCount": 0,
+          "failedBreakoutPressure": 0,
+          "lowerWickRatio": 0.4375,
+          "preBreakoutCompression": 0.166667,
+          "rangeBreakout": "NONE",
+          "shortAbsorptionRisk": 0,
+          "shortBreakdownQuality": 0.378568,
+          "shortContinuationScore": 0.064858,
+          "shortExtensionRisk": 0.052884,
+          "shortRetestScore": 0,
+          "shortSweepRisk": 0,
+          "shortVolumePersistence": 0.259432,
+          "structure": "MIXED",
+          "volumeRatio": 1.042254,
+          "volumeTrend": 0.0409,
+          "wickRatio": 0.5
+        },
+        "marketConfirmation": {
+          "state": "NEUTRAL"
+        },
+        "momentumEnvironment": "AVOID_MOMENTUM",
+        "reasons": [
+          "high_choppiness_low_trend_strength",
+          "environment_avoid_momentum"
+        ],
+        "scores": {
+          "chopRisk": 0.967218,
+          "exhaustionRisk": 0.5,
+          "marketConfirmationScore": 0.55,
+          "momentumQuality": 0.256372,
+          "transitionRisk": 0.5,
+          "trendStrength": 0.032782,
+          "volatilityRisk": 0.75
+        },
+        "symbol": "BTCUSDT",
+        "technicalDirection": "NONE",
+        "technicalRegime": "CHOP",
+        "timeframe": "5m",
+        "timestamp": "2030-01-01T13:15:00.000Z",
+        "transition": {
+          "reasons": [
+            "transition_risk_normal"
+          ],
+          "risk": "MODERATE"
+        }
+      },
+      "expected_snapshot": {
+        "adx": 12.917886,
+        "atr_percentile": 0.75,
+        "bollinger_width_percentile": 1.0,
+        "chop_risk": 0.967218,
+        "failed_breakout_count": 0,
+        "technical_regime": "CHOP",
+        "transition_risk": "MODERATE",
+        "volume_ratio": 1.042254
+      },
+      "name": "oscillating",
+      "origin": "2030-01-01T00:00:00Z",
+      "shape": "oscillating"
+    },
+    {
+      "atr14_raw_hex": "0x1.99999999999f9p-1",
+      "expected_decision": {
+        "confidence": 0.607796,
+        "indicators": {
+          "adx": 100,
+          "adxSlope": 0,
+          "atrPercentile": 0.175,
+          "bodySizePercentile": 0.01,
+          "bollingerWidthPercentile": 0.008333,
+          "breakdownCloseBeyondRangePct": -0.075873,
+          "breakoutBodyConfirmation": 0.0625,
+          "breakoutTooExtendedFromEma25": 0,
+          "breakoutVolumePersistence": 1.044574,
+          "choppiness": 42.364763,
+          "closeLocation": 0.5,
+          "distanceFromEma25Pct": 0.018547,
+          "distanceFromEma99Pct": 0.076845,
+          "ema25": 129.400007,
+          "ema25Slope": 0.01252,
+          "ema7": 131.2,
+          "ema7Slope": 0.009231,
+          "ema99": 122.394614,
+          "emaStackAge": 159,
+          "failedBreakoutCount": 20,
+          "failedBreakoutPressure": 1,
+          "lowerWickRatio": 0.4375,
+          "preBreakoutCompression": 0.991667,
+          "rangeBreakout": "NONE",
+          "shortAbsorptionRisk": 0,
+          "shortBreakdownQuality": 0.387382,
+          "shortContinuationScore": 0.064858,
+          "shortExtensionRisk": 0,
+          "shortRetestScore": 0,
+          "shortSweepRisk": 0,
+          "shortVolumePersistence": 0.259432,
+          "structure": "HH_HL",
+          "volumeRatio": 1.042254,
+          "volumeTrend": 0.0409,
+          "wickRatio": 0.5
+        },
+        "marketConfirmation": {
+          "state": "NEUTRAL"
+        },
+        "momentumEnvironment": "AVOID_MOMENTUM",
+        "reasons": [
+          "long_ema_stack_mature_trend",
+          "environment_avoid_momentum",
+          "transition_risk_high"
+        ],
+        "scores": {
+          "chopRisk": 0,
+          "exhaustionRisk": 0.529914,
+          "marketConfirmationScore": 0.55,
+          "momentumQuality": 0.561099,
+          "transitionRisk": 0.75,
+          "trendStrength": 1,
+          "volatilityRisk": 0.175
+        },
+        "symbol": "BTCUSDT",
+        "technicalDirection": "LONG",
+        "technicalRegime": "MOMENTUM_UP_MATURE",
+        "timeframe": "5m",
+        "timestamp": "2030-01-01T13:15:00.000Z",
+        "transition": {
+          "possibleNextRegime": "CHOP_OR_PULLBACK",
+          "reasons": [
+            "failed_breakouts_recent"
+          ],
+          "risk": "HIGH"
+        }
+      },
+      "expected_snapshot": {
+        "adx": 100.0,
+        "atr_percentile": 0.175,
+        "bollinger_width_percentile": 0.008333,
+        "chop_risk": 0.0,
+        "failed_breakout_count": 20,
+        "technical_regime": "MOMENTUM_UP_MATURE",
+        "transition_risk": "HIGH",
+        "volume_ratio": 1.042254
+      },
+      "name": "uptrend",
+      "origin": "2030-01-01T00:00:00Z",
+      "shape": "uptrend"
+    },
+    {
+      "atr14_raw_hex": "0x1.02055611ade48p+0",
+      "expected_decision": {
+        "confidence": 0.463458,
+        "indicators": {
+          "adverseWickAgainstBreakout": 0.4375,
+          "adx": 51.156595,
+          "adxSlope": 24.805933,
+          "atrPercentile": 1,
+          "bodySizePercentile": 0.01,
+          "bollingerWidthPercentile": 1,
+          "breakdownCloseBeyondRangePct": -0.078333,
+          "breakoutBodyConfirmation": 0.0625,
+          "breakoutCloseBeyondRangePct": 0.003704,
+          "breakoutFollowThroughScore": 0.487544,
+          "breakoutStrengthPct": 0.049628,
+          "breakoutTooExtendedFromEma25": 1,
+          "breakoutVolumePersistence": 1.044574,
+          "choppiness": 18.469652,
+          "closeLocation": 0.5,
+          "distanceFromEma25Pct": 0.051511,
+          "distanceFromEma99Pct": 0.071216,
+          "ema25": 102.709314,
+          "ema25Slope": 0.025296,
+          "ema7": 105.735489,
+          "ema7Slope": 0.041101,
+          "ema99": 100.820026,
+          "emaStackAge": 12,
+          "failedBreakoutCount": 0,
+          "failedBreakoutPressure": 0.4375,
+          "lowerWickRatio": 0.4375,
+          "preBreakoutCompression": 0,
+          "rangeBreakout": "UP",
+          "shortAbsorptionRisk": 0,
+          "shortBreakdownQuality": 0.401471,
+          "shortContinuationScore": 0.149395,
+          "shortExtensionRisk": 0,
+          "shortRetestScore": 0,
+          "shortSweepRisk": 0,
+          "shortVolumePersistence": 0.259432,
+          "structure": "HH_HL",
+          "volumeRatio": 1.042254,
+          "volumeTrend": 0.0409,
+          "wickRatio": 0.5
+        },
+        "marketConfirmation": {
+          "state": "NEUTRAL"
+        },
+        "momentumEnvironment": "AVOID_MOMENTUM",
+        "reasons": [
+          "up_momentum_overextended_or_upper_wick",
+          "environment_avoid_momentum",
+          "transition_risk_high"
+        ],
+        "scores": {
+          "chopRisk": 0,
+          "exhaustionRisk": 1,
+          "marketConfirmationScore": 0.55,
+          "momentumQuality": 0.453834,
+          "transitionRisk": 1,
+          "trendStrength": 1,
+          "volatilityRisk": 1
+        },
+        "symbol": "BTCUSDT",
+        "technicalDirection": "LONG",
+        "technicalRegime": "MOMENTUM_UP_EXHAUSTED",
+        "timeframe": "5m",
+        "timestamp": "2030-01-01T13:15:00.000Z",
+        "transition": {
+          "possibleNextRegime": "CHOP_OR_PULLBACK",
+          "reasons": [
+            "exhaustion_risk_high",
+            "extended_from_ema25"
+          ],
+          "risk": "HIGH"
+        }
+      },
+      "expected_snapshot": {
+        "adx": 51.156595,
+        "atr_percentile": 1.0,
+        "bollinger_width_percentile": 1.0,
+        "chop_risk": 0.0,
+        "failed_breakout_count": 0,
+        "technical_regime": "MOMENTUM_UP_EXHAUSTED",
+        "transition_risk": "HIGH",
+        "volume_ratio": 1.042254
+      },
+      "name": "compression_breakout",
+      "origin": "2030-01-01T00:00:00Z",
+      "shape": "compression_breakout"
+    }
+  ],
+  "schema_version": "aegis-range-regime-v2-parity-golden-v1",
+  "synthetic_only": true
+}
