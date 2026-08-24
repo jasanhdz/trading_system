@@ -1,0 +1,10 @@
+{
+  "schema_version": "aegis-range-thesis-golden-fixture-v1",
+  "synthetic_only": true,
+  "decision_at": "2030-01-01T00:00:00.000Z",
+  "entry_available_at": "2030-01-01T00:05:00.000Z",
+  "entry_fill": "94.000000000000",
+  "stop_at_entry": "89.300000000000",
+  "target_at_entry": "100.000000000000",
+  "expected_sha256": "dbc38ff08459e9673c96cfa72d675c4c6a817871a999604f13177e8ba2a745cb"
+}
