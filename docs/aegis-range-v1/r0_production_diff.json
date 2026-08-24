@@ -1,0 +1,40 @@
+{
+  "schema_version": "aegis-range-r0-production-diff-v1",
+  "created_date": "2026-08-24",
+  "comparison": "sha256 baseline captured before R0 versus final R0 verification",
+  "paths": {
+    "regime_config.live.yaml": {
+      "baseline_sha256": "7b841c07bc8488827201a443a8682f676e08fc7863df903baa2527d200360858",
+      "final_sha256": "7b841c07bc8488827201a443a8682f676e08fc7863df903baa2527d200360858",
+      "changed": false
+    },
+    "src/domain/services/AegisRegimeGuard.ts": {
+      "baseline_sha256": "86211d956b290931bd92475886645ae9cd666ca7898b9147b56f3a3150efd755",
+      "final_sha256": "86211d956b290931bd92475886645ae9cd666ca7898b9147b56f3a3150efd755",
+      "changed": false
+    },
+    "src/app/services/TradingService.ts": {
+      "baseline_sha256": "db63d7996c5fc36c206b75f462c2e875602ffc6f8fc74a09fb26e3c1a8af012c",
+      "final_sha256": "db63d7996c5fc36c206b75f462c2e875602ffc6f8fc74a09fb26e3c1a8af012c",
+      "changed": false
+    },
+    "src/domain/services/regime-v2/RegimeEngineV2.ts": {
+      "baseline_sha256": "3726e28badfdba5acc81d87ccd3202fc43310a04d4b3cff2597f38acb2913134",
+      "final_sha256": "3726e28badfdba5acc81d87ccd3202fc43310a04d4b3cff2597f38acb2913134",
+      "changed": false
+    },
+    "src/domain/services/regime-v2/RegimeEngineV2.types.ts": {
+      "baseline_sha256": "3b3972153f7c977d50ec864a5d8a4c4b3d8d2e73822453eaed1a25391211d10c",
+      "final_sha256": "3b3972153f7c977d50ec864a5d8a4c4b3d8d2e73822453eaed1a25391211d10c",
+      "changed": false
+    },
+    "src/domain/services/regime-v2/RegimeEngineV2.test.ts": {
+      "baseline_sha256": "80aa2619efdcb74fa8722f79ce62a01a4028bb213856f3a5b7fc0ea32e091cf1",
+      "final_sha256": "80aa2619efdcb74fa8722f79ce62a01a4028bb213856f3a5b7fc0ea32e091cf1",
+      "changed": false
+    }
+  },
+  "git_diff_command": "git diff -- regime_config.live.yaml src/domain/services/AegisRegimeGuard.ts src/app/services/TradingService.ts src/domain/services/regime-v2/RegimeEngineV2.ts src/domain/services/regime-v2/RegimeEngineV2.types.ts src/domain/services/regime-v2/RegimeEngineV2.test.ts",
+  "git_diff_stdout": "",
+  "production_modified": false
+}
