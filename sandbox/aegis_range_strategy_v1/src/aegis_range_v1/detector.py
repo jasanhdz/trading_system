@@ -54,16 +54,12 @@ class RangeDetectorV1:
             return None
         support = clusters.get(episode.support_cluster_id)
         resistance = clusters.get(episode.resistance_cluster_id)
-        if support is None or resistance is None:
+        if self.active_pair_invalid_reason(clusters) is not None:
             return None
-        if len(support.pivots) < 2 or len(resistance.pivots) < 2 or len(support.touches) < 2 or len(resistance.touches) < 2:
-            return None
+        assert support is not None and resistance is not None
         midpoint = (support.center + resistance.center) / 2.0
         amplitude = (resistance.center - support.center) / midpoint
-        if not self.candidate.min_range_amplitude_pct <= amplitude <= 0.08:
-            return None
-        if support.last_touch_at is None or resistance.last_touch_at is None:
-            return None
+        assert support.last_touch_at is not None and resistance.last_touch_at is not None
         old = episode.previous_snapshot.pair
         return RangePair(
             support.cluster_id,
@@ -77,6 +73,22 @@ class RangeDetectorV1:
             min(support.last_touch_at, resistance.last_touch_at),
             old.pair_first_eligible_at,
         )
+
+    def active_pair_invalid_reason(self, clusters: dict[str, LevelCluster]) -> str | None:
+        episode = self.episode
+        if episode is None:
+            return None
+        support = clusters.get(episode.support_cluster_id)
+        resistance = clusters.get(episode.resistance_cluster_id)
+        if support is None or resistance is None:
+            return "STRUCTURE_LOST"
+        if len(support.pivots) < 2 or len(resistance.pivots) < 2 or len(support.touches) < 2 or len(resistance.touches) < 2:
+            return "STRUCTURE_LOST"
+        midpoint = (support.center + resistance.center) / 2.0
+        amplitude = (resistance.center - support.center) / midpoint
+        if not self.candidate.min_range_amplitude_pct <= amplitude <= 0.08:
+            return "AMPLITUDE_OUT_OF_RANGE"
+        return None
 
     def winner_replaces_active(self, winner: RangePair | None) -> bool:
         return self.episode is not None and winner is not None and (

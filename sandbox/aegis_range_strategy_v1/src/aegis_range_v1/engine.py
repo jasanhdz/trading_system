@@ -136,9 +136,10 @@ class RangeEngineV1:
             return self._record(output)
 
         self.levels.expire(candle.available_at)
-        if self.episode is not None and self._active_pair() is None:
-            output["episode_event"] = "STRUCTURE_LOST"
-            self._end_episode(candle.available_at, "STRUCTURE_LOST")
+        invalid_reason = self.detector.active_pair_invalid_reason(self.levels.clusters)
+        if invalid_reason is not None:
+            output["episode_event"] = invalid_reason
+            self._end_episode(candle.available_at, invalid_reason)
             output["status"] = "NOT_OPERABLE"
             return self._record(output)
 
@@ -151,6 +152,13 @@ class RangeEngineV1:
         if self.detector.winner_replaces_active(winner):
             output["episode_event"] = "PAIR_REPLACED"
             self._end_episode(candle.available_at, "PAIR_REPLACED")
+            output["status"] = "NOT_OPERABLE"
+            return self._record(output)
+
+        invalid_reason = self.detector.active_pair_invalid_reason(self.levels.clusters)
+        if invalid_reason is not None:
+            output["episode_event"] = invalid_reason
+            self._end_episode(candle.available_at, invalid_reason)
             output["status"] = "NOT_OPERABLE"
             return self._record(output)
 

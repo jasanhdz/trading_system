@@ -1,0 +1,87 @@
+{
+  "schema_version": "aegis-range-r2-post-r1-fix-revalidation-manifest-v1",
+  "created_date": "2026-08-24",
+  "status": "AEGIS_RANGE_R2_POST_R1_FIX_REVALIDATION_READY_FOR_REVIEW",
+  "hash_algorithm": "sha256",
+  "r1_lineage": {
+    "defect_fixed": "R1_ACTIVE_PAIR_POST_MUTATION_VALIDITY",
+    "old_r1_manifest_sha256": "5b93160123aa7a8059e92ce256df135e7bdfe71ae055bc195ce6854a1c16ac81",
+    "new_r1_manifest_sha256": "2a55d0a5511b178b8d8c8a5b0a7259ecffe800e59b715234c75ff2eea8639d5c",
+    "verified_files": 42,
+    "mismatches": 0
+  },
+  "historical_downstream_lineage": {
+    "r2_data_readiness_manifest_sha256": "442f842999e9a2d9e881932d5d1d21297e8f2a358da5ffca7e111487c21111d6",
+    "r2_source_gap_manifest_sha256": "2f0c09d0489bdda45fe02787b3f626365bb1ec88bec67927a3ebb57b9e982c52",
+    "gap_resolved_manifest_sha256": "ccda624d7a683daad18888846cae53b8240f3a90bbc8838d6930ce301b290973",
+    "gap_resolved_logical_sha256": "8bcfb6ee88ece002e903774ba20e509536239c1f566617640fcd305b976fd2b4",
+    "disposition": "SUPERSEDED_BY_EXPLICIT_POST_R1_FIX_REVALIDATION"
+  },
+  "source_integrity": {
+    "ohlcv_archives": {"expected": 341, "verified": 341, "absent": 0, "conflicts": 0},
+    "fundingRate_archives": {"expected": 341, "verified": 341, "absent": 0, "conflicts": 0},
+    "markPriceKlines_archives": {"expected": 341, "verified": 341, "absent": 0, "conflicts": 0},
+    "daily_gap_files": {"expected": 22, "verified": 22, "mismatches": 0},
+    "monthly_daily_overlap": {"compared": 15818, "exact": 15818, "mismatches": 0},
+    "replacement_policy": "MONTHLY_PRIMARY_DAILY_GAP_FILL_V1",
+    "source_changed": false
+  },
+  "data_content": {
+    "base_derived_manifest_sha256": "55605c09e3f3de0d3f4d8b335beeac0eab4b0728a0f267512a6429ee8e2186b0",
+    "base_derived_logical_sha256": "00ff950ae0c2605a941172a52b83a460f89b195093a2f9c444fd4050a27e24c1",
+    "ohlcv_artifacts": 341,
+    "ohlcv_rows": 2987424,
+    "funding_mark_artifacts": 341,
+    "funding_rows": 31108,
+    "funding_events_total": 31108,
+    "funding_events_mapped": 31108,
+    "funding_events_missing_mark_price": 0,
+    "remaining_non_funding_mark_gaps": 22,
+    "data_changed": false,
+    "economic_rows_changed": false,
+    "funding_mapping_changed": false,
+    "source_gap_policy_changed": false
+  },
+  "reproducibility": {
+    "daily_audit_path": "sandbox/aegis_range_strategy_v1/artifacts/r2_post_r1_fix_revalidation/daily_audit.json",
+    "daily_audit_sha256": "fc0c4c464d7c90b9023b5417657e5681ebfac15643419f05b8af38d460781760",
+    "regenerated_source_gap_manifest_sha256": "2f0c09d0489bdda45fe02787b3f626365bb1ec88bec67927a3ebb57b9e982c52",
+    "build_a_manifest_sha256": "2bd850cbb88123f870dd3f26a5865a6749aa30025cc512997ac44f44ac17a1cc",
+    "build_b_manifest_sha256": "2bd850cbb88123f870dd3f26a5865a6749aa30025cc512997ac44f44ac17a1cc",
+    "new_logical_sha256": "587476db7f427670e0f4225ce06cd4058604d73c3ea885c95feb0492a2589ce8",
+    "artifact_rows_equal": true,
+    "artifact_hashes_equal": true,
+    "source_hashes_equal": true,
+    "build_manifests_equal": true,
+    "change_classification": "LINEAGE_ONLY_HASH_CHANGE"
+  },
+  "verification": {
+    "python_tests_total": 79,
+    "python_tests_passed": 79,
+    "typescript_tests_total": 17,
+    "typescript_tests_passed": 17,
+    "typescript_python_parity": "PASS",
+    "atr_binary64_parity": "PASS",
+    "no_lookahead": "PASS",
+    "determinism": "PASS",
+    "regression": "PASS",
+    "thesis_golden_sha256": "dbc38ff08459e9673c96cfa72d675c4c6a817871a999604f13177e8ba2a745cb"
+  },
+  "phase_boundary": {
+    "partition_access_flags_enabled": false,
+    "range_engine_executed_on_market_data": false,
+    "r2_strategy_executed": false,
+    "train_opened": false,
+    "candidates_executed": 0,
+    "calibration_opened": false,
+    "validation_opened": false,
+    "holdout_opened": false,
+    "economic_metrics_computed": false,
+    "candidate_selection_executed": false,
+    "production_modified": false,
+    "e4_modified": false,
+    "regime_engine_v2_modified": false,
+    "child_repository_modified": false
+  },
+  "self_hash_policy": "This manifest intentionally excludes its own hash; report it from final read-only verification."
+}
