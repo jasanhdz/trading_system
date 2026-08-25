@@ -1,0 +1,180 @@
+{
+  "artifacts": {
+    "confirmation_counterfactuals": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/range_v2_discovery/confirmation_counterfactuals.jsonl.gz",
+      "rows": 44032,
+      "sha256": "aaca07c8055d96753fc56a5b83e0d57a0be69c90f67938c3f8794aab2c40044c"
+    },
+    "diagnostic_summary": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/range_v2_discovery/diagnostic_summary.json",
+      "rows": 1,
+      "sha256": "38ff8f28bc4b6a5dc204c14fe1aa6b6bd3d57fe56df3873cf467fd6303fd56fb"
+    },
+    "diagnostics_manifest": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/range_v2_discovery/diagnostics_manifest.json",
+      "rows": 1,
+      "sha256": "77b27abf29efa2cffae853ea991da4af2183dad9b1feff150b7d527bba4346e3"
+    },
+    "opportunity_paths": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/range_v2_discovery/opportunity_paths.jsonl.gz",
+      "rows": 22016,
+      "sha256": "796af43415a7398f04704a4ca22d60d7c7f5b9e7d54b9589ea1700c3aaaf9b00"
+    },
+    "report": {
+      "path": "docs/aegis-range-v1/AEGIS_RANGE_V2_DISCOVERY_DIAGNOSTIC_REPORT.md",
+      "sha256": "b02324d03addbfef715b9fe88aeb9462f40eec5b5976bcc1f6231f30c85dc97a"
+    },
+    "stop_recovery": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/range_v2_discovery/stop_recovery.jsonl.gz",
+      "rows": 16280,
+      "sha256": "796fec88152c7cd08161691f2198b3cdd1486f7eeec8d6719fafa8bdedce86f7"
+    },
+    "symbol_suitability": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/range_v2_discovery/symbol_suitability.jsonl.gz",
+      "rows": 382,
+      "sha256": "6061ff4b5102f1227ce85578674144e2c9be1b9d5eddff80312df1cff7b9ac34"
+    }
+  },
+  "audit": {
+    "all_11_regime_cache_hashes_match": true,
+    "artifact_hashes_match": true,
+    "artifact_row_counts_match": true,
+    "canonical_id_errors": 0,
+    "censored_counterfactuals": 0,
+    "deterministic_gzip_files_match": 4,
+    "episode_join_missing": 0,
+    "excursion_negative_values": 0,
+    "future_information_violations": 0,
+    "official_exit_reconstruction_errors": 0,
+    "partition_violations": 0,
+    "prior_window_or_maturity_errors": 0,
+    "purged_counterfactuals": 0,
+    "regime_context_join_missing": 0,
+    "run_a_artifact_hashes_match": true,
+    "unique_weight_errors": 0,
+    "unique_weight_total": 382.0
+  },
+  "authority": {
+    "base_commit": "5ecfa7009f6cfe3f700cdc1607aacb15ce245614",
+    "dataset_logical_sha256": "587476db7f427670e0f4225ce06cd4058604d73c3ea885c95feb0492a2589ce8",
+    "lineage_reconciliation_report_sha256": "b21fc0e85286c09e5ac53a12a30965858aaa15858464847ec9486509a94274c5",
+    "post_r1_revalidation_manifest_sha256": "9fa69860198843a07d14f61116a458738e433939c4ecd7f0c6418ff87512e4d1",
+    "r1_manifest_sha256": "2a55d0a5511b178b8d8c8a5b0a7259ecffe800e59b715234c75ff2eea8639d5c",
+    "r1_verified_files": 42,
+    "r2_authority_commit": "55c3bb7665790572d83db014509c2978bf3effaf",
+    "r2_status": "AEGIS_RANGE_R2_TRAIN_BACKTEST_COMPLETE_REJECT_NO_EDGE",
+    "source_gap_policy": "MONTHLY_PRIMARY_DAILY_GAP_FILL_V1"
+  },
+  "conclusion": {
+    "calibration_authorized": false,
+    "candidate_selected": false,
+    "confirmation_a_unique_baseline_net_expectancy": -0.002043660492317081,
+    "confirmation_b_unique_baseline_net_expectancy": -0.002082243386949805,
+    "eligible_suitability_symbols": 0,
+    "promotion_authorized": false,
+    "status": "AEGIS_RANGE_V2_DISCOVERY_READY_FOR_REVIEW",
+    "v1_unique_baseline_net_expectancy": -0.0019512721725689275,
+    "whitelist_authorized": false
+  },
+  "counts": {
+    "candidate_rows": 22016,
+    "canonical_opportunities": 382,
+    "confirmation_counterfactual_rows": 44032,
+    "stop_rows": 16280,
+    "suitability_rows": 382,
+    "symbols": 11
+  },
+  "created_date_utc": "2026-08-25",
+  "input_hashes": {
+    "candidate_metrics.json": "12f72be45420099d7ab0a56524ca934e791dfbaa9da0c0add87277d7939b656f",
+    "episodes.jsonl.gz": "82989a83a68935ed44866afb2f5904e703c81e27b50acde5fe1c2fabd6af5270",
+    "regime_cache_manifest.json": "a9699e874537bcdf14042e3d811594448e886b6811f48741b9b6ce5ad7e9c22b",
+    "run_manifest.json": "5f62022f35fb38de174e6f7c573397d1c1ceebc75d76f7d848260c35456012b8",
+    "trades.jsonl.gz": "125f31dcb1bf27e6f183bbbb02da901a5133847e577196a9bd6a59be42cd4537"
+  },
+  "labels": [
+    "DISCOVERY_ONLY",
+    "NO_WHITELIST_AUTHORITY"
+  ],
+  "methodology_contract": {
+    "confirmation_a": "NEXT_CLOSE_PROGRESS",
+    "confirmation_b": "REJECTION_EXTREME_RECLAIM",
+    "opportunity_path_extrema": "CONSERVATIVE_TERMINAL_MODEL_WITH_FULL_TERMINAL_OHLC_AMBIGUITY_DISCLOSURE",
+    "post_stop_start": "FIRST_COMPLETE_5M_BAR_STRICTLY_AFTER_STOP_EXIT_BAR",
+    "prior_minimum_unique_opportunities": 30,
+    "prior_window_days": 60,
+    "suitability_maturity_lag_hours": 12,
+    "unique_weighting": "EACH_CANDIDATE_ROW_WEIGHTED_BY_INVERSE_CANONICAL_OPPORTUNITY_MULTIPLICITY"
+  },
+  "phase_boundary": {
+    "calibration_opened": false,
+    "candidate_selected": false,
+    "holdout_opened": false,
+    "pre_validation_spec_frozen": false,
+    "production_modified": false,
+    "promotion_authorized": false,
+    "validation_opened": false
+  },
+  "regime_cache_hashes": {
+    "ADAUSDT": "3c78717f759f3c66a42ef1c6fe7974a91391745e02167a27fe398ec655363619",
+    "AVAXUSDT": "b8b2abf5ac54b0c7d3b5ca6311f6c9264355c21c39f7ebcecb11f46056d587cf",
+    "BNBUSDT": "29a4ede0c4e4da3ea30abcebe3880a59bbdc4d47c4bd20b68ff5e4ca0713e896",
+    "BTCUSDT": "edcc68b7ad58b67c1eddfb1099464f0b472ac2c210b40af60bddff72af79ca24",
+    "DOGEUSDT": "c5a292c19c392c78d3b8f7426a1da252604a739c3c225e5303c07ef45e310fc2",
+    "ETHUSDT": "81b378ccf9f9ca659810649cb30514c58745e1e29320ab5d58a50616c68bae3f",
+    "LINKUSDT": "2e674b7fbe0819c47898b7d20a66980de0b45ed935faaa86f62b7a8e4c153111",
+    "LTCUSDT": "05ebced82fd0a6c25194e4903b64e060e1edf70f04d13ab42e5da0bafdee4936",
+    "SOLUSDT": "eb035d7f62d3317175796fbade11b964a2580966550849c71d7793ca73b5dc16",
+    "SUIUSDT": "b8b47c2c39d6b1abb017bbac817802054e91b6b0d80231ae480b182e6c72b6d0",
+    "XRPUSDT": "3256e72f1dee88aa5c0b027bce846d762af5621b0cea5d8cdab58e0a224a79a6"
+  },
+  "results": {
+    "confirmation_a": {
+      "candidate_abstention_rate": 0.643531976744186,
+      "candidate_baseline_net_expectancy": -0.0014716453199634188,
+      "unique_abstention_rate": 0.6723385689354275,
+      "unique_baseline_net_expectancy": -0.002043660492317081,
+      "unique_original_stop_avoided_rate": 0.6872133027522935,
+      "unique_original_target_lost_rate": 0.6425661914460286
+    },
+    "confirmation_b": {
+      "candidate_abstention_rate": 0.6242732558139534,
+      "candidate_baseline_net_expectancy": -0.0015976588177510913,
+      "unique_abstention_rate": 0.6407068062827226,
+      "unique_baseline_net_expectancy": -0.002082243386949805,
+      "unique_original_stop_avoided_rate": 0.6611238532110091,
+      "unique_original_target_lost_rate": 0.5875763747454176
+    },
+    "future_by_prior_tercile": {},
+    "insufficient_history_opportunities": 382,
+    "prior_sample_count_max": 17,
+    "v1_unique_baseline_net_expectancy": -0.0019512721725689275
+  },
+  "schema_version": "aegis-range-v2-discovery-manifest-v1",
+  "self_hash_policy": "MANIFEST_INTENTIONALLY_EXCLUDES_OWN_SHA256_COMPUTE_READ_ONLY_AFTER_SERIALIZATION",
+  "source_files": {
+    "runner_cli": {
+      "path": "sandbox/aegis_range_strategy_v1/scripts/run_range_v2_discovery.py",
+      "sha256": "d518c639e4e7b3ee63d2a85841fe2e1ed1cc0b04c90337aaffef25a3f40977f7"
+    },
+    "runner_module": {
+      "path": "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/range_v2_discovery.py",
+      "sha256": "f4f9a60d01cbe72a1e9247fc889d14840a1124dce13cba72dfc0a13e7b436802"
+    },
+    "runner_tests": {
+      "path": "sandbox/aegis_range_strategy_v1/tests/test_range_v2_discovery.py",
+      "sha256": "d79deb6c5e815be43467ccdddeb6b3394a44e76bc31b447cba9465ed9e53d5fd"
+    }
+  },
+  "source_methodology": "TRAIN_2024_ONLY_HYPOTHESIS_GENERATION",
+  "tests": {
+    "discovery_tests": "17/17 PASS",
+    "python_total": "106/106 PASS",
+    "r1_integrity": "42/42 MATCH",
+    "typescript_frozen": "17/17 PASS"
+  },
+  "train": {
+    "end_exclusive": "2025-01-01T00:00:00.000Z",
+    "start_inclusive": "2024-01-01T00:00:00.000Z"
+  }
+}
