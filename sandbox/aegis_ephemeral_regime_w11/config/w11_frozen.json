@@ -1,0 +1,85 @@
+{
+  "schema_version": "aegis-ephemeral-regime-w11-preregistered-v1",
+  "experiment_id": "AEGIS_W11_EPHEMERAL_REGIME_ALPHA",
+  "seed": 20260825,
+  "source": {
+    "candle_dir": "data/independent_entry_quality_discovery_v1/candles_1m",
+    "manifest": "data/independent_entry_quality_discovery_v1/candles_1m/dataset_manifest.json",
+    "symbols": ["ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT", "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT"],
+    "bar_minutes": 5,
+    "snapshot_minutes": 15
+  },
+  "partitions": {
+    "discovery": ["2023-05-01T00:00:00Z", "2023-09-01T00:00:00Z"],
+    "validation": ["2023-09-01T00:00:00Z", "2023-11-01T00:00:00Z"],
+    "prospective": ["2023-11-01T00:00:00Z", "2024-01-01T00:00:00Z"],
+    "external_holdouts": "SEALED_NOT_OPENED"
+  },
+  "experts": {
+    "training_window_hours": [6, 12, 24, 48, 72],
+    "validation_hours": 6,
+    "creation_cadence_hours": 6,
+    "horizons_minutes": [5, 15, 30, 60],
+    "primary_ttl_by_window_hours": {"6": 6, "12": 6, "24": 12, "48": 24, "72": 24},
+    "diagnostic_ttl_hours": [6, 12, 24, 36, 48]
+  },
+  "features": {
+    "names": [
+      "return_5m_bps", "return_15m_bps", "return_30m_bps", "return_60m_bps",
+      "realized_vol_60m_bps", "atr_60m_bps", "ema_distance_60m_bps",
+      "ema_slope_60m_bps", "efficiency_60m", "range_position_60m",
+      "relative_volume_60m", "taker_imbalance_15m", "btc_return_15m_bps",
+      "relative_to_btc_15m_bps", "btc_beta_120m", "btc_correlation_120m",
+      "market_breadth_15m", "cross_sectional_dispersion_15m_bps",
+      "alt_basket_return_15m_bps", "eth_btc_relative_15m_bps"
+    ]
+  },
+  "targets": {
+    "opportunity_min_gross_bps": 19.0,
+    "same_bar_policy": "NOT_APPLICABLE_CLOSE_TO_CLOSE",
+    "entry": "NEXT_5M_BAR_OPEN",
+    "exit": "HORIZON_BAR_CLOSE"
+  },
+  "models": {
+    "opportunity": "LOGISTIC_REGRESSION",
+    "direction": "LOGISTIC_REGRESSION_ON_OPPORTUNITIES",
+    "logistic_c": 0.25,
+    "class_weight": "balanced",
+    "opportunity_probability": 0.55,
+    "direction_probability": 0.55
+  },
+  "costs_bps": {"baseline": 14.0, "stress": 20.0, "severe": 30.0, "fee_per_side": 5.0, "baseline_slippage_per_side": 2.0},
+  "activation": {
+    "minimum_train_rows": 200,
+    "minimum_class_rows": 10,
+    "minimum_validation_trades": 12,
+    "minimum_validation_symbols": 3,
+    "maximum_single_symbol_fraction": 0.5,
+    "minimum_validation_baseline_net_bps": 0.0,
+    "minimum_validation_stress_net_bps": 0.0,
+    "minimum_bootstrap_probability_positive": 0.8,
+    "bootstrap_draws": 500,
+    "bootstrap_block_hours": 1,
+    "selection": "HIGHEST_VALIDATION_STRESS_NET_THEN_SHORTER_WINDOW_HORIZON"
+  },
+  "guardian": {
+    "regime_drift_consecutive_snapshots": 3,
+    "similarity_train_quantile": 0.1,
+    "edge_decay_min_resolved_trades": 12,
+    "edge_decay_rolling_trades": 12,
+    "edge_decay_net_bps_threshold": -2.0,
+    "expiration_priority": ["EDGE_DECAY", "REGIME_DRIFT", "TTL"],
+    "reactivation": "FORBIDDEN"
+  },
+  "success": {
+    "minimum_prospective_trades": 100,
+    "minimum_instances": 5,
+    "minimum_symbols": 4,
+    "maximum_single_symbol_fraction": 0.5,
+    "require_baseline_net_positive": true,
+    "require_stress_net_positive": true,
+    "require_temporal_bootstrap_ci_lower_positive": true,
+    "require_guardian_improvement": true,
+    "require_similarity_edge_relationship": true
+  }
+}
