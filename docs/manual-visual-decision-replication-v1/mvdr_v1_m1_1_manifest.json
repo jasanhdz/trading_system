@@ -1,0 +1,27 @@
+{
+  "program": "MANUAL_VISUAL_DECISION_REPLICATION_V1",
+  "phase": "MVDR_V1_M1_1_LEVEL_TO_LEVEL_STATE_RECONSTRUCTION",
+  "status": "MVDR_V1_M1_1_LEVEL_TO_LEVEL_STATE_READY_FOR_REVIEW",
+  "m1_authority": "522ebcd43711ca1bd75770384f5a6026fa46e467",
+  "artifact_manifest": "sandbox/manual_visual_decision_replication_v1/artifacts/m1_1_level_state/m1_1_manifest.json",
+  "labels": [
+    "RETROSPECTIVE_DISCOVERY_ONLY",
+    "POST_M1_HYPOTHESIS",
+    "NO_VALIDATION_AUTHORITY",
+    "NO_PROFITABILITY_AUTHORITY"
+  ],
+  "flags": {
+    "CAUSAL_LEVEL_STATE_RECONSTRUCTION_COMPLETE": true,
+    "MANUAL_STATE_ANNOTATION_AVAILABLE": true,
+    "LEVEL_STATE_REPLICATION_IMPROVEMENT": false,
+    "PROSPECTIVE_CAPTURE_RESEARCH_JUSTIFIED": false,
+    "FULL_AUTOMATION_RESEARCH_JUSTIFIED": false
+  },
+  "interpretation": "LEVEL_TO_LEVEL_STATE_INSUFFICIENT",
+  "market_sha256": {
+    "SUIUSDT_1m": "384019dff980f49f49b28e7ba37655b0f9c599124fd022141cce057a73102b08",
+    "BTCUSDT_1m": "139d8fa801f678c2aa30d0a2693b468b824d6fcc195968c66e043ba4d4b15efb"
+  },
+  "production_modified": false,
+  "commit_authority": false
+}
