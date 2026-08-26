@@ -1,0 +1,24 @@
+{
+  "program": "MANUAL_VISUAL_DECISION_REPLICATION_V1",
+  "phase": "MVDR_V1_M1_CAUSAL_ENTRY_RECONSTRUCTION",
+  "status": "MVDR_V1_M1_CAUSAL_ENTRY_RECONSTRUCTION_READY_FOR_REVIEW",
+  "artifact_manifest": "sandbox/manual_visual_decision_replication_v1/artifacts/m1/m1_manifest.json",
+  "trade_source_sha256": "6f7ce034ce790b3a806bcb1c0bd2c0d424700ac5eda659d0474f93edcbc9e463",
+  "market_source": "Binance USD-M Futures REST /fapi/v1/klines",
+  "market_sha256": {
+    "SUIUSDT_1m": "384019dff980f49f49b28e7ba37655b0f9c599124fd022141cce057a73102b08",
+    "BTCUSDT_1m": "139d8fa801f678c2aa30d0a2693b468b824d6fcc195968c66e043ba4d4b15efb"
+  },
+  "flags": {
+    "TRADE_IDENTITY_COMPLETE": true,
+    "CAUSAL_MARKET_REPLAY_COMPLETE": true,
+    "VISUAL_FEATURE_RECONSTRUCTION_COMPLETE": true,
+    "MANUAL_ENTRY_REPLICATION_SIGNAL_PRESENT": false,
+    "FULL_AUTOMATION_RESEARCH_JUSTIFIED": false,
+    "MANUAL_SR_REQUIRED": null
+  },
+  "interpretation": "NO_REPLICATION_SIGNAL",
+  "production_modified": false,
+  "phase_2_executed": false,
+  "commit_authority": false
+}
