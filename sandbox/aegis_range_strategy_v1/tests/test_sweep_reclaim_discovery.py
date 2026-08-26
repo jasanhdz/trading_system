@@ -486,7 +486,7 @@ def test_partition_and_immutable_output_guard_fail_closed(tmp_path, monkeypatch)
     with pytest.raises(PermissionError, match="PARTITION"):
         verify_authority(tmp_path, tmp_path / "out", {"TRAIN_ACCESS": "true", "CALIBRATION_ACCESS": "true", "VALIDATION_ACCESS": "false", "HOLDOUT_ACCESS": "false"})
     monkeypatch.setattr("aegis_range_v1.sweep_reclaim_discovery.SealedPartitionGuard.access_flags", lambda environment: FLAGS)
-    monkeypatch.setattr("aegis_range_v1.sweep_reclaim_discovery.subprocess.run", lambda *args, **kwargs: type("Result", (), {"stdout": "5a85018a6363006a44f683b22f2dad8cbdb49f49\n"})())
+    monkeypatch.setattr("aegis_range_v1.sweep_reclaim_discovery.subprocess.run", lambda *args, **kwargs: type("Result", (), {"stdout": "d917602b2c7e065d18b29f87df14febb935d8ad8\n"})())
     repo = tmp_path / "repo"
     immutable = repo / "sandbox/aegis_range_strategy_v1/artifacts/r2_train/run_a"
     immutable.mkdir(parents=True)
