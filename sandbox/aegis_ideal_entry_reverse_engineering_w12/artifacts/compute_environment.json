@@ -59,7 +59,7 @@
     }
   },
   "memory": {
-    "available_bytes_at_audit": 16710365184,
+    "available_bytes_at_audit": 15421300736,
     "total_bytes": 41888493568
   },
   "parallelism": {

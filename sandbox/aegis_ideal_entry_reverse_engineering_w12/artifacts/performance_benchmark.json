@@ -1,8 +1,8 @@
 {
   "cpu_parallel": {
     "deterministic_match": true,
-    "seconds": 0.1710451179988013,
-    "speedup": 1.8294948763302747,
+    "seconds": 0.18934108699977514,
+    "speedup": 1.7288015516780446,
     "workers": 4
   },
   "gpu": {
@@ -17,7 +17,7 @@
   "selected": "CPU_VECTORIZED_PROCESS_POOL",
   "selection_reason": "Same outputs, bounded workers, and direct compatibility with frozen NumPy/pandas/sklearn methods.",
   "single_worker": {
-    "seconds": 0.3129261670001142,
+    "seconds": 0.3273331650016189,
     "workers": 1
   },
   "workload": "8 independent synthetic 25000x60 future-path label reductions"
