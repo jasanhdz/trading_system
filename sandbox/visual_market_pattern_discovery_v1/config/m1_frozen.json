@@ -1,0 +1,36 @@
+{
+  "program": "VISUAL_MARKET_PATTERN_DISCOVERY_V1",
+  "phase": "VMPD_V1_M1_UNSUPERVISED_VISUAL_PATTERN_DISCOVERY",
+  "research_only": true,
+  "trading_authority": false,
+  "source": "Binance USD-M Futures 1m klines",
+  "symbols": ["SUIUSDT", "BTCUSDT"],
+  "window_complete_days": 60,
+  "snapshot_minutes": 3,
+  "timeframes_minutes": [3, 5, 15],
+  "visible_candles": {"3": 80, "5": 60, "15": 40},
+  "layout": {
+    "resolution": [1200, 900],
+    "primary_panel": "SUIUSDT_15m",
+    "panels": ["SUIUSDT_15m", "SUIUSDT_5m", "BTCUSDT_5m", "SUIUSDT_3m", "BTCUSDT_3m"],
+    "derived_not_rendered": ["BTCUSDT_15m"],
+    "font": "DejaVuSans",
+    "absolute_timestamps_visible": false
+  },
+  "views": ["RAW_VIEW"],
+  "encoder_preference": ["dinov3", "dinov2", "open_clip"],
+  "encoder_default": {"family": "open_clip", "model": "ViT-B-32", "pretrained": "laion2b_s34b_b79k", "input_resolution": 224},
+  "clustering": {"algorithm": "HDBSCAN", "min_cluster_size": 120, "min_samples": 30, "metric": "euclidean_on_l2_normalized_embeddings", "cluster_selection_method": "eom"},
+  "umap": {"seed": 731991, "n_neighbors": 30, "min_dist": 0.1, "metric": "cosine", "visualization_only": true},
+  "episode_gap_minutes": 15,
+  "stable_pattern_min_frames": 50,
+  "stable_pattern_min_days": 10,
+  "precursor_min_independent_onsets": 30,
+  "precursor_lags_minutes": [3, 6, 9, 15, 30],
+  "sequence_max_states": 4,
+  "sequence_min_support": 10,
+  "forward_horizons_minutes": [5, 15, 30, 60, 120],
+  "first_passage_bps": [[10, -10], [20, -20], [30, -20], [40, -30]],
+  "seed": 731991
+}
+
