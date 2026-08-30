@@ -181,10 +181,14 @@ class HybridLiveExperimentSelector:
         self.config = config
         self._hashing = Sha256HashProvider()
         self._journal = _AppendOnlyJournal(config.decision_journal, "event_id")
-        self._processed_cycles = {
-            str(row["decision_cycle_id"]) for row in self._journal.rows
-        }
+        self._processed_cycles: set[str] = set()
         self._entry_methodology_state: dict[tuple[str, str], Mapping[str, Any]] = {}
+        self._methodology_records = 0
+        self._methodology_tier_counts: Counter[str] = Counter()
+        self._meta_model_status_counts: Counter[str] = Counter()
+        self._long_specialist_status_counts: Counter[str] = Counter()
+        self._long_archetype_records = 0
+        self._long_archetype_counts: Counter[str] = Counter()
         self._entry_path_meta_model: EntryPathMetaModelShadow | None = None
         self._entry_path_meta_model_status = "ARTIFACT_NOT_PRESENT"
         self._long_specialist_model: LongEntrySpecialistModelShadow | None = None
@@ -214,11 +218,30 @@ class HybridLiveExperimentSelector:
             except LongEntrySpecialistModelShadowError:
                 self._long_specialist_model_status = "ARTIFACT_INVALID_IGNORED"
         for row in self._journal.rows:
+            self._processed_cycles.add(str(row["decision_cycle_id"]))
             assessment = row.get("entry_methodology_v2_shadow")
             if isinstance(assessment, Mapping):
+                self._methodology_records += 1
+                tier = assessment.get("tier")
+                if tier in ("A", "B", "C"):
+                    self._methodology_tier_counts[tier] += 1
                 self._entry_methodology_state[
                     (str(row["symbol"]), str(row["side"]))
                 ] = assessment
+            meta_model = row.get("entry_path_meta_model_shadow")
+            if isinstance(meta_model, Mapping):
+                self._meta_model_status_counts[str(meta_model.get("status"))] += 1
+            long_specialist = row.get("long_entry_specialist_shadow")
+            if isinstance(long_specialist, Mapping):
+                self._long_specialist_status_counts[
+                    str(long_specialist.get("status"))
+                ] += 1
+            long_archetype = row.get("long_entry_archetype_v2_shadow")
+            if isinstance(long_archetype, Mapping):
+                self._long_archetype_records += 1
+                archetype = long_archetype.get("archetype")
+                if archetype is not None:
+                    self._long_archetype_counts[str(archetype)] += 1
 
     @staticmethod
     def _timestamp(value: object) -> datetime:
@@ -494,10 +517,31 @@ class HybridLiveExperimentSelector:
             rows.append(row)
         if cycle_id not in self._processed_cycles:
             for row in rows:
-                self._journal.append(row)
-                self._entry_methodology_state[
-                    (str(row["symbol"]), str(row["side"]))
-                ] = row["entry_methodology_v2_shadow"]
+                if self._journal.append(row):
+                    assessment = row["entry_methodology_v2_shadow"]
+                    self._methodology_records += 1
+                    tier = assessment.get("tier")
+                    if tier in ("A", "B", "C"):
+                        self._methodology_tier_counts[tier] += 1
+                    self._entry_methodology_state[
+                        (str(row["symbol"]), str(row["side"]))
+                    ] = assessment
+                    meta_model = row.get("entry_path_meta_model_shadow")
+                    if isinstance(meta_model, Mapping):
+                        self._meta_model_status_counts[
+                            str(meta_model.get("status"))
+                        ] += 1
+                    long_specialist = row.get("long_entry_specialist_shadow")
+                    if isinstance(long_specialist, Mapping):
+                        self._long_specialist_status_counts[
+                            str(long_specialist.get("status"))
+                        ] += 1
+                    long_archetype = row.get("long_entry_archetype_v2_shadow")
+                    if isinstance(long_archetype, Mapping):
+                        self._long_archetype_records += 1
+                        archetype = long_archetype.get("archetype")
+                        if archetype is not None:
+                            self._long_archetype_counts[str(archetype)] += 1
             self._processed_cycles.add(cycle_id)
         by_symbol: dict[str, Any] = {}
         for symbol in CANONICAL_SYMBOLS:
@@ -557,35 +601,6 @@ class HybridLiveExperimentSelector:
         }
 
     def health(self) -> Mapping[str, Any]:
-        methodology_records = 0
-        methodology_tier_counts: Counter[str] = Counter()
-        meta_model_status_counts: Counter[str] = Counter()
-        long_specialist_status_counts: Counter[str] = Counter()
-        long_archetype_records = 0
-        long_archetype_counts: Counter[str] = Counter()
-        for row in self._journal.rows:
-            methodology = row.get("entry_methodology_v2_shadow")
-            if isinstance(methodology, Mapping):
-                methodology_records += 1
-                tier = methodology.get("tier")
-                if tier in ("A", "B", "C"):
-                    methodology_tier_counts[tier] += 1
-
-            meta_model = row.get("entry_path_meta_model_shadow")
-            if isinstance(meta_model, Mapping):
-                meta_model_status_counts[str(meta_model.get("status"))] += 1
-
-            long_specialist = row.get("long_entry_specialist_shadow")
-            if isinstance(long_specialist, Mapping):
-                long_specialist_status_counts[str(long_specialist.get("status"))] += 1
-
-            long_archetype = row.get("long_entry_archetype_v2_shadow")
-            if isinstance(long_archetype, Mapping):
-                long_archetype_records += 1
-                archetype = long_archetype.get("archetype")
-                if archetype is not None:
-                    long_archetype_counts[str(archetype)] += 1
-
         return {
             "status": "ACTIVE",
             "mode": "LIVE",
@@ -604,9 +619,9 @@ class HybridLiveExperimentSelector:
             "entry_methodology_v2_shadow": {
                 "status": "ACTIVE",
                 "mode": "SHADOW",
-                "records": methodology_records,
+                "records": self._methodology_records,
                 "tier_counts": {
-                    tier: methodology_tier_counts[tier]
+                    tier: self._methodology_tier_counts[tier]
                     for tier in ("A", "B", "C")
                 },
                 "selection_effect": "NONE",
@@ -622,7 +637,7 @@ class HybridLiveExperimentSelector:
                     else None
                 ),
                 "side_status_counts": dict(
-                    sorted(meta_model_status_counts.items())
+                    sorted(self._meta_model_status_counts.items())
                 ),
                 "selection_effect": "NONE",
                 "exchange_authority": False,
@@ -642,7 +657,7 @@ class HybridLiveExperimentSelector:
                     else False
                 ),
                 "status_counts": dict(
-                    sorted(long_specialist_status_counts.items())
+                    sorted(self._long_specialist_status_counts.items())
                 ),
                 "selection_effect": "NONE",
                 "exchange_authority": False,
@@ -651,9 +666,9 @@ class HybridLiveExperimentSelector:
             "long_entry_archetype_v2_shadow": {
                 "mode": "SHADOW",
                 "status": "OBSERVATION_ONLY",
-                "records": long_archetype_records,
+                "records": self._long_archetype_records,
                 "archetype_counts": dict(
-                    sorted(long_archetype_counts.items())
+                    sorted(self._long_archetype_counts.items())
                 ),
                 "selection_effect": "NONE",
                 "exchange_authority": False,

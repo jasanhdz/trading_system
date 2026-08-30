@@ -176,6 +176,26 @@ def hybrid_selector(tmp_path: Path) -> HybridLiveExperimentSelector:
     return HybridLiveExperimentSelector(config)
 
 
+def test_hybrid_live_health_uses_recovered_counters_without_iterating_journal(
+    tmp_path: Path,
+) -> None:
+    selector = hybrid_selector(tmp_path)
+
+    class NoJournalIteration:
+        def __len__(self) -> int:
+            return 0
+
+        def __iter__(self):
+            raise AssertionError("health must not iterate the journal")
+
+    selector._journal.rows = NoJournalIteration()
+
+    health = selector.health()
+
+    assert health["decision_records"] == 0
+    assert health["entry_methodology_v2_shadow"]["records"] == 0
+
+
 def confirm_direction(batch: dict, symbol: str, side: str) -> None:
     features = batch["results"][symbol]["research_features"]
     sign = 1.0 if side == "LONG" else -1.0
