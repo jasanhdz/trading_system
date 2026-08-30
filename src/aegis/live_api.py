@@ -11,7 +11,6 @@ Endpoints:
 from __future__ import annotations
 
 import argparse
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -21,6 +20,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from aegis.config import CANONICAL_SYMBOLS
+from aegis.context_inference import predict_from_snapshot
+from aegis.market_context import MarketContextError, market_snapshot_from_context
 from aegis.live_decision import (
     CurrentBrainDecisionService,
     CurrentBrainEngine,
@@ -32,7 +33,7 @@ from aegis.hybrid_live_experiment import build_hybrid_live_experiment_selector
 from aegis.research.dual_side_shadow import build_composite_research_observer
 from aegis.v17_execution_challenger import load_v17_challenger_config
 
-from aegis.risk_guard.domain import FROZEN_TAIL_RISK_THRESHOLD, RiskDecision, RiskGuardConfig
+from aegis.risk_guard.domain import FROZEN_TAIL_RISK_THRESHOLD, RiskGuardConfig
 from aegis.risk_guard.precompute import (
     E4PrecomputeService,
     SOURCE_FEED_LAG_TOLERANCE_S,
@@ -43,6 +44,7 @@ from aegis.risk_guard.observability import E4EvidenceRecorder
 class PredictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     symbol: str = Field(min_length=1, max_length=20)
+    market_context: dict[str, Any] | None = None
 
 
 class E4TailRiskRequest(BaseModel):
@@ -136,7 +138,32 @@ def create_app(
                 status_code=422, detail="AEGIS_CURRENT_BRAIN_SYMBOL_UNAUTHORIZED"
             )
         try:
-            result = dict(runtime.predict(symbol, trace_id()))
+            request_trace_id = trace_id()
+            if request.market_context is not None:
+                snapshot = market_snapshot_from_context(
+                    request.market_context,
+                    expected_symbol=symbol,
+                )
+                result = dict(
+                    predict_from_snapshot(runtime, snapshot, symbol, request_trace_id)
+                )
+                result.setdefault("metadata", {})["market_context"] = {
+                    "version": request.market_context.get("version"),
+                    "source": "TYPESCRIPT_SHARED_WEBSOCKET",
+                    "closed_at": snapshot.closed_at.isoformat().replace("+00:00", "Z"),
+                    "rest_snapshot_provider_used": False,
+                }
+            else:
+                # Backward-compatible recovery path. Normal bot inference supplies
+                # market_context; symbol-only requests retain the previous REST
+                # provider for bootstrap/recovery and external diagnostics.
+                result = dict(runtime.predict(symbol, request_trace_id))
+                result.setdefault("metadata", {})["market_context"] = {
+                    "source": "PYTHON_PUBLIC_REST_RECOVERY",
+                    "rest_snapshot_provider_used": True,
+                }
+        except MarketContextError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except CurrentBrainError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:
@@ -144,7 +171,6 @@ def create_app(
                 status_code=503, detail="AEGIS_CURRENT_BRAIN_INFERENCE_FAILED"
             ) from exc
 
-        aegis_block = result.get("aegis", {})
         e4_block = _build_e4_unavailable_response(
             symbol, "LONG", "", "E4_NOT_AVAILABLE"
         )
