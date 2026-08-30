@@ -8,6 +8,7 @@ promotion record are configured and hash-verified.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, Protocol
 
 import yaml
 
@@ -264,37 +265,73 @@ def _validate_live_promotion(
         )
 
 
+class _JournalRows:
+    """Stream journal rows instead of retaining every decoded payload in RAM."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._count = 0
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        if not self._path.exists():
+            return
+        with self._path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    yield json.loads(line)
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        if index < 0:
+            index += self._count
+        if index < 0:
+            raise IndexError(index)
+        for position, row in enumerate(self):
+            if position == index:
+                return row
+        raise IndexError(index)
+
+    def append(self, _: Mapping[str, Any]) -> None:
+        self._count += 1
+
+
 class _AppendOnlyJournal:
     def __init__(self, path: Path, identity_field: str) -> None:
         self.path = path
         self.identity_field = identity_field
-        self.rows: list[dict[str, Any]] = []
+        self.rows = _JournalRows(path)
         self.payloads: dict[str, str] = {}
         if path.exists():
             self._recover()
 
     def _recover(self) -> None:
         try:
-            for line in self.path.read_text(encoding="utf-8").splitlines():
-                if not line:
-                    raise EntryQualityV2Error("AEGIS_ENTRY_QUALITY_V2_JOURNAL_INVALID")
-                row = json.loads(line)
-                identity = str(row[self.identity_field])
-                payload = canonical_json(row)
-                existing = self.payloads.get(identity)
-                if existing is not None and existing != payload:
-                    raise EntryQualityV2Error("AEGIS_ENTRY_QUALITY_V2_JOURNAL_CONFLICT")
-                if existing is None:
-                    self.rows.append(row)
-                    self.payloads[identity] = payload
+            with self.path.open(encoding="utf-8") as handle:
+                for raw_line in handle:
+                    line = raw_line.rstrip("\n")
+                    if not line:
+                        raise EntryQualityV2Error("AEGIS_ENTRY_QUALITY_V2_JOURNAL_INVALID")
+                    row = json.loads(line)
+                    identity = str(row[self.identity_field])
+                    payload = canonical_json(row)
+                    payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                    existing = self.payloads.get(identity)
+                    if existing is not None and existing != payload_hash:
+                        raise EntryQualityV2Error("AEGIS_ENTRY_QUALITY_V2_JOURNAL_CONFLICT")
+                    if existing is None:
+                        self.rows.append(row)
+                        self.payloads[identity] = payload_hash
         except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
             raise EntryQualityV2Error("AEGIS_ENTRY_QUALITY_V2_JOURNAL_INVALID") from exc
 
     def append(self, row: Mapping[str, Any]) -> bool:
         identity = str(row[self.identity_field])
         payload = canonical_json(row)
+        payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         existing = self.payloads.get(identity)
-        if existing == payload:
+        if existing == payload_hash:
             return False
         if existing is not None:
             raise EntryQualityV2Error("AEGIS_ENTRY_QUALITY_V2_JOURNAL_CONFLICT")
@@ -307,7 +344,7 @@ class _AppendOnlyJournal:
         os.chmod(self.path, 0o600)
         normalized = json.loads(payload)
         self.rows.append(normalized)
-        self.payloads[identity] = payload
+        self.payloads[identity] = payload_hash
         return True
 
 

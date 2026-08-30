@@ -200,6 +200,20 @@ def confirm_direction(batch: dict, symbol: str, side: str) -> None:
     )
 
 
+def assert_compatibility_response(payload: dict, expected: dict) -> None:
+    """Compare the legacy decision payload while asserting new transport fields."""
+    assert payload["metadata"]["market_context"] == {
+        "source": "PYTHON_PUBLIC_REST_RECOVERY",
+        "rest_snapshot_provider_used": True,
+    }
+    assert isinstance(payload["aegis"]["e4_tail_risk"], dict)
+
+    comparable = copy.deepcopy(payload)
+    comparable["metadata"].pop("market_context")
+    comparable["aegis"].pop("e4_tail_risk")
+    assert comparable == expected
+
+
 def test_health_not_ready_before_initialization() -> None:
     engine = CurrentBrainEngine()
     service = CurrentBrainDecisionService(engine, StaticProvider(None))
@@ -514,7 +528,7 @@ async def test_real_pipeline_and_http_adapter_are_lossless(
                     symbol,
                     response.json()["metadata"]["trace_id"],
                 )
-                assert response.json() == expected
+                assert_compatibility_response(response.json(), expected)
     assert provider.calls == 1
 
 
@@ -544,7 +558,7 @@ async def test_twenty_distinct_snapshots_preserve_http_parity_and_feature_driven
                 expected = compatibility_response(
                     canonical, symbol, payload["metadata"]["trace_id"]
                 )
-                assert payload == expected
+                assert_compatibility_response(payload, expected)
 
                 result = canonical["results"][symbol]
                 feature_hashes[symbol].add(result["feature_vector_hash"])
