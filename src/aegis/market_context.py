@@ -12,6 +12,7 @@ MARKET_CONTEXT_VERSION = "AEGIS_MARKET_CONTEXT_V1"
 MARKET_CONTEXT_SOURCE = "SHARED_MARKET_DATA_RUNTIME"
 TIMEFRAME = "5m"
 INTERVAL_MS = 300_000
+FINALIZATION_DELAY_MS = 2_000
 MIN_HISTORY_BARS = 96
 
 
@@ -71,36 +72,14 @@ def market_snapshot_from_context(
         raise MarketContextError("AEGIS_MARKET_CONTEXT_SYMBOL_MISMATCH")
 
     captured_at_ms = _integer(context.get("capturedAtMs"), "capturedAtMs")
-    universe = _mapping(context.get("universe5m"), "universe5m")
-    if universe.get("timeframe") != TIMEFRAME:
-        raise MarketContextError("AEGIS_MARKET_CONTEXT_TIMEFRAME_INVALID")
-    if universe.get("symbolSetHash") != CANONICAL_SYMBOL_SET_HASH:
-        raise MarketContextError("AEGIS_MARKET_CONTEXT_UNIVERSE_HASH_MISMATCH")
-
-    closed_at_ms = _integer(universe.get("closedAtMs"), "universe5m.closedAtMs")
-    if closed_at_ms > captured_at_ms:
-        raise MarketContextError("AEGIS_MARKET_CONTEXT_FUTURE_CLOSE")
-    if captured_at_ms - closed_at_ms > 15 * 60 * 1000:
-        raise MarketContextError("AEGIS_MARKET_CONTEXT_SNAPSHOT_STALE")
-
-    series_payload = universe.get("series")
-    if not isinstance(series_payload, list) or len(series_payload) != len(CANONICAL_SYMBOLS):
-        raise MarketContextError("AEGIS_MARKET_CONTEXT_UNIVERSE_SIZE_MISMATCH")
-
-    by_symbol: dict[str, Mapping[str, Any]] = {}
-    for raw in series_payload:
-        item = _mapping(raw, "universe5m.series[]")
-        item_symbol = str(item.get("symbol", "")).strip().upper()
-        if item_symbol in by_symbol:
-            raise MarketContextError("AEGIS_MARKET_CONTEXT_DUPLICATE_SYMBOL")
-        by_symbol[item_symbol] = item
-    if tuple(by_symbol.keys()) != CANONICAL_SYMBOLS:
+    universe = _mapping(context.get("universeCandles5m"), "universeCandles5m")
+    if tuple(universe.keys()) != CANONICAL_SYMBOLS:
         raise MarketContextError("AEGIS_MARKET_CONTEXT_SYMBOL_ORDER_MISMATCH")
 
-    closed_at = _utc_ms(closed_at_ms)
-    series: list[SymbolSeries] = []
+    prepared: dict[str, tuple[Mapping[str, Any], list[Mapping[str, Any]], int]] = {}
+    latest_closed_ms: list[int] = []
     for item_symbol in CANONICAL_SYMBOLS:
-        item = by_symbol[item_symbol]
+        item = _mapping(universe[item_symbol], f"universeCandles5m.{item_symbol}")
         if item.get("status") != "FRESH" or item.get("source") != "WEBSOCKET":
             raise MarketContextError("AEGIS_MARKET_CONTEXT_CANDLE_SOURCE_INVALID")
         observed_at_ms = _integer(item.get("observedAtMs"), f"{item_symbol}.observedAtMs")
@@ -113,17 +92,51 @@ def market_snapshot_from_context(
         if source_lag_ms > 30_000:
             raise MarketContextError("AEGIS_MARKET_CONTEXT_CANDLE_STALE")
 
-        rows = item.get("candles")
-        if not isinstance(rows, list) or len(rows) < MIN_HISTORY_BARS:
+        raw_rows = item.get("candles")
+        if not isinstance(raw_rows, list) or len(raw_rows) < MIN_HISTORY_BARS:
             raise MarketContextError("AEGIS_MARKET_CONTEXT_INCOMPLETE_SERIES")
+        rows = [_mapping(row, f"{item_symbol}.candle") for row in raw_rows]
+        eligible = [
+            row
+            for row in rows
+            if _integer(row.get("openTime"), f"{item_symbol}.openTime")
+            + INTERVAL_MS
+            + FINALIZATION_DELAY_MS
+            <= captured_at_ms
+        ]
+        if len(eligible) < MIN_HISTORY_BARS:
+            raise MarketContextError("AEGIS_MARKET_CONTEXT_INCOMPLETE_CLOSED_SERIES")
+        symbol_closed_at_ms = (
+            _integer(eligible[-1].get("openTime"), f"{item_symbol}.openTime")
+            + INTERVAL_MS
+        )
+        latest_closed_ms.append(symbol_closed_at_ms)
+        prepared[item_symbol] = (item, eligible, source_lag_ms)
+
+    closed_at_ms = min(latest_closed_ms)
+    if closed_at_ms > captured_at_ms:
+        raise MarketContextError("AEGIS_MARKET_CONTEXT_FUTURE_CLOSE")
+    if captured_at_ms - closed_at_ms > 15 * 60 * 1000:
+        raise MarketContextError("AEGIS_MARKET_CONTEXT_SNAPSHOT_STALE")
+
+    closed_at = _utc_ms(closed_at_ms)
+    series: list[SymbolSeries] = []
+    for item_symbol in CANONICAL_SYMBOLS:
+        _item, eligible, source_lag_ms = prepared[item_symbol]
+        aligned = [
+            row
+            for row in eligible
+            if _integer(row.get("openTime"), f"{item_symbol}.openTime") + INTERVAL_MS
+            <= closed_at_ms
+        ][-MIN_HISTORY_BARS:]
+        if len(aligned) < MIN_HISTORY_BARS:
+            raise MarketContextError("AEGIS_MARKET_CONTEXT_INCOMPLETE_ALIGNED_SERIES")
+
         candles: list[Candle] = []
         previous_open_ms: int | None = None
-        for raw_candle in rows[-MIN_HISTORY_BARS:]:
-            row = _mapping(raw_candle, f"{item_symbol}.candle")
+        for row in aligned:
             open_ms = _integer(row.get("openTime"), f"{item_symbol}.openTime")
             normalized_close_ms = open_ms + INTERVAL_MS
-            if normalized_close_ms > closed_at_ms:
-                raise MarketContextError("AEGIS_MARKET_CONTEXT_OPEN_CANDLE_PRESENT")
             if previous_open_ms is not None and open_ms - previous_open_ms != INTERVAL_MS:
                 raise MarketContextError("AEGIS_MARKET_CONTEXT_CANDLE_GAP")
             previous_open_ms = open_ms
