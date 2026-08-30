@@ -209,7 +209,7 @@ class HybridDirectionalShadowRuntime:
 
     def _mature_outcomes(self) -> None:
         for symbol in CANONICAL_SYMBOLS:
-            symbol_rows = [row for row in self._signals.rows if row["symbol"] == symbol]
+            symbol_rows = [row for row in self._signals.rows.recent if row["symbol"] == symbol]
             if len(symbol_rows) <= self.config.horizon_bars:
                 continue
             source = symbol_rows[-self.config.horizon_bars - 1]
@@ -269,7 +269,7 @@ class HybridDirectionalShadowRuntime:
     def _overlay(self, timestamp: str) -> Mapping[str, Any]:
         latest = {
             str(row["symbol"]): row
-            for row in self._signals.rows
+            for row in self._signals.rows.recent
             if str(row["market_timestamp"]) == timestamp
         }
         return {

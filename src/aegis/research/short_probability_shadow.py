@@ -272,7 +272,7 @@ class ShortProbabilityShadowRuntime:
         by_symbol: dict[str, list[dict[str, Any]]] = {
             symbol: [] for symbol in CANONICAL_SYMBOLS
         }
-        for row in self._signals.rows:
+        for row in self._signals.rows.recent:
             by_symbol[str(row["symbol"])].append(row)
         for rows in by_symbol.values():
             rows.sort(key=lambda row: str(row["market_timestamp"]))
@@ -321,7 +321,7 @@ class ShortProbabilityShadowRuntime:
     def _overlay(self, market_timestamp: str) -> Mapping[str, Any]:
         rows = [
             row
-            for row in self._signals.rows
+            for row in self._signals.rows.recent
             if str(row["market_timestamp"]) == market_timestamp
         ]
         return {

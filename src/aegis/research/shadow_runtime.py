@@ -13,6 +13,7 @@ import json
 import math
 import os
 import threading
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -41,6 +42,9 @@ class EntryQualityV2Error(RuntimeError):
 class EntryQualityV2Mode(str, Enum):
     SHADOW = "SHADOW"
     LIVE = "LIVE"
+
+
+RECENT_JOURNAL_ROWS = len(CANONICAL_SYMBOLS) * 24 * 2
 
 
 @dataclass(frozen=True)
@@ -271,6 +275,7 @@ class _JournalRows:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._count = 0
+        self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_JOURNAL_ROWS)
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
         if not self._path.exists():
@@ -293,8 +298,13 @@ class _JournalRows:
                 return row
         raise IndexError(index)
 
-    def append(self, _: Mapping[str, Any]) -> None:
+    def append(self, row: Mapping[str, Any]) -> None:
         self._count += 1
+        self._recent.append(dict(row))
+
+    @property
+    def recent(self) -> tuple[dict[str, Any], ...]:
+        return tuple(self._recent)
 
 
 class _AppendOnlyJournal:
@@ -605,7 +615,7 @@ class EntryQualityV2ShadowRuntime:
         by_symbol: dict[str, list[dict[str, Any]]] = {
             symbol: [] for symbol in CANONICAL_SYMBOLS
         }
-        for row in self._signals.rows:
+        for row in self._signals.rows.recent:
             by_symbol[str(row["symbol"])].append(row)
         for rows in by_symbol.values():
             rows.sort(key=lambda row: str(row["market_timestamp"]))
@@ -657,7 +667,7 @@ class EntryQualityV2ShadowRuntime:
 
     def _overlay_for_cycle(self, cycle: str) -> Mapping[str, Any]:
         rows = [
-            row for row in self._signals.rows
+            row for row in self._signals.rows.recent
             if str(row["decision_cycle_id"]) == cycle
         ]
         return {
@@ -683,7 +693,7 @@ class EntryQualityV2ShadowRuntime:
     ) -> Mapping[str, Any]:
         rows = [
             row
-            for row in self._signals.rows
+            for row in self._signals.rows.recent
             if str(row["market_timestamp"]) == market_timestamp
         ]
         latest_by_symbol = {

@@ -750,6 +750,7 @@ class CurrentBrainDecisionService:
         self.started_at = datetime.now(timezone.utc)
         self._cache: tuple[float, Mapping[str, Any]] | None = None
         self._lock = threading.Lock()
+        self._metrics_lock = threading.Lock()
         self.request_count = 0
         self.error_count = 0
         self.research_error_count = 0
@@ -776,7 +777,8 @@ class CurrentBrainDecisionService:
                 try:
                     overlay = self.research_observer.observe_batch(batch)
                 except Exception as exc:
-                    self.research_error_count += 1
+                    with self._metrics_lock:
+                        self.research_error_count += 1
                     mode = str(
                         getattr(
                             self.research_observer.mode,
@@ -801,18 +803,26 @@ class CurrentBrainDecisionService:
                     "_v17_execution_challenger": self.v17_challenger_config.health(),
                 }
             self._cache = (now, batch)
-            self.last_inference_at = datetime.now(timezone.utc)
+            with self._metrics_lock:
+                self.last_inference_at = datetime.now(timezone.utc)
             return batch
 
     def predict(self, symbol: str, trace_id: str) -> Mapping[str, Any]:
-        self.request_count += 1
+        with self._metrics_lock:
+            self.request_count += 1
         try:
             return compatibility_response(self._batch(), symbol, trace_id)
         except Exception:
-            self.error_count += 1
+            with self._metrics_lock:
+                self.error_count += 1
             raise
 
     def health(self) -> Mapping[str, Any]:
+        with self._metrics_lock:
+            request_count = self.request_count
+            error_count = self.error_count
+            research_error_count = self.research_error_count
+            latest_inference_at = self.last_inference_at
         health = {
             "status": "ready" if self.engine.ready else "not_ready",
             "ready": self.engine.ready,
@@ -825,13 +835,13 @@ class CurrentBrainDecisionService:
             "service_version": SERVICE_VERSION,
             "startup_timestamp": self.started_at.isoformat().replace("+00:00", "Z"),
             "latest_inference_timestamp": (
-                self.last_inference_at.isoformat().replace("+00:00", "Z")
-                if self.last_inference_at
+                latest_inference_at.isoformat().replace("+00:00", "Z")
+                if latest_inference_at
                 else None
             ),
-            "requests": self.request_count,
-            "errors": self.error_count,
-            "research_errors": self.research_error_count,
+            "requests": request_count,
+            "errors": error_count,
+            "research_errors": research_error_count,
         }
         if self.research_observer is not None:
             health["entry_quality_v2"] = dict(self.research_observer.health())

@@ -17,12 +17,14 @@ def predict_from_snapshot(
     request_trace_id: str,
 ) -> Mapping[str, Any]:
     """Evaluate the current brain without asking its REST SnapshotProvider for data."""
-    service.request_count += 1
+    with service._metrics_lock:  # noqa: SLF001 - adapter shares service metrics
+        service.request_count += 1
     try:
         batch = _batch_from_snapshot(service, snapshot)
         return compatibility_response(batch, symbol, request_trace_id)
     except Exception:
-        service.error_count += 1
+        with service._metrics_lock:  # noqa: SLF001 - adapter shares service metrics
+            service.error_count += 1
         raise
 
 
@@ -46,7 +48,8 @@ def _batch_from_snapshot(
             try:
                 overlay = service.research_observer.observe_batch(batch)
             except Exception as exc:
-                service.research_error_count += 1
+                with service._metrics_lock:  # noqa: SLF001 - adapter shares service metrics
+                    service.research_error_count += 1
                 mode = str(
                     getattr(
                         service.research_observer.mode,
@@ -73,5 +76,6 @@ def _batch_from_snapshot(
             }
 
         service._cache = (now, batch)  # noqa: SLF001
-        service.last_inference_at = datetime.now(timezone.utc)
+        with service._metrics_lock:  # noqa: SLF001 - adapter shares service metrics
+            service.last_inference_at = datetime.now(timezone.utc)
         return batch

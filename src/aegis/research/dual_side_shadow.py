@@ -341,7 +341,7 @@ class DualSideEntryQualityShadowRuntime:
 
     def _mature_outcomes(self) -> None:
         by_symbol = {symbol: [] for symbol in CANONICAL_SYMBOLS}
-        for row in self._signals.rows:
+        for row in self._signals.rows.recent:
             by_symbol[str(row["symbol"])].append(row)
         for rows in by_symbol.values():
             rows.sort(key=lambda row: str(row["market_timestamp"]))
@@ -386,7 +386,7 @@ class DualSideEntryQualityShadowRuntime:
     def _overlay(self, *, cycle: str, timestamp: str) -> Mapping[str, Any]:
         rows = [
             row
-            for row in self._signals.rows
+            for row in self._signals.rows.recent
             if str(row["decision_cycle_id"]) == cycle
             or str(row["market_timestamp"]) == timestamp
         ]

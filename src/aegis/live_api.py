@@ -132,7 +132,7 @@ def create_app(
         return payload
 
     @app.post("/ml-v2/predict")
-    async def predict(request: PredictRequest) -> dict:
+    def predict(request: PredictRequest) -> dict:
         symbol = request.symbol.strip().upper()
         if symbol not in CANONICAL_SYMBOLS:
             raise HTTPException(

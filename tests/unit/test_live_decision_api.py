@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import copy
+import concurrent.futures
+import asyncio
 import inspect
 import math
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,6 +13,7 @@ import pytest
 import httpx
 
 from aegis.config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
+from aegis.context_inference import _batch_from_snapshot
 from aegis.domain import (
     Candle,
     FeedQuality,
@@ -194,6 +198,107 @@ def test_hybrid_live_health_uses_recovered_counters_without_iterating_journal(
 
     assert health["decision_records"] == 0
     assert health["entry_methodology_v2_shadow"]["records"] == 0
+
+
+@pytest.mark.anyio
+async def test_slow_prediction_does_not_block_health() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class SlowService:
+        class Engine:
+            ready = True
+
+        engine = Engine()
+
+        def predict(self, symbol: str, trace_id: str) -> dict:
+            started.set()
+            assert release.wait(timeout=2)
+            return {"aegis": {}, "metadata": {"trace_id": trace_id}}
+
+        def health(self) -> dict:
+            return {"ready": True, "status": "ready"}
+
+    class E4Stub:
+        def health(self) -> dict:
+            return {"available": True}
+
+    transport = httpx.ASGITransport(app=create_app(SlowService(), E4Stub()))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        prediction = asyncio.create_task(
+            client.post("/ml-v2/predict", json={"symbol": "ETHUSDT"})
+        )
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert started.is_set()
+
+        health = await asyncio.wait_for(client.get("/health"), timeout=0.5)
+        assert health.status_code == 200
+        assert health.json()["ready"] is True
+
+        release.set()
+        response = await prediction
+        assert response.status_code == 200
+
+
+def test_same_snapshot_concurrent_batch_evaluates_once() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    class Engine:
+        ready = True
+
+        def evaluate(self, snapshot):
+            nonlocal calls
+            calls += 1
+            entered.set()
+            assert release.wait(timeout=2)
+            return {"market_timestamp": snapshot.closed_at.isoformat().replace("+00:00", "Z")}
+
+    class Observer:
+        mode = "SHADOW"
+        calls = 0
+
+        def observe_batch(self, batch):
+            self.calls += 1
+            return {}
+
+        def health(self):
+            return {}
+
+    class Hybrid:
+        calls = 0
+
+        def apply(self, batch):
+            self.calls += 1
+            return {}
+
+        def health(self):
+            return {}
+
+    observer = Observer()
+    hybrid = Hybrid()
+    service = CurrentBrainDecisionService(
+        Engine(),
+        StaticProvider(None),
+        research_observer=observer,
+        hybrid_live_selector=hybrid,
+    )
+    snapshot = synthetic_snapshot()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(_batch_from_snapshot, service, snapshot)
+        assert entered.wait(timeout=2)
+        second = pool.submit(_batch_from_snapshot, service, snapshot)
+        release.set()
+        assert first.result(timeout=2) is second.result(timeout=2)
+
+    assert calls == 1
+    assert observer.calls == 1
+    assert hybrid.calls == 1
 
 
 def confirm_direction(batch: dict, symbol: str, side: str) -> None:

@@ -641,7 +641,7 @@ class EntryIntelligenceShadowRuntime:
 
     def _mature_outcomes(self) -> None:
         by_symbol = {symbol: [] for symbol in CANONICAL_SYMBOLS}
-        for row in self._signals.rows:
+        for row in self._signals.rows.recent:
             by_symbol[str(row["symbol"])].append(row)
         for rows in by_symbol.values():
             rows.sort(key=lambda row: str(row["market_timestamp"]))
@@ -763,7 +763,7 @@ class EntryIntelligenceShadowRuntime:
 
     def _mature_acceleration_outcomes(self) -> None:
         by_symbol = {symbol: [] for symbol in CANONICAL_SYMBOLS}
-        for row in self._signals.rows:
+        for row in self._signals.rows.recent:
             by_symbol[str(row["symbol"])].append(row)
         for rows in by_symbol.values():
             rows.sort(key=lambda row: str(row["market_timestamp"]))
@@ -822,7 +822,7 @@ class EntryIntelligenceShadowRuntime:
     def _overlay(self, timestamp: str) -> Mapping[str, Any]:
         latest = {
             str(row["symbol"]): row
-            for row in self._signals.rows
+            for row in self._signals.rows.recent
             if str(row["market_timestamp"]) == timestamp
         }
         ranking = [
