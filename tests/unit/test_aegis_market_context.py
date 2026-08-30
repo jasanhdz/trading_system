@@ -9,7 +9,7 @@ def _payload() -> dict:
     closed_at_ms = 1_800_000_000_000
     captured_at_ms = closed_at_ms + 5_000
     first_open_ms = closed_at_ms - 96 * interval
-    series = []
+    universe: dict[str, dict] = {}
     for symbol_index, symbol in enumerate(CANONICAL_SYMBOLS):
         base = 100.0 + symbol_index
         candles = []
@@ -28,18 +28,15 @@ def _payload() -> dict:
                     "closeTime": open_ms + interval - 1,
                 }
             )
-        series.append(
-            {
-                "symbol": symbol,
-                "source": "WEBSOCKET",
-                "status": "FRESH",
-                "observedAtMs": captured_at_ms - 100,
-                "ageMs": 100,
-                "websocketObservedAtMs": captured_at_ms - 100,
-                "restFallbackCount": 0,
-                "candles": candles,
-            }
-        )
+        universe[symbol] = {
+            "source": "WEBSOCKET",
+            "status": "FRESH",
+            "observedAtMs": captured_at_ms - 100,
+            "ageMs": 100,
+            "websocketObservedAtMs": captured_at_ms - 100,
+            "restFallbackCount": 0,
+            "candles": candles,
+        }
     return {
         "version": "AEGIS_MARKET_CONTEXT_V1",
         "symbol": "ETHUSDT",
@@ -49,14 +46,9 @@ def _payload() -> dict:
         "quote": {},
         "orderBook": {},
         "aggTrades": {},
-        "candles5m": {},
+        "candles5m": universe["ETHUSDT"],
+        "universeCandles5m": universe,
         "liquidity": {},
-        "universe5m": {
-            "timeframe": "5m",
-            "closedAtMs": closed_at_ms,
-            "symbolSetHash": CANONICAL_SYMBOL_SET_HASH,
-            "series": series,
-        },
     }
 
 
@@ -71,18 +63,18 @@ def test_market_context_builds_canonical_aligned_snapshot() -> None:
 
 def test_market_context_rejects_missing_canonical_symbol() -> None:
     payload = _payload()
-    payload["universe5m"]["series"].pop()
+    payload["universeCandles5m"].pop("LTCUSDT")
     try:
         market_snapshot_from_context(payload, expected_symbol="ETHUSDT")
     except MarketContextError as exc:
-        assert str(exc) == "AEGIS_MARKET_CONTEXT_UNIVERSE_SIZE_MISMATCH"
+        assert str(exc) == "AEGIS_MARKET_CONTEXT_SYMBOL_ORDER_MISMATCH"
     else:
         raise AssertionError("expected MarketContextError")
 
 
 def test_market_context_rejects_rest_as_steady_state_source() -> None:
     payload = _payload()
-    payload["universe5m"]["series"][0]["source"] = "REST_RECOVERY"
+    payload["universeCandles5m"]["ETHUSDT"]["source"] = "REST_RECOVERY"
     try:
         market_snapshot_from_context(payload, expected_symbol="ETHUSDT")
     except MarketContextError as exc:
