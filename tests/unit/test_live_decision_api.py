@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import httpx
+import aegis.live_api as live_api
 
 from aegis.config import CANONICAL_SYMBOLS, CANONICAL_SYMBOL_SET_HASH
 from aegis.context_inference import _batch_from_snapshot
@@ -57,6 +58,16 @@ class StaticProvider:
     def snapshot(self):
         self.calls += 1
         return self.value
+
+
+class IsolatedE4Stub:
+    """Deterministic E4 dependency for Current Brain HTTP tests."""
+
+    last_cycle = None
+    last_attempt = None
+
+    def health(self) -> dict:
+        return {"available": False}
 
 
 def recent_close() -> datetime:
@@ -642,7 +653,9 @@ async def test_real_pipeline_and_http_adapter_are_lossless(
 ) -> None:
     provider = StaticProvider(current_snapshot)
     service = CurrentBrainDecisionService(real_engine, provider, cache_seconds=60)
-    transport = httpx.ASGITransport(app=create_app(service))
+    transport = httpx.ASGITransport(
+        app=create_app(service, e4_service=IsolatedE4Stub())
+    )
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         for _ in range(20):
             for symbol in CANONICAL_SYMBOLS:
@@ -672,7 +685,9 @@ async def test_twenty_distinct_snapshots_preserve_http_parity_and_feature_driven
         service = CurrentBrainDecisionService(
             real_engine, StaticProvider(snapshot), cache_seconds=60
         )
-        transport = httpx.ASGITransport(app=create_app(service))
+        transport = httpx.ASGITransport(
+            app=create_app(service, e4_service=IsolatedE4Stub())
+        )
         async with httpx.AsyncClient(
             transport=transport, base_url="http://test"
         ) as client:
@@ -703,6 +718,29 @@ async def test_twenty_distinct_snapshots_preserve_http_parity_and_feature_driven
     # Entry variability comes from the feature-driven layers and global selection.
     assert all(len(values) == 1 for values in probability_vectors.values())
     assert any("ENTER_NOW" in values for values in decisions.values())
+
+
+def test_multiple_current_brain_http_adapters_do_not_start_real_e4_or_network(
+    monkeypatch, real_engine, current_snapshot
+) -> None:
+    class UnexpectedE4Construction:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Current Brain HTTP test constructed real E4")
+
+    def unexpected_network_call(*args, **kwargs):
+        raise AssertionError("Current Brain HTTP test touched Binance/network")
+
+    monkeypatch.setattr(live_api, "E4PrecomputeService", UnexpectedE4Construction)
+    monkeypatch.setattr(
+        "aegis.risk_guard.market_snapshot.requests.get", unexpected_network_call
+    )
+
+    for _ in range(20):
+        service = CurrentBrainDecisionService(
+            real_engine, StaticProvider(current_snapshot), cache_seconds=60
+        )
+        app = create_app(service, e4_service=IsolatedE4Stub())
+        assert app is not None
 
 
 @pytest.mark.parametrize("symbol", CANONICAL_SYMBOLS)
@@ -822,7 +860,9 @@ async def test_unknown_symbol_and_malformed_request_fail_safely(
     real_engine, current_snapshot
 ) -> None:
     service = CurrentBrainDecisionService(real_engine, StaticProvider(current_snapshot))
-    transport = httpx.ASGITransport(app=create_app(service))
+    transport = httpx.ASGITransport(
+        app=create_app(service, e4_service=IsolatedE4Stub())
+    )
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         assert (
             await client.post("/ml-v2/predict", json={"symbol": "UNKNOWN"})
@@ -842,7 +882,9 @@ async def test_model_failure_never_masquerades_as_successful_hold(real_engine) -
             raise CurrentBrainError("TEST_MODEL_UNAVAILABLE")
 
     service = CurrentBrainDecisionService(real_engine, FailingProvider())
-    transport = httpx.ASGITransport(app=create_app(service))
+    transport = httpx.ASGITransport(
+        app=create_app(service, e4_service=IsolatedE4Stub())
+    )
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/ml-v2/predict", json={"symbol": "ETHUSDT"})
         assert response.status_code == 503
@@ -855,7 +897,9 @@ async def test_exit_signal_fails_closed_because_current_brain_has_no_exit_contra
     current_snapshot,
 ) -> None:
     service = CurrentBrainDecisionService(real_engine, StaticProvider(current_snapshot))
-    transport = httpx.ASGITransport(app=create_app(service))
+    transport = httpx.ASGITransport(
+        app=create_app(service, e4_service=IsolatedE4Stub())
+    )
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/ml-v2/exit_signal", json={"symbol": "ETHUSDT"})
         assert response.status_code == 501
