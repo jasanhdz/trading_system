@@ -2,6 +2,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -20,6 +21,7 @@ from aegis.research.prospective_microstructure_w13p import (
     _write_parquet_part,
     progress_report,
 )
+from aegis.shared_binance_rate_limit import SharedBinanceRateLimiter
 
 
 def config(tmp_path: Path, **overrides) -> CollectorConfig:
@@ -94,6 +96,15 @@ def test_local_book_snapshot_sequence_duplicate_gap_cross_and_resync():
     assert not book.install_snapshot({"lastUpdateId": 200, "bids": [["100", "1"]], "asks": [["101", "1"]]})
     assert book.integrity.crossed_books == 1
     assert not book.integrity.valid
+
+
+def test_shared_binance_rate_limiter_coordinates_instances(tmp_path: Path):
+    limiter_a = SharedBinanceRateLimiter("a", tmp_path / "budget.sqlite3")
+    limiter_b = SharedBinanceRateLimiter("b", tmp_path / "budget.sqlite3")
+    limiter_a.acquire(1_500, "candles")
+    assert limiter_b.snapshot()["available_weight"] < 400
+    limiter_b.note_rate_limit(int(time.time() * 1000) + 1_000, 429)
+    assert limiter_b.snapshot()["cooldown_until"] > int(time.time() * 1000)
 
 
 def test_snapshot_accepts_first_diff_starting_at_next_update_id():

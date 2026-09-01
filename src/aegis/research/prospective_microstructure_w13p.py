@@ -28,6 +28,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
 
+from aegis.shared_binance_rate_limit import SharedBinanceRateLimiter
+
 SCHEMA_VERSION = "aegis-w13p-v1"
 SIGNAL_SCHEMA = "aegis-prospective-signal-evidence-v1"
 CURRENT_QUALITY_GATE_VERSION = "w13p-quality-v3-post-signal-ring-backfill"
@@ -656,6 +658,7 @@ class W13PSidecar:
         self.snapshot_semaphore = asyncio.Semaphore(1)
         self.snapshot_backoff_until_monotonic = 0.0
         self.snapshot_rate_limit_count = 0
+        self.shared_rate_limiter = SharedBinanceRateLimiter("w13p-passive-microstructure-collector")
 
     async def run(self, duration_seconds: float | None = None) -> None:
         self._assert_disk_safe()
@@ -732,6 +735,7 @@ class W13PSidecar:
                     "snapshot_backoff_remaining_seconds": max(
                         0.0, self.snapshot_backoff_until_monotonic - time.monotonic()
                     ),
+                    "shared_rate_limit": self.shared_rate_limiter.snapshot(),
                     "ring_event_counts": {
                         symbol: dict(counts)
                         for symbol, counts in self.core.ring_type_counts.items()
@@ -807,6 +811,11 @@ class W13PSidecar:
                 return
             for attempt in range(5):
                 try:
+                    await asyncio.to_thread(
+                        self.shared_rate_limiter.acquire,
+                        20,
+                        "depth_snapshot",
+                    )
                     async with session.get(self.config.public_snapshot_url, params=params) as response:
                         if response.status in {418, 429}:
                             body = await response.text()
@@ -815,6 +824,9 @@ class W13PSidecar:
                             )
                             self.snapshot_backoff_until_monotonic = time.monotonic() + delay
                             self.snapshot_rate_limit_count += 1
+                            self.shared_rate_limiter.note_rate_limit(
+                                int(time.time() * 1000 + delay * 1000), response.status
+                            )
                             self.books[symbol].invalidate()
                             return
                         response.raise_for_status()
