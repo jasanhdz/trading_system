@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis-w12-ideal-entry-decision-attribution-v1",
+  "type": "object",
+  "required": ["decision_id", "decision_model_family", "decision_model_instance_id", "entry_quality_score", "predicted_side", "predicted_horizon_minutes", "decision", "created_at", "feature_snapshot_at"],
+  "properties": {
+    "decision_id": {"type": "string"},
+    "decision_model_family": {"const": "W12_IDEAL_ENTRY"},
+    "decision_model_instance_id": {"type": "string"},
+    "entry_quality_score": {"type": "number", "minimum": 0, "maximum": 100},
+    "predicted_side": {"enum": ["LONG", "SHORT", "SKIP"]},
+    "predicted_horizon_minutes": {"enum": [15, 30, 60]},
+    "decision": {"enum": ["ENTER", "SKIP"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "feature_snapshot_at": {"type": "string", "format": "date-time"},
+    "symbol": {"type": "string"},
+    "model_version": {"type": "string"},
+    "score_percentile": {"type": "number"}
+  },
+  "additionalProperties": false
+}

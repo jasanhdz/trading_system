@@ -1,0 +1,24 @@
+{
+  "schema_version": "aegis-range-r0-artifact-manifest-v1",
+  "created_date": "2026-08-24",
+  "status": "AEGIS_RANGE_R0_READY_FOR_REVIEW",
+  "hash_algorithm": "sha256",
+  "artifacts": {
+    "docs/aegis-range-v1/AEGIS_RANGE_R0_PREREGISTRATION_REPORT.md": "6cf7faef4590f80f1c9a224957a3064fa6999f00661e440e9b278521d06e6342",
+    "docs/aegis-range-v1/r0_source_manifest.json": "39cd5b8371ef4d193fcce22e6d6392ceaff8b802b52b4589d0c27cfa583a7704",
+    "docs/aegis-range-v1/r0_split_manifest.json": "a67766d8ab446c657260550d37c55589d94cc11afba064ae3f043db803868c03",
+    "docs/aegis-range-v1/r0_production_diff.json": "cb8d5ddd3e4b84eff229f096387e199731c5bed32278415beadd33572c5b9c55"
+  },
+  "self_hash_policy": "The artifact manifest intentionally does not contain its own hash. Report it from the final read-only verification.",
+  "authority_boundary": {
+    "r0_complete": true,
+    "r1_authorized": false,
+    "r2_authorized": false,
+    "train_executed": false,
+    "calibration_executed": false,
+    "pre_validation_spec_frozen": false,
+    "validation_opened": false,
+    "holdout_opened": false,
+    "production_modified": false
+  }
+}

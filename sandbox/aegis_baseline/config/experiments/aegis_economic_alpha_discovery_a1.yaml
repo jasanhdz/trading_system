@@ -1,0 +1,172 @@
+schema_version: aegis-economic-alpha-discovery-a1-preregistration-v1
+experiment_id: aegis-economic-alpha-discovery-a1-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+runtime_selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  m1c_config_sha256: ce5fdbf98afa29d46dcf7cced23bd5e1890ae73738895d2a87de9cff1735dc7e
+  m1c_result_sha256: aafdf4ab500f7c17f53b4aceca6fa1cf9650a7e0e66b7f0c31850aedb70715a7
+  m1c_private_result_sha256: 274a44e8b8bb872692ef59a7e2a293e0743ff0300c78be080a5fd3baa8404045
+  base_archive_manifest_sha256: f6635e39862b4dfb5dafbbca45bde2581444ada04e332bdcc84bb198552aa278
+  economic_archive_manifest_sha256: 1cc559055937f3d2432f0559a6badda6865495fdfd26f52f3f02c0943836f92b
+  source_commit: ae324ed75d5e08ea6447b4841d91dcbb342f6d9c
+
+objective:
+  statement: >-
+    Discover whether any preregistered economic mechanism has stable gross and
+    net directional information before introducing machine learning.
+  primary_metric: CROSS_SECTIONAL_TOP_RANK_NET_EXPECTANCY
+  accuracy_is_primary: false
+  abstention_is_valid: true
+  minimum_gross_edge_multiple_of_primary_cost: 3.0
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  state_interval: 15m
+  source_interval: 1m
+  entry: NEXT_15M_OPEN_AFTER_CAUSAL_STATE_CLOSE
+  horizons_minutes: [60, 240, 480, 720, 1440]
+
+data:
+  sources:
+    - checksum_verified_futures_1m_klines
+    - checksum_verified_spot_1m_klines
+    - checksum_verified_mark_price_1m_klines
+    - checksum_verified_funding_history
+  optional_absent:
+    - historical_order_book_depth
+    - historical_liquidations
+    - historical_news
+    - entity_attributed_whale_flows
+  missing_optional_value: NOT_PRESENT
+  synthetic_fill: PROHIBITED
+  incomplete_15m_bar: REJECT
+  incomplete_future_path: REJECT
+
+mechanisms:
+  TREND_ACCEPTANCE:
+    economic_claim: sustained_breakout_with_cross_sectional_leadership
+    frozen_score: >-
+      mean(z_4h_return, z_24h_return, z_volume_persistence,
+      z_taker_flow_persistence, z_breakout_acceptance, z_relative_strength_btc)
+    eligible:
+      breakout_acceptance_positive: true
+      volume_persistence_train_quantile_gte: 0.60
+      side_taker_flow_persistence_positive: true
+    directions: [LONG, SHORT]
+  EXTREME_REVERSAL:
+    economic_claim: statistically_extreme_extension_with_flow_exhaustion_and_reclaim
+    frozen_score: >-
+      mean(z_extension_extremity, z_flow_exhaustion, z_reclaim_strength,
+      z_wick_rejection, z_relative_reversal)
+    eligible:
+      extension_extremity_train_quantile_gte: 0.90
+      reclaim_strength_positive: true
+      flow_exhaustion_positive: true
+    directions: [LONG, SHORT]
+  CARRY_CONVERGENCE:
+    economic_claim: crowded_funding_and_mark_spot_dislocation_that_converges
+    frozen_score: >-
+      mean(z_side_favorable_basis_extremity, z_side_favorable_funding,
+      z_basis_convergence, z_liquidity)
+    eligible:
+      basis_extremity_train_quantile_gte: 0.90
+      side_favorable_funding_positive: true
+      basis_convergence_positive: true
+    directions: [LONG, SHORT]
+
+features:
+  causal_cutoff: STATE_CLOSE_INCLUSIVE
+  standardization: TRAIN_CROSS_SECTIONAL_ROBUST_ZSCORE
+  clipping: TRAIN_Q001_Q999
+  groups:
+    price: [return_1h, return_4h, return_24h, realized_volatility_4h, realized_volatility_24h]
+    trend: [breakout_acceptance_1h, distance_sma_4h, distance_sma_24h]
+    flow: [taker_flow_15m, taker_flow_1h, taker_flow_persistence_1h, volume_persistence_1h]
+    reversal: [extension_z_24h, reclaim_strength_1h, wick_rejection_1h, flow_exhaustion_1h]
+    cross_market: [mark_spot_basis, basis_z_7d, basis_convergence_1h, funding_rate, funding_age_hours]
+    relative: [relative_strength_btc_4h, cross_sectional_return_rank_4h, breadth_4h]
+    context: [utc_hour_sin, utc_hour_cos, weekday_sin, weekday_cos]
+  training_serving_contract_required: true
+  missing_extra_reordered_nonfinite: REJECT
+
+outcomes:
+  fixed_horizon_mark_to_market: true
+  entry_and_exit: NEXT_BAR_OPEN
+  record: [gross_return, net_return, mae, mfe, time_to_first_positive, funding_return]
+  path_resolution: 1m
+  costs:
+    ZERO_COST_ATTRIBUTION: 0.0
+    OPTIMISTIC_8BPS: 0.0008
+    PRIMARY_14BPS: 0.0014
+    STRESS_20BPS: 0.0020
+  primary_cost: PRIMARY_14BPS
+
+temporal_protocol:
+  train: ['2024-01-01T00:00:00Z', '2025-04-01T00:00:00Z']
+  calibration: ['2025-04-01T00:00:00Z', '2025-10-01T00:00:00Z']
+  contaminated_validation: ['2025-10-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 1440
+  embargo_minutes: 1440
+  validation_open_once: true
+  retrospective_promotion_authority: false
+
+ranking:
+  select_per_timestamp_mechanism_side: 1
+  minimum_score_quantile_from_calibration: 0.90
+  score_quantile_search: PROHIBITED
+  duplicate_symbol_horizon_event: PROHIBITED
+  overlapping_event_analysis: REPORT_BOTH_ALL_AND_DAILY_SPACED
+  daily_spaced_minimum_minutes_per_symbol_mechanism_side: 1440
+
+controls:
+  - NO_TRADE
+  - ALL_ELIGIBLE_EVENTS
+  - CROSS_SECTIONAL_RANDOM_ELIGIBLE
+  - TIME_REGIME_MATCHED_RANDOM
+  - SIMPLE_4H_MOMENTUM
+  - SIMPLE_4H_REVERSAL
+  - BUY_AND_HOLD_BTC_DIRECTIONAL_REFERENCE
+
+gate:
+  applied_per_mechanism_side_horizon: true
+  minimum_daily_spaced_validation_events: 100
+  gross_expectancy_gte: 0.0042
+  primary_net_expectancy_gt: 0.0
+  day_block_bootstrap_net_lower_95_gt: 0.0
+  day_block_bootstrap_profit_factor_lower_95_gt: 1.0
+  positive_temporal_thirds_gte: 2
+  maximum_symbol_share_lte: 0.25
+  positive_symbols_gte: 7
+  outperform_all_controls: true
+  primary_cost_survives: true
+  stress_cost_survives: true
+  stable_across_direction_regimes_gte: 2
+  stable_across_volatility_regimes_gte: 2
+  zero_material_leakage: true
+
+anti_overfitting:
+  no_models_in_a1: true
+  all_mechanism_side_horizon_results_retained: true
+  no_threshold_tuning_on_validation: true
+  no_symbol_exclusion_after_results: true
+  no_horizon_selection_claim_on_opened_validation: true
+  no_best_seed_selection: true
+  failed_results_immutable: true
+  future_modeling_requires_separate_preregistration: true
+
+deployment:
+  A1_ECONOMIC_MECHANISM_FOUND: false
+  A1_READY_FOR_MODELING: false
+  A1_READY_FOR_FORWARD_COLLECTION: false
+  A1_READY_FOR_SHADOW: false
+  A1_READY_FOR_LIVE: false
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0

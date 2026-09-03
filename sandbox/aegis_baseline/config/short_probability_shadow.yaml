@@ -1,0 +1,36 @@
+schema_version: aegis-short-probability-semantics-shadow-v1
+experiment_id: aegis-short-probability-semantics-shadow-01
+enabled: true
+mode: SHADOW
+runtime_authority: OBSERVATIONAL_ONLY
+
+artifacts:
+  profitability:
+    path: config/bundles/aegis-short-terminal-profitability-rf-shadow-v1.json
+    sha256: effa9cb125098d4ec130ef7c104a892f9eba956aab385d1213b21f999e4eb568
+    probability_semantics: TERMINAL_NET_POSITIVE_H12_AFTER_COSTS
+    offline_validation_state: FAILED
+  clean_entry:
+    path: config/bundles/aegis-entry-quality-v2-short-opportunity-rf-v2.json
+    sha256: 9afdf47d718c78583a2265b79da66473e1ea2b4bf714088bb891663b10ede175
+    probability_semantics: CLEAN_ENTRY_LOW_MAE_H12
+
+evidence:
+  journal_root: ../data/short_probability_semantics_shadow
+  signal_journal: signals_v2.jsonl
+  outcome_journal: outcomes_v2.jsonl
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+  maximum_clean_mae_fraction: 0.01
+
+semantics:
+  short_prob: SIDE_AUTHORITY_NOT_PROFITABILITY_CONFIDENCE
+  terminal_net_positive_probability: P_NET_SHORT_RETURN_GT_ZERO_AT_H12_AFTER_COSTS
+  clean_entry_probability: P_CLEAN_SHORT_PATH_WITH_BOUNDED_MAE_H12
+  legacy_expected_return: UNDER_SEPARATE_AUDIT
+
+authority:
+  selection_effect: NONE
+  exchange_authority: false
+  exchange_mutations: 0
+  automatic_promotion: false

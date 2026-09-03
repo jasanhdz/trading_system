@@ -1,0 +1,131 @@
+{
+  "artifacts": {
+    "candidate_metrics": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/r2_train/run_a/candidate_metrics.json",
+      "rows": 384,
+      "sha256": "12f72be45420099d7ab0a56524ca934e791dfbaa9da0c0add87277d7939b656f"
+    },
+    "episodes": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/r2_train/run_a/episodes.jsonl.gz",
+      "rows": 1457408,
+      "sha256": "82989a83a68935ed44866afb2f5904e703c81e27b50acde5fe1c2fabd6af5270"
+    },
+    "report": {
+      "path": "docs/aegis-range-v1/AEGIS_RANGE_R2_TRAIN_BACKTEST_REPORT.md",
+      "sha256": "1cb2c9145f01796d8ae05169fbc7e9d37247ad810a10e84916f1b243ec165bb4"
+    },
+    "run_manifest": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/r2_train/run_a/run_manifest.json",
+      "sha256": "5f62022f35fb38de174e6f7c573397d1c1ceebc75d76f7d848260c35456012b8"
+    },
+    "trades": {
+      "path": "sandbox/aegis_range_strategy_v1/artifacts/r2_train/run_a/trades.jsonl.gz",
+      "rows": 22016,
+      "sha256": "125f31dcb1bf27e6f183bbbb02da901a5133847e577196a9bd6a59be42cd4537"
+    }
+  },
+  "audit": {
+    "all_11_shard_hashes_match": true,
+    "artifact_hashes_match": true,
+    "candidate_count_errors": 0,
+    "episode_formula_errors": 0,
+    "funding_interval_errors": 0,
+    "orphan_trade_episode_keys": 0,
+    "partition_violations": 0,
+    "purged_episodes": 704,
+    "purged_trades": 0,
+    "replay_hashes_recorded": 4224,
+    "stress_population_or_order_errors": 0,
+    "trade_formula_errors": 0
+  },
+  "authority": {
+    "base_commit": "5ecfa7009f6cfe3f700cdc1607aacb15ce245614",
+    "dataset_logical_sha256": "587476db7f427670e0f4225ce06cd4058604d73c3ea885c95feb0492a2589ce8",
+    "lineage_reconciliation_report_sha256": "b21fc0e85286c09e5ac53a12a30965858aaa15858464847ec9486509a94274c5",
+    "post_r1_revalidation_manifest_sha256": "9fa69860198843a07d14f61116a458738e433939c4ecd7f0c6418ff87512e4d1",
+    "r1_manifest_sha256": "2a55d0a5511b178b8d8c8a5b0a7259ecffe800e59b715234c75ff2eea8639d5c",
+    "r1_verified_files": 42,
+    "source_gap_policy": "MONTHLY_PRIMARY_DAILY_GAP_FILL_V1"
+  },
+  "conclusion": {
+    "baseline_positive_candidates": 0,
+    "baseline_profit_factor_above_one": 0,
+    "candidate_selected": false,
+    "descriptive_best_candidate": "C371",
+    "descriptive_best_tied_candidate": "C369",
+    "descriptive_median_candidate": "C364",
+    "descriptive_worst_candidate": "C093",
+    "positive_in_all_scenarios": 0,
+    "promotion_authorized": false,
+    "status": "AEGIS_RANGE_R2_TRAIN_BACKTEST_COMPLETE_REJECT_NO_EDGE"
+  },
+  "execution": {
+    "candidate_count": 384,
+    "embargo_end": "2024-01-03T00:00:00.000Z",
+    "official_run": "run_a",
+    "run_b_official": false,
+    "scenarios": [
+      "BASELINE",
+      "STRESS_20",
+      "STRESS_30"
+    ],
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "BNBUSDT",
+      "XRPUSDT",
+      "DOGEUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "LINKUSDT",
+      "SUIUSDT",
+      "LTCUSDT"
+    ],
+    "train_end_exclusive": "2025-01-01T00:00:00.000Z",
+    "train_start_inclusive": "2024-01-01T00:00:00.000Z"
+  },
+  "phase_boundary": {
+    "calibration_opened": false,
+    "candidate_selected": false,
+    "holdout_opened": false,
+    "pre_validation_spec_frozen": false,
+    "validation_opened": false
+  },
+  "results": {
+    "aggregate_abstention_rate": 0.9848864285400466,
+    "baseline_expectancy_max": -0.0002196775595685362,
+    "baseline_expectancy_median": -0.0016074889149501359,
+    "baseline_expectancy_min": -0.0027473480870028647,
+    "baseline_win_rate": 0.2539970930232558,
+    "nonpurged_episodes": 1456704,
+    "operated_episodes": 22016,
+    "stress_20_expectancy_max": -0.0008200958771812508,
+    "stress_30_expectancy_max": -0.0018209653225325206,
+    "trades": 22016
+  },
+  "schema_version": "aegis-range-r2-train-backtest-manifest-v1",
+  "source_files": {
+    "batch_bridge": {
+      "path": "sandbox/aegis_range_strategy_v1/scripts/regime_v2_train_batch_bridge.cjs",
+      "sha256": "f55156435719a650218a0379c181733351e222d103f36ed0d22b85a2e49f8acc"
+    },
+    "runner_cli": {
+      "path": "sandbox/aegis_range_strategy_v1/scripts/run_train_backtest.py",
+      "sha256": "700309714cda1eeb371bbefd55f6e752ef26f673eeb2a58eae3d9ecd10041a3b"
+    },
+    "runner_module": {
+      "path": "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/train_backtest.py",
+      "sha256": "bd7bf2686d7f4fbf4ed6ef2b23785b94f7b696f8f8f018c025f492b967001143"
+    },
+    "runner_tests": {
+      "path": "sandbox/aegis_range_strategy_v1/tests/test_train_backtest.py",
+      "sha256": "79f163b259609f93deea1a1df0a612957a239cebc3d9474658accb86435e0bca"
+    }
+  },
+  "tests": {
+    "python": "89/89 PASS",
+    "r1_integrity": "42/42 MATCH",
+    "typescript_frozen": "17/17 PASS"
+  }
+}

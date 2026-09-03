@@ -1,0 +1,94 @@
+{
+  "schema": "independent-entry-quality-discovery-v1-preregistration",
+  "experiment": "INDEPENDENT_ENTRY_QUALITY_DISCOVERY_V1",
+  "classification": "RETROSPECTIVE_DISCOVERY_WITH_TEMPORAL_OOS_VALIDATION",
+  "frozen_at": "2026-08-18T00:00:00Z",
+  "independent_from_aegis": true,
+  "independent_from_phase2_candidates": true,
+  "symbols": ["ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT", "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT"],
+  "source": {
+    "market": "BINANCE_USDM_PUBLIC_MONTHLY_KLINES",
+    "start_inclusive": "2023-05-01T00:00:00Z",
+    "end_exclusive": "2024-01-01T00:00:00Z",
+    "resolution": "1m",
+    "decision_cadence_minutes": 60,
+    "outcome_horizon_minutes": 60,
+    "same_symbol_overlap_minutes": 60
+  },
+  "splits": {
+    "TRAIN": ["2023-09-01T00:00:00Z", "2023-10-16T00:00:00Z"],
+    "EMBARGO_1": ["2023-10-16T00:00:00Z", "2023-10-17T00:00:00Z"],
+    "CALIBRATION": ["2023-10-17T00:00:00Z", "2023-11-06T00:00:00Z"],
+    "EMBARGO_2": ["2023-11-06T00:00:00Z", "2023-11-07T00:00:00Z"],
+    "VALIDATION": ["2023-11-07T00:00:00Z", "2023-12-06T00:00:00Z"],
+    "EMBARGO_3": ["2023-12-06T00:00:00Z", "2023-12-07T00:00:00Z"],
+    "FINAL_HOLDOUT": ["2023-12-07T00:00:00Z", "2024-01-01T00:00:00Z"]
+  },
+  "contamination": {
+    "strategy_router_v1_discovery_contaminated": ["2024-01-01T00:00:00Z", "2024-10-01T00:00:00Z"],
+    "w1_w14_holdouts": "SEALED_UNREAD",
+    "prior_research_exposure_before_2024": "POSSIBLE_LIMITATION_NOT_PROSPECTIVE_CLEAN"
+  },
+  "primary_target": {
+    "atr_reference": "ATR14_LAST_CLOSED_15M_AT_DECISION",
+    "favorable_barrier_atr": 0.5,
+    "adverse_barrier_atr": 0.5,
+    "horizon_minutes": 60,
+    "same_bar_ambiguity": "ADVERSE_FIRST",
+    "conservative_cost_bps": 20.0,
+    "economic_hurdle_net_bps": 20.0
+  },
+  "opportunity_target": {
+    "definition": "MAX_ABSOLUTE_EXCURSION_WITHIN_60M_GE_MAX_0_5ATR_OR_20BPS",
+    "direction_independent": true
+  },
+  "sampling": {
+    "both_sides_per_market_state": true,
+    "same_timestamp_sides_share_group": true,
+    "cross_symbol_temporal_block": "UTC_HOUR",
+    "future_outcomes_for_holdout": false
+  },
+  "models": {
+    "primary_quality_model": "TWO_STAGE_LOGISTIC_OPPORTUNITY_X_FAVORABLE_FIRST",
+    "constant_empirical": true,
+    "logistic": {"C": 1.0, "penalty": "l2", "max_iter": 2000, "class_weight": null},
+    "ridge": {"alpha": 1.0},
+    "shallow_tree": {"max_depth": 3, "min_samples_leaf": 200},
+    "gradient_boosting_gate": "ONLY_AFTER_SIMPLE_VALIDATION_SIGNAL",
+    "deep_learning": false
+  },
+  "coverage_levels": [1.0, 0.5, 0.25, 0.1, 0.05, 0.02],
+  "feature_ablations": ["PRICE_PATH", "STRUCTURE_LOCATION", "TREND_EXTENSION", "VOLATILITY_VOLUME", "FLOW_RESPONSE", "CROSS_MARKET", "FULL"],
+  "support": {
+    "minimum_train_rows": 20000,
+    "minimum_train_hour_groups": 1000,
+    "minimum_validation_rows": 10000,
+    "minimum_validation_hour_groups": 600,
+    "minimum_symbols": 10,
+    "minimum_selected_effective_groups": 500
+  },
+  "success": {
+    "classification_auc_minimum": 0.55,
+    "classification_ece_maximum": 0.10,
+    "classification_logloss_must_beat_constant": true,
+    "ranking_spearman_minimum": 0.7,
+    "monotonic_required_levels": [1.0, 0.5, 0.25, 0.1],
+    "primary_coverage": 0.1,
+    "net_ci_lower_above_bps": 0.0,
+    "minimum_positive_symbols": 6,
+    "minimum_positive_week_fraction": 0.6666666667,
+    "economically_material_net_bps": 20.0
+  },
+  "statistics": {
+    "episode_bootstrap_samples": 10000,
+    "block_bootstrap_samples": 10000,
+    "seed": 20260818,
+    "fdr_alpha": 0.05
+  },
+  "cost_scenarios_bps": [0.0, 14.0, 20.0, 30.0],
+  "final_holdout": {
+    "state": "SEALED_NOT_OPENED",
+    "open_automatically": false
+  },
+  "prohibited": ["AEGIS_OUTPUTS", "PHASE2_CANDIDATE_CONDITIONING", "RULE_SEARCH", "GRID_SEARCH", "HOLDOUT_LABEL_BUILD", "PRODUCTION_CHANGES", "SHADOW", "LIVE"]
+}

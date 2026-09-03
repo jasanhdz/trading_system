@@ -1,0 +1,108 @@
+schema_version: aegis-safety-gated-ranker-v17-preregistration-v1
+experiment_id: aegis-safety-gated-ranker-v17-research-01
+mode: RESEARCH_ONLY
+selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  source_v15_config: config/experiments/aegis_directional_contract_v15_research.yaml
+  source_v15_config_sha256: 57a8c3dd3ba6171efcb6825fc804ed103a400e2447995e4b7362639fa42cfe12
+  source_v16_config: config/experiments/aegis_economic_ranker_v16_research.yaml
+  source_v16_config_sha256: fce064cacfcedb4cf5cf8bc4cc83398cb8be7143719301e4afa6b514c451e6d0
+  source_v16_validation: data/economic_ranker_v16/validation.json
+  source_v16_validation_sha256: 22d8b9b02f53eae6c8439ca13e8085981a1cdd26fae6ee5460b99d10932f6b24
+  source_v16_report: reports/governance/aegis_prospective_validation/live/economic_ranker_v16/aegis_economic_ranker_v16_research_report.md
+  source_v16_report_sha256: 17680907d5c6b47993b2190c210e225b0479bb293ae5803294a33b6523edd445
+  source_v16_verdict: reports/governance/aegis_prospective_validation/live/economic_ranker_v16/economic_ranker_v16_verdict.json
+  source_v16_verdict_sha256: 5bb2b76d740a851e3e46b904e0396a0f82235284fba1f3a9025ae910cc150810
+  evidence_status: RETROSPECTIVE_AFTER_V16
+  entry_rule: NEXT_BAR_OPEN
+
+feature_contracts:
+  LONG: V15_LONG_129
+  SHORT: V15_SHORT_168
+  add_features: NONE
+  remove_features: NONE
+
+controls:
+  safety_composite:
+    identity: V15_INDEPENDENT_HEAD_COMPOSITE
+    policy: V15_CALIBRATION_ONLY_SCORE_QUANTILE
+  direct_ranker:
+    identity: V16_PAIRWISE_TRAJECTORY_RANKER
+    policy: V16_CALIBRATION_ONLY_SCORE_QUANTILE
+
+candidate:
+  identity: V17_SAFETY_GATE_THEN_PAIRWISE_RANKER
+  one_pipeline_per_side: true
+  safety_heads:
+    clean: V15_BALANCED_LOGISTIC_CLASSIFIER
+    danger: V15_BALANCED_LOGISTIC_CLASSIFIER
+    mae: V15_HISTOGRAM_GRADIENT_BOOSTING_Q90
+  ranker: V16_STANDARDIZED_SGD_LOGISTIC_PAIRWISE
+  ranking_scope: SAFETY_GATE_SURVIVORS_ONLY
+  maximum_selected_per_timestamp: 1
+  prohibit_test_training: true
+  prohibit_test_threshold_tuning: true
+
+calibration:
+  split_method: CHRONOLOGICAL_HALF
+  gate_calibration_role: FIRST_HALF
+  rank_calibration_role: SECOND_HALF
+  gate_grid:
+    minimum_clean_probability_quantiles: [0.00, 0.25, 0.50]
+    maximum_danger_probability_quantiles: [0.25, 0.50, 0.75]
+    maximum_mae_q90_quantiles: [0.25, 0.50, 0.75]
+  gate_choice_order:
+    - LOWER_ADVERSE_FIRST_RATE
+    - LOWER_MEAN_MAE
+    - HIGHER_MEAN_UTILITY
+    - HIGHER_SURVIVOR_RATE
+  rank_score_quantiles: [0.80, 0.90, 0.95]
+  rank_choice_order:
+    - HIGHER_MEAN_UTILITY
+    - HIGHER_CVAR
+    - LOWER_MEAN_MAE
+  minimum_gate_survivors: 100
+  minimum_gate_survivor_rate: 0.10
+  minimum_rank_selected: 20
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD_WITH_SPLIT_CALIBRATION
+  embargo_minutes: 120
+  minimum_rows_per_partition: 500
+  minimum_training_pairs: 10000
+  required_improvement_folds: 3
+  folds:
+    - {id: 1, train_end: '2025-11-26T18:55:00+00:00', calibration_end: '2026-01-02T06:55:00+00:00', test_end: '2026-02-07T18:55:00+00:00'}
+    - {id: 2, train_end: '2026-01-02T06:55:00+00:00', calibration_end: '2026-02-07T18:55:00+00:00', test_end: '2026-03-16T06:55:00+00:00'}
+    - {id: 3, train_end: '2026-03-16T06:55:00+00:00', calibration_end: '2026-04-21T18:55:00+00:00', test_end: '2026-05-28T06:55:00+00:00'}
+    - {id: 4, train_end: '2026-07-03T18:55:00+00:00', calibration_end: '2026-07-17T18:55:00+00:00', test_end: '2026-08-09T06:55:00+00:00'}
+  require_positive_mean_utility: true
+  require_improvement_over_both_controls:
+    - mean_utility
+    - cvar
+    - positive_rate
+    - adverse_first_rate
+    - mean_mae_fraction
+    - clean_rate
+  minimum_selection_count_ratio_vs_v16: 0.50
+  maximum_p95_gap_ratio_vs_v16: 2.00
+
+promotion:
+  current_experiment_can_promote: false
+  reason: NO_POST_V16_UNTOUCHED_HOLDOUT
+  future_holdout_required: true
+  shadow_authorization_required: true
+  live_promotion: PROHIBITED
+
+deployment:
+  model_export: PROHIBITED
+  shadow_runtime: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0

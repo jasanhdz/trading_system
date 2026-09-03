@@ -1,0 +1,55 @@
+schema_version: aegis-technical-entry-guard-ablation-v1
+experiment_id: AEGIS_TECHNICAL_ENTRY_GUARD_FACTOR_ABLATION
+scope: PYTHON_OFFLINE_RETROSPECTIVE_RESEARCH_ONLY
+seed: 20260817
+
+sources:
+  dataset: data/entry_safety_gate_w11/run_01/w11_candidates_train_validation.parquet
+  train_split: W11_TRAIN
+  validation_split: W11_VALIDATION
+  sealed_holdout_start: 2026-08-01T00:00:00Z
+  sealed_holdout_status: SEALED_NOT_OPENED
+
+thresholds:
+  rsi_remaining_room: 30.0
+  ema25_opposed_atr: 0.0
+  ema25_extended_atr: 1.0
+  prior_move_atr: 1.5
+  favorable_space_atr: 0.75
+  price_return_1m_bps: -5.0
+  price_return_5m_bps: -5.0
+  taker_imbalance: -0.10
+  atr_percentile: 0.90
+  volume_ratio: 2.50
+  path_efficiency: 0.35
+
+selection:
+  maximum_selected_t0_policies: 3
+  maximum_selected_breakout_policies: 1
+  minimum_train_executed: 75
+  minimum_train_execution_rate: 0.25
+  maximum_train_execution_rate: 0.90
+  minimum_train_good_retention: 0.50
+  minimum_train_bad_avoidance: 0.20
+
+validation:
+  baseline_cost_bps: 14.0
+  stress_cost_bps: 20.0
+  minimum_validation_executed: 35
+  minimum_validation_execution_rate: 0.20
+  minimum_net_bps_per_signal: 0.0
+  minimum_net_bps_per_trade: 0.0
+  minimum_improvement_bps_per_signal: 2.0
+  minimum_good_retention: 0.50
+  minimum_bad_avoidance: 0.20
+  bootstrap_samples: 10000
+
+restrictions:
+  production_modified: false
+  typescript_modified: false
+  live_guard_modified: false
+  pm2_modified: false
+  authenticated_api_used: false
+  orders_sent: false
+  holdout_opened: false
+

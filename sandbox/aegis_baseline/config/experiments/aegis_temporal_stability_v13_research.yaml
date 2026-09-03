@@ -1,0 +1,137 @@
+schema_version: aegis-temporal-stability-v13-preregistration-v1
+experiment_id: aegis-temporal-stability-v13-research-01
+mode: RESEARCH_ONLY
+selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_experiment: aegis-joint-path-v12-research-01
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_manifest: data/calibrated_horizon_v11/dataset_manifest.json
+  source_v12_validation: data/joint_path_v12/validation.json
+  source_v12_config: config/experiments/aegis_joint_path_v12_research.yaml
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  source_manifest_sha256: 8648567317d7d7690c917afcb36049e1f4af01168c2f9f8b871718cbc41934f4
+  source_v12_validation_sha256: 964db032993681eea4386c2416e346fa37128293f059d3d6637474c16cd3df62
+  source_v12_config_sha256: 4cbcdab4cf69154851e8bc3585234128e4cead95e006fa9afdf2561fe2298403
+  episodes: 48191
+  symbols: 11
+  entry_rule: NEXT_BAR_OPEN
+
+models:
+  joint_state_classes:
+    - COHERENT_CLEAN_FAVORABLE
+    - COHERENT_DIRTY_FAVORABLE
+    - ADVERSE_FIRST
+    - SAME_BAR_AMBIGUOUS
+    - UNRESOLVED_OR_DIRECTION_MISMATCH
+  historical:
+    training_window: EXPANDING
+    max_iter: 60
+  recent:
+    training_window_days: 120
+    minimum_training_rows: 1200
+    max_iter: 60
+  regime_expert:
+    enabled: true
+    minimum_training_rows: 1800
+    minimum_calibration_rows: 300
+    max_iter: 60
+  estimator: HISTOGRAM_GRADIENT_BOOSTING
+  one_bundle_per_side: true
+  contracts_stacked_in_training: true
+  no_symbol_specific_estimators: true
+
+agreement:
+  require_historical_recent_dominant_state_match: true
+  require_supported_regime_expert_match: true
+  maximum_jensen_shannon_divergence: 0.08
+  blend: EQUAL_WEIGHT_SUPPORTED_PREDICTORS
+  disagreement_action: ABSTAIN
+  prohibit_test_threshold_tuning: true
+
+distribution_gate:
+  features: V9_SIDE_FEATURES
+  robust_center: MEDIAN
+  robust_scale: INTERQUARTILE_RANGE
+  score: MEDIAN_ABSOLUTE_ROBUST_Z
+  calibration_quantile: 0.95
+  minimum_scale: 0.000001
+  out_of_distribution_action: ABSTAIN
+
+mae_risk:
+  estimator: HISTOGRAM_GRADIENT_BOOSTING_QUANTILE
+  quantile: 0.90
+  historical_and_recent: true
+  conservative_combination: MAXIMUM
+  target: V9_MAE_FRACTION
+  maximum_mae_quantiles: [0.40, 0.50, 0.60, 0.70]
+  prohibit_test_calibration: true
+
+contract_assignment:
+  method: POLICY_WINDOW_CAUSAL_REGIME_TABLE
+  inputs: [SIDE, CAUSAL_REGIME]
+  fallback: SIDE_GLOBAL_POLICY_WINDOW
+  minimum_group_rows: 200
+  minimum_contract_observations: 30
+  prohibit_test_assignment: true
+  prohibit_per_candidate_utility_maximization: true
+
+calibration:
+  method: ONE_VS_REST_PLATT_THEN_NORMALIZE
+  expected_calibration_error_bins: 10
+  maximum_multiclass_ece: 0.10
+  prohibit_test_calibration: true
+
+utility:
+  severe_round_trip_fraction: 0.0020
+  ambiguous_penalty_fraction_of_adverse: 1.0
+  unresolved_penalty_fraction_of_adverse: 0.25
+  dirty_favorable_discount: 0.50
+  clean_favorable_discount: 1.0
+  require_positive_conservative_utility: true
+
+selection:
+  coherent_probability_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  adverse_probability_quantiles: [0.30, 0.40, 0.50]
+  unknown_probability_quantiles: [0.30, 0.40, 0.50]
+  utility_quantiles: [0.50, 0.60, 0.70, 0.80, 0.90]
+  maximum_selected_per_timestamp: 1
+  minimum_policy_selections: 30
+  prohibit_forced_trade_quota: true
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD_TEMPORAL_CONSENSUS
+  folds: 4
+  embargo_minutes: 120
+  probability_calibration_fraction: 0.50
+  contract_assignment_fraction_of_policy: 0.50
+  minimum_test_selections_per_fold: 15
+  minimum_positive_folds: 3
+  require_worst_fold_non_negative: true
+  minimum_historical_skilled_folds: 3
+  minimum_recent_skilled_folds: 3
+  require_realized_utility_above_v12_control: true
+  require_cvar_above_v12_control: true
+  require_payoff_ratio_at_least: 1.0
+  maximum_p95_opportunity_gap_hours: 96
+  minimum_clean_selected_rate: 0.40
+  maximum_adverse_first_rate: 0.30
+  require_mae_below_unfiltered_control: true
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+  prohibit_test_threshold_tuning: true
+
+manual_interventions:
+  pyramiding: EXCLUDED_FROM_AUTONOMOUS_LABELS
+  manual_closes: EXCLUDED_FROM_AUTONOMOUS_LABELS
+  future_role: SEPARATE_CAUSAL_POLICY_STUDY
+
+deployment:
+  model_export: PROHIBITED_UNTIL_ALL_GATES_PASS
+  shadow_runtime: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0

@@ -1,0 +1,129 @@
+schema_version: aegis-event-path-quality-c2a-preregistration-v1
+experiment_id: aegis-event-path-quality-c2a-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+hypothesis:
+  statement: >-
+    Public taker-flow events contain incremental information about whether a
+    favorable barrier is reached before an adverse barrier, path MAE/MFE and
+    time to first favorable excursion beyond price-only and matched-random
+    controls.
+  forbidden_interpretation: DIRECTIONAL_ACCURACY_ALONE_IS_EDGE
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  venue: BINANCE_USDM_PERPETUAL
+
+data:
+  source: BINANCE_PUBLIC_CHECKSUM_VERIFIED_ARCHIVES
+  acquisition_start_month: '2025-08'
+  acquisition_end_month: '2026-07'
+  first_bounded_batch: ['2026-06', '2026-07']
+  required_datasets: [FUTURES_1M_KLINES, FUTURES_AGG_TRADES]
+  optional_incremental_datasets: [OPEN_INTEREST, LIQUIDATIONS, DEPTH]
+  event_timestamp: LAST_AGG_TRADE_TIMESTAMP_IN_COMPLETE_1M_BUCKET
+  decision_timestamp: EVENT_MINUTE_CLOSE
+  entry: NEXT_COMPLETE_1M_OPEN
+  future_fill: PROHIBITED
+  synthetic_zero: PROHIBITED
+  source_mixing_without_identity: PROHIBITED
+
+flow_features:
+  windows_minutes: [1, 3, 5, 15, 60]
+  fields:
+    - taker_buy_quote
+    - taker_sell_quote
+    - taker_imbalance
+    - flow_z_train_only
+    - trade_count_z_train_only
+    - price_response
+    - flow_price_efficiency
+    - flow_persistence
+  thresholds_fit_on: TRAIN_ONLY
+
+event_detectors:
+  FLOW_IMPULSE_CONTINUATION:
+    side_flow_z_minimum: 2.5
+    side_trade_count_z_minimum: 1.0
+    side_flow_imbalance_3m_minimum: 0.10
+    side_flow_persistence_5m_minimum: 0.20
+    side_price_response_1m_minimum: 0.0
+  FLOW_ABSORPTION_REVERSAL:
+    opposing_flow_z_minimum: 2.5
+    opposing_trade_count_z_minimum: 1.0
+    side_price_response_1m_minimum: 0.0001
+    side_flow_imbalance_3m_minimum: -0.10
+  threshold_search_after_registration: PROHIBITED
+
+targets:
+  horizons_minutes: [15, 60, 240]
+  favorable_barrier_bps: [20, 42, 80]
+  adverse_barrier_bps: [20, 42, 80]
+  same_bar_order: ADVERSE_FIRST
+  outputs:
+    - FAVORABLE_BEFORE_ADVERSE
+    - BARRIER_OUTCOME
+    - MAE_FRACTION
+    - MFE_FRACTION
+    - MFE_BEFORE_MAE
+    - TIME_TO_FIRST_FAVORABLE_MINUTES
+    - TIME_TO_MFE_MINUTES
+    - TERMINAL_SIDE_RETURN
+    - NET_UTILITY
+
+partitions:
+  train: ['2025-08-01T00:00:00Z', '2026-02-01T00:00:00Z']
+  validation: ['2026-02-01T00:00:00Z', '2026-05-01T00:00:00Z']
+  final_holdout: ['2026-05-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 240
+  final_holdout_open_count: 1
+  repeated_holdout_selection: PROHIBITED
+
+economics:
+  costs_bps: [8, 14, 20]
+  primary_cost_bps: 14
+  funding: INCLUDE_WHEN_HORIZON_CROSSES_FUNDING_TIMESTAMP
+  slippage: EVENT_TIME_SPREAD_WHEN_AVAILABLE_ELSE_STRESS_COST
+  primary_objective: NET_EXPECTANCY_WITH_BOUNDED_MAE
+
+controls:
+  - RANDOM_TIMESTAMP_MATCHED_SYMBOL_SIDE_REGIME
+  - PRICE_ONLY
+  - C1_FROZEN_BASELINE
+  - UNFILTERED_EVENT
+
+evidence_gate:
+  minimum_source_days: 300
+  minimum_independent_events_per_side: 1000
+  minimum_events_per_symbol_side: 50
+  event_cooldown_minutes: 15
+  require_positive_validation_expectancy: true
+  require_positive_holdout_expectancy: true
+  require_positive_day_cluster_ci_lower: true
+  require_profit_factor_above: 1.10
+  require_20bps_cost_survival: true
+  require_outperform_all_controls: true
+  require_positive_symbols: 7
+  require_positive_temporal_thirds: 2
+  maximum_symbol_share: 0.20
+
+gates:
+  C2A_DATA_READY: false
+  C2A_DATASET_READY: false
+  C2A_INCREMENTAL_EDGE_FOUND: false
+  C2A_READY_FOR_MODELING: false
+  C2A_READY_FOR_SHADOW: false
+  C2A_READY_FOR_LIVE: false
+
+safety:
+  authenticated_requests: 0
+  exchange_mutations: 0
+  credentials_loaded: false
+  pm2_changes: NONE
+  live_changes: NONE
+  shadow_changes: NONE

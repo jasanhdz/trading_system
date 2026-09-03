@@ -1,0 +1,155 @@
+schema_version: aegis-long-entry-v31-shadow-preregistration-v1
+experiment_id: aegis-long-entry-v31-confirmed-opportunity-shadow-01
+mode: SHADOW
+side: LONG
+selection_effect: NONE
+automatic_live_promotion: false
+
+source:
+  base_database: data/binance_candles.db
+  public_candle_delta: data/long_entry_v21_shadow/public_candles_delta.jsonl
+  public_microstructure_database: data/long_entry_v3_shadow/public_microstructure.db
+  database_open_mode: READ_ONLY
+  timeframe: 5m
+  lookback_days: 540
+  symbols: [ETHUSDT, BTCUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, SUIUSDT, LTCUSDT]
+
+sampling:
+  history_bars: 576
+  maximum_horizon_bars: 48
+  stride_bars: 6
+  independent_test_stride_bars: 12
+  opportunity_population: LONG_V3_CAUSAL_CANDIDATES
+
+opportunity_stage:
+  target: FAMILY_HORIZON_ATR_TARGET_BEFORE_ATR_STOP
+  features_at: OPPORTUNITY_SIGNAL_CLOSE
+  families: [BREAKOUT_EXPANSION, TREND_PULLBACK_RECLAIM, CONFIRMED_REVERSAL, BREAKOUT_RETEST]
+  family_horizon_bars:
+    BREAKOUT_EXPANSION: 24
+    TREND_PULLBACK_RECLAIM: 24
+    CONFIRMED_REVERSAL: 12
+    BREAKOUT_RETEST: 48
+
+entry_timing_stage:
+  policy_is_preregistered: true
+  family_trigger:
+    BREAKOUT_EXPANSION: NEXT_BAR_FOLLOW_THROUGH
+    TREND_PULLBACK_RECLAIM: NEXT_BAR_OPEN
+    CONFIRMED_REVERSAL: NEXT_BAR_HIGHER_CLOSE
+    BREAKOUT_RETEST: NEXT_BAR_OPEN
+  next_bar_follow_through:
+    require_green_candle: true
+    require_close_above_signal_close: true
+    minimum_close_location: 0.55
+    minimum_taker_buy_ratio: 0.51
+  next_bar_higher_close:
+    require_green_candle: true
+    require_close_above_signal_close: true
+    minimum_taker_buy_ratio: 0.51
+  rejected_confirmation_behavior: NO_EXECUTION_CANDIDATE
+  threshold_tuning_after_test: PROHIBITED
+
+global_context_gate:
+  applied_before_execution_model: true
+  minimum_market_breadth_6: 0.55
+  minimum_btc_trend_proxy: 0.0
+  minimum_eth_trend_proxy: 0.0
+  prohibited_regime_directions: [BEARISH]
+  require_at_least_one_hourly_long_stack: true
+  context_failure_behavior: NO_EXECUTION_CANDIDATE
+
+features:
+  opportunity_feature_count: 166
+  execution_feature_count: 166
+  feature_schema: aegis-features-v2
+  microstructure_schema: aegis-long-v3-public-microstructure-v1
+  future_fields_as_features: false
+  outcome_fields_as_features: false
+  unavailable_value_policy: FAIL_CLOSED
+
+models:
+  architecture: FOUR_SPECIALISTS_PER_CANDIDATE_FAMILY_TWO_STAGE
+  opportunity_specialist: DIRECTIONAL_OPPORTUNITY
+  execution_specialists: [ENTRY_TIMING, FALLING_KNIFE, PATH_RISK]
+  estimator: HISTOGRAM_GRADIENT_BOOSTING
+  probability_calibration: PLATT_ON_CALIBRATION_ONLY
+  committee_score: OPPORTUNITY_TIMES_TIMING_TIMES_ONE_MINUS_FALLING_KNIFE_TIMES_ONE_MINUS_PATH_RISK
+  unavailable_specialist_behavior: FAIL_CLOSED
+
+hard_negatives:
+  enabled: true
+  types: [WRONG_DIRECTION, LATE_RECOVERY, FALSE_BREAKOUT, FALLING_KNIFE, CHOP_NO_RESOLUTION]
+  falling_knife_target: HARD_NEGATIVE_EQUALS_FALLING_KNIFE
+  training_weight: 2.0
+  test_weight: 1.0
+
+typescript_protection:
+  gate_source: binance-futures-bot-ts/src/domain/services/AegisMicroLiveGate.ts
+  gate_source_sha256: 35a30b4e03c048d74fccfe0d255a791b400ea93d17ba1be6b59a065c133efa80
+  guardian_source: binance-futures-bot-ts/src/domain/services/ProfitGuardian.ts
+  guardian_source_sha256: b362c2939238ead4d5708e3a49ceb12e6b2fa9666e07b1a88eec8dd7faea4932
+  runtime_config: binance-futures-bot-ts/regime_config.live.yaml
+  runtime_config_sha256: 1306688131baf9f3ed01dcde00dd0ee6d7ef942352764cc7f005b8546964474f
+  replay_source: src/aegis/research/hybrid_ts_protection_replay.py
+  replay_source_sha256: 433792de841e5accc7d715cf0cce806ffef84dde2c6b8bb49ce675b81517a48a
+  leverage: 15.0
+  hard_stop_roe: -0.40
+  take_profit_roe: 0.50
+  break_even_trigger_roe: 0.08
+  break_even_offset_fraction: 0.003
+  trailing_activation_roe: 0.15
+  trailing_callback_roe: 0.08
+  atr_period: 14
+  atr_multiplier: 1.5
+  round_trip_cost_fraction: 0.001
+  intrabar_paths: [OPEN_HIGH_LOW_CLOSE, OPEN_LOW_HIGH_CLOSE]
+  evaluation_value: WORST_CASE_INTRABAR_PROTECTED_NET_RETURN
+
+ranking:
+  method: CROSS_SECTIONAL_PER_TIMESTAMP
+  maximum_selected_per_timestamp_grid: [1, 2]
+  score_quantiles: [0.70, 0.75, 0.80, 0.85, 0.90, 0.925, 0.95]
+  maximum_falling_knife_quantiles: [0.25, 0.35, 0.45, 0.55]
+  maximum_path_risk_quantiles: [0.35, 0.45, 0.55, 0.65]
+  force_minimum_frequency: false
+  maximum_p95_gap_hours: 72
+
+family_retirement:
+  minimum_positive_folds: 3
+  require_worst_fold_non_negative: true
+  require_selected_mae_below_baseline: true
+  require_selected_underwater_below_baseline: true
+  failed_family_behavior: RETIRE_FROM_ELIGIBLE_SHADOW_POLICY
+  family_fallback: PROHIBITED
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD
+  folds: 4
+  embargo_minutes: 240
+  threshold_source: CALIBRATION_ONLY
+  minimum_calibration_selections: 30
+  minimum_scoring_selections_per_fold: 15
+  minimum_positive_folds: 3
+  require_positive_protected_net: true
+  require_worst_fold_non_negative: true
+  require_selected_mae_below_baseline: true
+  require_selected_underwater_below_baseline: true
+  leave_one_symbol_out_required: true
+  minimum_symbols_without_regression: 8
+  prohibit_post_test_threshold_relaxation: true
+
+prospective_shadow:
+  enabled_only_after_offline_pass: true
+  minimum_independent_candidates: 300
+  minimum_observation_days: 14
+  require_positive_protected_net: true
+  require_mae_improvement: true
+  live_promotion: SEPARATE_OWNER_AUTHORIZATION_REQUIRED
+
+deployment:
+  current_runtime: RESEARCH_ONLY
+  shadow_runtime_requires_validation_pass: true
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_mutations: 0

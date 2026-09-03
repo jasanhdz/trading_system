@@ -1,0 +1,65 @@
+{
+  "schema_version": "aegis-range-r0-split-manifest-v1",
+  "created_date": "2026-08-24",
+  "timezone": "UTC",
+  "interval_semantics": "half_open",
+  "source_interval": {
+    "start_inclusive": "2024-01-01T00:00:00Z",
+    "end_exclusive": "2026-08-01T00:00:00Z"
+  },
+  "splits": [
+    {
+      "name": "TRAIN",
+      "start_inclusive": "2024-01-01T00:00:00Z",
+      "end_exclusive": "2025-01-01T00:00:00Z",
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "name": "CALIBRATION",
+      "start_inclusive": "2025-01-01T00:00:00Z",
+      "end_exclusive": "2025-07-01T00:00:00Z",
+      "status": "SEALED_NOT_EXECUTED"
+    },
+    {
+      "name": "VALIDATION",
+      "start_inclusive": "2025-07-01T00:00:00Z",
+      "end_exclusive": "2026-01-01T00:00:00Z",
+      "status": "SEALED_NOT_AUTHORIZED"
+    },
+    {
+      "name": "HOLDOUT",
+      "start_inclusive": "2026-01-01T00:00:00Z",
+      "end_exclusive": "2026-08-01T00:00:00Z",
+      "status": "SEALED_NOT_AUTHORIZED"
+    }
+  ],
+  "warmup": {
+    "regime_closed_5m_bars": 160,
+    "may_read_before_split_for_indicators_only": true,
+    "range_state_resets_at_each_split": true
+  },
+  "embargo": {
+    "duration_hours_from_each_split_start": 48,
+    "episode_confirmation_allowed": false,
+    "entries_allowed": false
+  },
+  "purge": {
+    "episode_must_end_before_split_end": true,
+    "open_trade_or_pending_exit_at_boundary": "PURGE_WHOLE_EPISODE",
+    "evaluation_horizon_crosses_boundary": "PURGE_WHOLE_EPISODE",
+    "episode_can_appear_in_adjacent_split": false
+  },
+  "bootstrap": {
+    "moving_block_days": 7,
+    "candidate_start_latest": "split_end_minus_7d",
+    "block_may_cross_split_boundary": false,
+    "symbols_sampled_synchronously": true
+  },
+  "sealed_data_policy": {
+    "r0": "paths_checksums_and_dates_only",
+    "train_smoke_test": "TRAIN_OR_SYNTHETIC_ONLY",
+    "calibration": "ONE_SELECTION_FROM_384_PREREGISTERED_CANDIDATES",
+    "validation": "ONE_OPEN_AFTER_PRE_VALIDATION_SPEC_FROZEN",
+    "holdout": "ONE_OPEN_ONLY_IF_VALIDATION_GATE_PASSES"
+  }
+}

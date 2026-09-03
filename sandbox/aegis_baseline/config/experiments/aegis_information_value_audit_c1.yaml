@@ -1,0 +1,170 @@
+schema_version: aegis-information-value-audit-c1-preregistration-v1
+experiment_id: aegis-information-value-audit-c1-01
+registered_at_utc: '2026-08-13T00:00:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+runtime_selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_60m: data/residual_regime_alpha_b2/run_01/residual_symbol_sides_60m.parquet
+  source_60m_sha256: 825a160258d743f5a8c187c4c27400412f6a53b9f258341f4fefe516546c2c2e
+  source_240m: data/residual_regime_alpha_b2/run_01/residual_symbol_sides_240m.parquet
+  source_240m_sha256: 1bb5cea187e40972686fbb86eb3ee1c1d24b3b4f320c059871107d0ebaec0453
+  b2_result_sha256: 853e2d046618b14b04b11e51c978ac10991277ae964206766f20cdb1785a3c33
+
+evidence:
+  project_wide_untouched: false
+  promotion_authority: false
+  purpose: MEASURE_INCREMENTAL_CAUSAL_INFORMATION_BY_SOURCE_FAMILY
+  permitted: [REJECT_FEATURE_FAMILIES, JUSTIFY_NEW_DATA_ACQUISITION, JUSTIFY_C2]
+  prohibited: [AUTHORIZE_SHADOW, AUTHORIZE_LIVE, EXPORT_TRADING_MODEL]
+
+partitions:
+  train: ['2024-01-22T00:00:00Z', '2025-01-01T00:00:00Z']
+  calibration: ['2025-01-02T00:00:00Z', '2025-07-01T00:00:00Z']
+  validation: ['2025-07-02T00:00:00Z', '2026-01-01T00:00:00Z']
+  pseudo_forward: ['2026-01-02T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 1440
+
+population:
+  event_grid_minutes: 240
+  horizons_minutes: [60, 240]
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  entry: NEXT_15M_OPEN
+  complete_rows_only: true
+
+targets:
+  residual_value: residual_utility
+  barrier_quality: favorable_first
+  path_risk: mae
+  economics: gross_return_minus_cost
+  primary_cost_bps: 14
+  stress_cost_bps: 20
+
+feature_families:
+  PRICE_STATE:
+    - side_return_1h
+    - side_return_4h
+    - side_return_24h
+    - realized_volatility_4h
+    - realized_volatility_24h
+    - side_distance_sma_4h
+    - side_distance_sma_24h
+    - side_extension_z_24h
+    - side_breakout_acceptance
+    - side_wick_rejection
+  FLOW_ACTIVITY:
+    - side_taker_flow_15m
+    - side_taker_flow_1h
+    - side_prior_taker_flow_1h
+    - volume_persistence_1h
+  DERIVATIVES_CARRY:
+    - side_mark_spot_basis
+    - side_basis_z_7d
+    - basis_convergence_1h
+    - side_funding_rate
+    - funding_age_hours
+  CROSS_MARKET:
+    - side_btc_state_return
+    - side_relative_strength_btc_4h
+    - side_cross_sectional_rank_4h
+    - side_breadth_4h
+    - beta_btc
+    - side_common_alt_state
+  CALENDAR_CONTROL:
+    - utc_hour_sin
+    - utc_hour_cos
+    - weekday_sin
+    - weekday_cos
+
+availability:
+  PRICE_STATE: HISTORICAL_COMPLETE
+  FLOW_ACTIVITY: HISTORICAL_COMPLETE_FROM_PUBLIC_KLINES
+  DERIVATIVES_CARRY: HISTORICAL_COMPLETE_FROM_MARK_SPOT_AND_FUNDING_ARCHIVES
+  CROSS_MARKET: HISTORICAL_COMPLETE_DERIVED_CAUSALLY
+  CALENDAR_CONTROL: HISTORICAL_COMPLETE_DERIVED_CAUSALLY
+  OPEN_INTEREST:
+    state: UNAVAILABLE_FOR_REQUIRED_HISTORY
+    action: DOCUMENT_GAP_NO_ZERO_FILL
+  LIQUIDATIONS:
+    state: UNAVAILABLE_HISTORICALLY
+    action: DOCUMENT_GAP_NO_ZERO_FILL
+  ORDER_BOOK:
+    state: UNAVAILABLE_HISTORICALLY
+    action: DOCUMENT_GAP_NO_ZERO_FILL
+  NEWS:
+    state: NO_TIMESTAMPED_POINT_IN_TIME_CORPUS
+    action: DOCUMENT_GAP_NO_RETROSPECTIVE_ENRICHMENT
+
+models:
+  residual_value: STANDARDIZED_RIDGE_ALPHA_10
+  barrier_quality: STANDARDIZED_LOGISTIC_BALANCED_L2
+  path_risk: HIST_GRADIENT_BOOSTING_REGRESSOR
+  fit_scope: ONE_MODEL_PER_SIDE_HORIZON_AND_CANDIDATE
+  ridge:
+    alpha: 10.0
+  logistic:
+    C: 1.0
+    class_weight: balanced
+    max_iter: 1000
+  path_regressor:
+    max_iter: 100
+    max_leaf_nodes: 15
+    learning_rate: 0.05
+    l2_regularization: 1.0
+  baseline: PRICE_STATE
+  candidates:
+    - PRICE_STATE_PLUS_FLOW_ACTIVITY
+    - PRICE_STATE_PLUS_DERIVATIVES_CARRY
+    - PRICE_STATE_PLUS_CROSS_MARKET
+    - PRICE_STATE_PLUS_CALENDAR_CONTROL
+    - PRICE_STATE_PLUS_ALL_AVAILABLE_NON_CALENDAR
+  random_state: 1813
+  hyperparameter_search: PROHIBITED
+  seed_search: PROHIBITED
+
+metrics:
+  residual_value: [grouped_spearman, top_decile_net, top_decile_stress_net]
+  barrier_quality: [log_loss, average_precision, brier]
+  path_risk: [mae_spearman, mean_absolute_error]
+  uncertainty: DAY_CLUSTER_BOOTSTRAP_95
+  top_decile_selection: CALIBRATION_PREDICTED_RESIDUAL_VALUE_Q90_THEN_MAX_ONE_PER_TIMESTAMP_SIDE
+
+incremental_gate:
+  validation_grouped_spearman_lift_gte: 0.01
+  pseudo_forward_grouped_spearman_lift_gte: 0.01
+  validation_absolute_grouped_spearman_gte: 0.05
+  pseudo_forward_absolute_grouped_spearman_gte: 0.05
+  validation_barrier_log_loss_improves: true
+  pseudo_forward_barrier_log_loss_improves: true
+  validation_barrier_average_precision_improves: true
+  pseudo_forward_barrier_average_precision_improves: true
+  validation_mae_spearman_lift_gte: 0.02
+  pseudo_forward_mae_spearman_lift_gte: 0.02
+  validation_top_decile_primary_net_gt: 0.0
+  pseudo_forward_top_decile_primary_net_gt: 0.0
+  pseudo_forward_bootstrap_lower_95_gt: 0.0
+  minimum_top_decile_events: 100
+  pass_required_horizons: 2
+
+anti_overfitting:
+  no_threshold_tuning: true
+  no_family_interaction_search: true
+  no_best_seed_selection: true
+  no_symbol_exclusion: true
+  no_side_exclusion: true
+  report_every_candidate: true
+  failed_trials_retained: true
+
+deployment:
+  C1_INCREMENTAL_INFORMATION_FOUND: false
+  C1_NEW_SOURCE_ACQUISITION_REQUIRED: true
+  C1_READY_FOR_C2: false
+  C1_READY_FOR_SHADOW: false
+  C1_READY_FOR_LIVE: false
+  exchange_calls: 0
+  exchange_mutations: 0
+  runtime_changes: NONE

@@ -1,0 +1,151 @@
+schema_version: aegis-v18-preregistration-v1
+experiment_id: aegis-decomposed-economic-selector-v18-01
+registered_at_utc: '2026-08-12T18:58:00Z'
+mode: RESEARCH_ONLY
+exchange_authority: false
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  entry_rule: NEXT_BAR_OPEN
+  feature_contract: aegis-v17-v9-directional-features-v1
+  feature_contract_role: CAUSAL_RUNTIME_COMPATIBILITY_ONLY
+  directions: [LONG, SHORT]
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  timeframe: 5m
+
+partitions:
+  train:
+    start: '2025-08-09T06:55:00+00:00'
+    end: '2026-05-31T23:55:00+00:00'
+    expected_rows: 78078
+  validation:
+    start: '2026-06-01T00:00:00+00:00'
+    end: '2026-08-09T06:55:00+00:00'
+    expected_rows: 18304
+  final_holdout:
+    start: '2026-08-10T00:00:00+00:00'
+    end: '2026-09-30T23:55:00+00:00'
+    minimum_open_date: '2026-10-01T00:00:00Z'
+    status: SEALED_NOT_AVAILABLE
+    access_count: 0
+  train_inner_calibration_fraction: 0.20
+  purge_minutes: 120
+
+features:
+  source: v9_features
+  long_contract: V15_LONG_129
+  short_contract: V15_SHORT_168
+  dtype: float64
+  required_closed_5m_bars: 576
+  missing_extra_reordered_nonfinite: FAIL_CLOSED
+  normalization:
+    classifiers: STANDARD_SCALER_FIT_TRAIN_SUBPARTITION_ONLY
+    mae: HISTOGRAM_GRADIENT_BOOSTING_NATIVE
+    utility: HISTOGRAM_GRADIENT_BOOSTING_NATIVE
+
+targets:
+  safety_clean: v11_clean_entry_label
+  safety_danger: [ADVERSE_FIRST, SAME_BAR_AMBIGUOUS]
+  mae: mae_fraction
+  expected_utility: ROE_10_H12_REALIZED_UTILITY_AFTER_FROZEN_COSTS
+
+models:
+  safety_clean:
+    estimator: LOGISTIC_REGRESSION
+    C: 1.0
+    class_weight: balanced
+    max_iter: 2000
+    seed: 180018
+  safety_danger:
+    estimator: LOGISTIC_REGRESSION
+    C: 1.0
+    class_weight: balanced
+    max_iter: 2000
+    seed: 180018
+  mae_q90:
+    estimator: HIST_GRADIENT_BOOSTING_QUANTILE
+    quantile: 0.90
+    learning_rate: 0.05
+    max_iter: 200
+    max_leaf_nodes: 15
+    l2_regularization: 1.0
+    seed: 180018
+  expected_utility:
+    estimator: HIST_GRADIENT_BOOSTING_REGRESSOR
+    learning_rate: 0.05
+    max_iter: 200
+    max_leaf_nodes: 15
+    l2_regularization: 1.0
+    seed: 180018
+  calibration: SIGMOID_ON_CHRONOLOGICAL_INNER_CALIBRATION
+  search_space: NONE
+  seeds: [180018]
+  best_seed_selection: PROHIBITED
+
+selection_policy:
+  minimum_clean_probability: 0.50
+  maximum_danger_probability: 0.25
+  maximum_mae_fraction: 0.005
+  minimum_expected_utility: 0.0
+  maximum_candidates_per_timestamp_per_side: 1
+  rank_survivors_by: EXPECTED_UTILITY_DESCENDING
+  threshold_tuning_on_validation_or_holdout: PROHIBITED
+
+economics:
+  fee_and_slippage_source: FROZEN_ROE_10_H12_CONTRACT
+  funding: INCLUDE_WHEN_PRESENT_OTHERWISE_REPORT_UNAVAILABLE
+  binance_constraints: REPORT_FROM_DATASET_CONTRACT_NO_EXCHANGE_CALLS
+  metrics: [net_expectancy, pnl, profit_factor, win_rate, mae, mfe, maximum_drawdown, cvar_05, frequency, temporal_stability]
+  uncertainty:
+    method: MOVING_BLOCK_BOOTSTRAP_BY_TIMESTAMP
+    confidence: 0.95
+    resamples: 1000
+    seed: 180018
+
+controls:
+  - V15_FROZEN
+  - V17_FROZEN
+  - SIMPLE_CAUSAL_SCORE_V15_CLEAN_MINUS_DANGER_MINUS_NORMALIZED_MAE
+  - RANDOM_ONE_PER_TIMESTAMP_SEED_180018
+
+offline_gate:
+  correction: BONFERRONI_TWO_DIRECTIONS_ALPHA_0.025_EACH
+  minimum_selected_per_direction: 100
+  require_mean_net_expectancy_ci_lower_gt: 0.0
+  require_profit_factor_ci_lower_gt: 1.0
+  require_cvar_05_gt: -0.004
+  require_mean_mae_lte: 0.004
+  require_positive_validation_thirds: 2
+  require_better_than_random_expectancy: true
+  require_no_material_regression_vs_v15: true
+  require_finite_complete_metrics: true
+  both_directions_required_for_v18_ready_for_shadow: true
+
+shadow_gate:
+  status: NOT_EVALUATED
+  frozen_thresholds_required: true
+  minimum_nonoverlapping_opportunities_per_direction: 300
+  minimum_calendar_days: 30
+  require_net_expectancy_ci_lower_gt: 0.0
+  require_no_integrity_incident: true
+  live_gate_independent: true
+
+anti_overfitting:
+  leakage_checks_required: true
+  threshold_mining: PROHIBITED
+  feature_mining: PROHIBITED
+  repeated_holdout_testing: PROHIBITED
+  retrospective_fold_selection: PROHIBITED
+  failed_experiments_must_be_preserved: true
+  final_holdout_may_be_opened_once: true
+
+deployment:
+  v18_ready_for_shadow_initial: false
+  v18_ready_for_live_initial: false
+  live_runtime_changes: PROHIBITED
+  shadow_runtime_changes_before_offline_gate: PROHIBITED
+  exchange_calls: 0
+  exchange_mutations: 0

@@ -1,0 +1,73 @@
+{
+  "schema": "aegis-e4-robust-training-preregistration-v1",
+  "experiment": "AEGIS_E4_ROBUST_TRAINING",
+  "classification": "RETROSPECTIVE_DISCOVERY_WITH_TEMPORAL_OOS_VALIDATION",
+  "frozen_at": "2026-08-18T00:00:00Z",
+  "production_baseline": "AEGIS_E3_FROZEN_UNCHANGED",
+  "symbols": ["ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT", "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT"],
+  "source": {
+    "root": "data/independent_entry_quality_discovery_v1/candles_1m",
+    "resolution": "1m",
+    "decision_cadence_minutes": 5,
+    "hourly_control_cadence_minutes": 60,
+    "horizon_minutes": 60,
+    "entry_price": "NEXT_AVAILABLE_1M_OPEN",
+    "timeframes_minutes": [5, 15, 60, 240],
+    "optional_daily_context": false
+  },
+  "splits": {
+    "TRAIN": ["2023-09-01T00:00:00Z", "2023-10-16T00:00:00Z"],
+    "EMBARGO_1": ["2023-10-16T00:00:00Z", "2023-10-17T00:00:00Z"],
+    "CALIBRATION": ["2023-10-17T00:00:00Z", "2023-11-06T00:00:00Z"],
+    "EMBARGO_2": ["2023-11-06T00:00:00Z", "2023-11-07T00:00:00Z"],
+    "VALIDATION": ["2023-11-07T00:00:00Z", "2023-12-06T00:00:00Z"],
+    "EMBARGO_3": ["2023-12-06T00:00:00Z", "2023-12-07T00:00:00Z"],
+    "FINAL_HOLDOUT": ["2023-12-07T00:00:00Z", "2024-01-01T00:00:00Z"]
+  },
+  "labels": {
+    "atr_reference": "LAST_CLOSED_15M_AT_DECISION",
+    "barrier_atr": 0.5,
+    "same_minute_ambiguity": "ADVERSE_FIRST",
+    "severe_mae_bps": 40.0,
+    "late_entry_remaining_mfe_bps": 20.0,
+    "cost_bps": 14.0,
+    "stress_cost_bps": 20.0
+  },
+  "episodes": {
+    "same_symbol_minutes": 60,
+    "temporal_block": "UTC_HOUR",
+    "both_sides_share_market_state": true,
+    "bootstrap_unit": "TEMPORAL_BLOCK_ID"
+  },
+  "ablations": {
+    "E4_BASE": ["BASE"],
+    "E4_BASE_FLOW": ["BASE", "FLOW"],
+    "E4_BASE_CROSS_MARKET": ["BASE", "CROSS_MARKET"],
+    "E4_BASE_REMAINING_MOVE": ["BASE", "REMAINING_MOVE"],
+    "E4_FULL": ["BASE", "FLOW", "CROSS_MARKET", "REMAINING_MOVE", "QUALITY"]
+  },
+  "models": {
+    "classification": "L2_REGULARIZED_LOGISTIC",
+    "regression": "RIDGE",
+    "shallow_tree_diagnostic": {"max_depth": 3, "min_samples_leaf": 500},
+    "seed": 20260818,
+    "deep_learning": false,
+    "online_learning": false
+  },
+  "support": {
+    "minimum_train_rows": 200000,
+    "minimum_validation_rows": 100000,
+    "minimum_train_effective_blocks": 1000,
+    "minimum_validation_effective_blocks": 500,
+    "minimum_symbols": 10
+  },
+  "cost_scenarios_bps": [0.0, 14.0, 20.0],
+  "optional_sources": {
+    "L2": "SEPARATE_SUBEXPERIMENT_REQUIRES_MATCHED_CONTINUOUS_COVERAGE",
+    "OPEN_INTEREST": "SEPARATE_SUBEXPERIMENT_REQUIRES_AUTHENTIC_CAUSAL_COVERAGE",
+    "LIQUIDATIONS": "SEPARATE_SUBEXPERIMENT_REQUIRES_AUTHENTIC_CAUSAL_COVERAGE",
+    "FUNDING": "SEPARATE_SUBEXPERIMENT_REQUIRES_MATCHED_PANEL_COVERAGE"
+  },
+  "final_holdout": {"state": "SEALED_NOT_OPENED", "build_targets": false, "open_automatically": false},
+  "prohibited": ["PRODUCTION_CHANGES", "E3_RETRAIN", "THRESHOLD_SEARCH", "HORIZON_SEARCH", "HOLDOUT_LABEL_BUILD", "SHADOW", "LIVE", "LEVERAGE"]
+}

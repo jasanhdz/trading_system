@@ -1,0 +1,50 @@
+schema_version: aegis-entry-quality-v2-training-v1
+experiment_id: aegis-entry-quality-v2-short-opportunity-v1
+side: SHORT
+feature_schema: aegis-features-v2
+feature_count: 83
+feature_hash: 2dc278b4353585fe22503233187e12832cabfd67e2a2e58f4cd683ee6f3b9454
+
+source:
+  preregistration_path: config/experiments/aegis_short_candidate_e3.yaml
+  canonical_series_path: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  canonical_manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+  expected_dataset_sha256: 1ffd0eaf07515d3a1a5fd6363f09c2d8ffe1e1f3925989486dee398e25b8c294
+
+split:
+  identity: E3_FOLD_4
+  train_start: "2024-07-11T15:20:00Z"
+  train_end: "2025-11-30T23:59:59Z"
+  calibration_start: "2025-12-01T02:00:00Z"
+  calibration_end: "2026-01-15T00:55:00Z"
+  scoring_start: "2026-01-15T02:55:00Z"
+  scoring_end: "2026-02-28T23:59:59Z"
+  embargo_minutes: 120
+
+training:
+  label_schema: aegis-labels-short-v4
+  label_field: clean_quality
+  maximum_acceptable_mae: 0.00275
+  seed: 20260725
+  minimum_symbol_calibration_rows: 100
+  symbol_calibration_shrinkage_rows: 500
+
+model:
+  candidate_id: eqm_random_forest_clean
+  selection_authority: E3_STABILITY_FIRST_WINNER
+  competition_contract_path: config/scientific_competition_v2.yaml
+  competition_contract_sha256: 70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79
+
+technical_readiness:
+  minimum_scoring_rows: 10000
+  minimum_average_precision_lift_over_prevalence: 0.005
+  threshold_authority: E3_EQM_RF_PRIOR_FOLD_EVIDENCE
+  maximum_ece: 0.08
+  maximum_brier: 0.25
+  require_all_symbols: true
+  automatic_live_activation: false
+
+outputs:
+  artifact_path: config/bundles/aegis-entry-quality-v2-short-opportunity-rf-v2.json
+  manifest_path: config/bundles/aegis-entry-quality-v2-short-opportunity-rf-v2.manifest.json
+  readiness_record_path: config/bundles/aegis-entry-quality-v2-live-readiness-rf-v2.json

@@ -6,15 +6,15 @@ __pycache__/
 .venv_cuda/
 .venv_rocm57/
 .venv_rocm62/
-experiments/
 
 # Database & Data
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
-data/raw/
+data/
 logs/
+binance-futures-bot-ts/logs/
 
 # Security
 .env
@@ -28,5 +28,35 @@ binance_futures_bot_py/state/*
 # Output Artifacts
 *.png
 *.csv
-scripts/grid_results/
-scripts/grid_search_results/
+# Generated Reports (local only)
+reports/
+*.txt
+backtest_*.png
+backtest_*.csv
+
+# Jupyter notebooks output
+*.ipynb_checkpoints/
+
+# Model artifacts (generated locally)
+*.pkl
+*.joblib
+*.h5
+*.keras
+*.npz
+*.pt
+*.pth
+*.safetensors
+
+# Archived Logs
+*.log.*
+*.gz
+*.zip
+*.tar
+scripts/archived/
+archive/
+
+# Parquet data files (experiment datasets, scored signals, candles)
+*.parquet
+
+# Experiment artifacts (results, scored data, models, audits)
+sandbox/**/artifacts/

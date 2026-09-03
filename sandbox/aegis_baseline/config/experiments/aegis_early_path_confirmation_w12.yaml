@@ -1,0 +1,98 @@
+schema_version: aegis-early-path-confirmation-w12-v1
+experiment_id: AEGIS_W12_EARLY_PATH_CONFIRMATION
+scope: PYTHON_OFFLINE_HISTORICAL_RESEARCH_ONLY
+seed: 20260815
+
+sources:
+  entry_csv: reports/governance/aegis_prospective_validation/live/live_entry_quality_audit_20260815/live_entry_classification.csv
+  logs_dir: binance-futures-bot-ts/logs/aegis
+  candle_dir: data/live_entry_quality_audit_20260815/candles_1m
+  w11_dataset: data/entry_safety_gate_w11/run_01/w11_candidates_train_validation.parquet
+  w11_validation_decisions: reports/governance/aegis_prospective_validation/live/entry_safety_gate_w11/w11_validation_decisions.csv
+  timeframes_minutes: [1, 5, 15, 60]
+  core_resolution: CLOSED_1M
+  optional_l2_overlap: NONE
+
+splits:
+  train_end_exclusive: 2026-07-01T00:00:00Z
+  validation_end_exclusive: 2026-07-27T00:00:00Z
+  final_holdout_start: 2026-07-27T00:00:00Z
+  final_holdout_end_exclusive: 2026-08-01T00:00:00Z
+  w11_august_holdout_excluded: true
+  final_holdout_status: SEALED_NOT_OPENED
+
+pending_states:
+  names:
+    - FULL_POST_SIGNAL_BAR_1
+    - FULL_POST_SIGNAL_BAR_2
+  timing_definition: FIRST_AND_SECOND_COMPLETE_1M_BARS_AFTER_SIGNAL
+  nominal_windows_seconds: [60, 120]
+  actual_elapsed_range_seconds:
+    FULL_POST_SIGNAL_BAR_1: [60, 120]
+    FULL_POST_SIGNAL_BAR_2: [120, 180]
+  maximum_one_entry_per_signal: true
+
+outcome:
+  horizon_minutes_from_candidate_entry: 60
+  early_move_threshold_bps: 5.0
+  favorable_barrier_bps: 30.0
+  adverse_barrier_bps: 20.0
+  same_bar_resolution: ADVERSE_FIRST
+  baseline_cost_bps: 14.0
+  stress_cost_bps: 20.0
+  minimum_material_improvement_bps: 2.0
+
+models:
+  classifier: REGULARIZED_LOGISTIC
+  regressor: RIDGE
+  logistic_c: 0.25
+  ridge_alpha: 10.0
+  enter_probability_threshold: 0.65
+  cancel_probability_threshold: 0.30
+  minimum_predicted_remaining_net_bps: 2.0
+  feature_ablations:
+    - PRICE_PATH_ONLY
+    - PRICE_PATH_PLUS_FLOW
+    - PRICE_PATH_FLOW_CONTEXT
+    - PRICE_PATH_FLOW_CONTEXT_SPACE
+    - FULL_W12
+
+baselines:
+  - ENTER_NOW
+  - WAIT_1M_FIXED
+  - WAIT_2M_FIXED
+  - WAIT_3M_FIXED
+  - W11_FROZEN
+  - NO_TRADE
+
+validation_gates:
+  minimum_episodes: 80
+  minimum_executed: 25
+  minimum_execution_rate: 0.20
+  maximum_execution_rate: 0.85
+  minimum_net_bps_per_executed_trade: 2.0
+  minimum_net_bps_per_original_signal: 0.0
+  minimum_improvement_vs_enter_now_bps: 2.0
+  minimum_improvement_vs_wait_2m_bps: 2.0
+  minimum_improvement_vs_w11_bps: 2.0
+  minimum_good_retention: 0.40
+  minimum_bad_avoidance: 0.20
+  minimum_mae_reduction: 0.20
+  minimum_symbols_executed: 4
+  maximum_single_symbol_fraction: 0.60
+  bootstrap_samples: 10000
+  require_temporal_block_ci_above_zero: true
+  require_positive_stress_expectancy: true
+
+restrictions:
+  production_modified: false
+  typescript_modified: false
+  brain_modified: false
+  guards_modified: false
+  leverage_modified: false
+  pm2_modified: false
+  exchange_modified: false
+  authenticated_api_used: false
+  orders_sent: false
+  shadow_enabled: false
+  live_enabled: false

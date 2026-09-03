@@ -1,0 +1,85 @@
+schema_version: aegis-historical-orderbook-direction-w9-preregistration-v1
+experiment_id: aegis-historical-orderbook-direction-w9-01
+registered_at_utc: '2026-08-14T19:20:00Z'
+mode: OFFLINE_HISTORICAL_RESEARCH_ONLY
+runtime_effect: NONE
+
+authority:
+  prior_holdouts: SEALED_W1_THROUGH_W8
+  prior_retuning: PROHIBITED
+  w7_opportunity_identity: H60:LOGISTIC_L2:P_GTE_0.7
+  w7_opportunity_refit: PROHIBITED
+
+data:
+  exchange: binance-futures
+  provider: TARDIS_FREE_FIRST_DAY_SAMPLES
+  required_types: [incremental_book_L2, quotes, trades]
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  normalized_l2_schema: [exchange, symbol, timestamp, local_timestamp, is_snapshot, side, price, amount]
+  require_initial_snapshot: true
+  require_sequential_updates: true
+  require_local_timestamp_order: true
+  native_sequence_validation: PROVIDER_RAW_FEED_DOCUMENTED_CSV_OMITS_IDS
+  synthetic_depth: PROHIBITED
+
+partitions:
+  train_months: ['2025-09', '2025-10', '2025-11', '2025-12']
+  validation_months: ['2026-01', '2026-02', '2026-03', '2026-04']
+  final_holdout:
+    identity: FUTURE_INDEPENDENT_W9_EVIDENCE_NOT_YET_COLLECTED
+    state: SEALED_NOT_OPENED
+
+data_gate:
+  minimum_train_episodes: 1000
+  minimum_validation_episodes: 500
+  minimum_symbols_per_partition: 8
+  minimum_months_per_partition: 3
+  action_on_failure: STOP_BEFORE_MODELING
+
+features:
+  static: [spread_bps, microprice_minus_mid, OBI_L1, OBI_L5, OBI_L10, OBI_L20]
+  dynamics: [bid_depletion, ask_depletion, bid_replenishment, ask_replenishment, depth_velocity, depth_acceleration]
+  flow: [aggressive_buy_volume, aggressive_sell_volume, taker_delta, cumulative_delta, delta_velocity, delta_acceleration]
+  response: [price_impact_per_buy_volume, price_impact_per_sell_volume, flow_without_price_response]
+  observation_windows_ms: [0, 100, 250, 500, 1000]
+
+targets:
+  type: FIRST_BARRIER
+  barriers_bps: [25, 50, 75]
+  atr_barrier: [1.0]
+  horizons_seconds: [60, 300, 900]
+  classes: [UP_FIRST, DOWN_FIRST, NEITHER]
+  same_event_resolution: CAPTURE_ORDER
+
+models:
+  families: [REGULARIZED_LOGISTIC, MULTINOMIAL_LOGISTIC, SHALLOW_TREE, GRADIENT_BOOSTING]
+  action_classes: [LONG, SHORT, SKIP]
+  no_deep_learning: true
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: opportunity_episode_id
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+
+economic_gate:
+  baseline_cost_bps: 14.0
+  stress_cost_bps: 20.0
+  minimum_net_expectancy_bps: 3.0
+  minimum_validation_trades: 300
+  minimum_positive_symbols: 7
+  minimum_positive_temporal_folds: 3
+  require_latency_survival_ms: 250
+  require_ci_lower_positive: true
+
+deployment:
+  production_changes: PROHIBITED
+  typescript_changes: PROHIBITED
+  brain_changes: PROHIBITED
+  guard_changes: PROHIBITED
+  leverage_changes: PROHIBITED
+  pm2_changes: PROHIBITED
+  shadow: PROHIBITED
+  live: PROHIBITED
+  authenticated_requests: 0
+  exchange_mutations: 0

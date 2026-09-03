@@ -1,0 +1,17 @@
+schema_version: aegis-brain-config-v1
+config_version: aegis-scientific-config-v1
+contract_version: aegis-clean-rebuild-v1
+build_id: clean-rebuild-dev-v1
+runtime:
+  mode: scientific
+  universe_config: universe.yaml
+  models_config: models.yaml
+api:
+  health: /health
+  ready: /ready
+  manifest: /manifest
+  evaluate: /v1/decisions/evaluate
+  outcome: /v1/evidence/outcome
+evidence:
+  path: ../data/scientific_evidence.jsonl
+  persistence_enabled: false

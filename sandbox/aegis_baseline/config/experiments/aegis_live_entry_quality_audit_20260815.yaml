@@ -1,0 +1,75 @@
+schema_version: aegis-live-entry-quality-audit-v1
+experiment_id: AEGIS_LIVE_ENTRY_QUALITY_AUDIT_20260815
+scope: READ_ONLY_HISTORICAL_LIVE
+
+sources:
+  logs_dir: binance-futures-bot-ts/logs/aegis
+  trade_glob: turbo_trades_*.jsonl
+  strategy: AEGIS_TURBO
+  mode: AEGIS_TURBO_MICRO_LIVE
+
+split:
+  discovery_end_exclusive: 2026-07-22T00:00:00Z
+  validation_start_inclusive: 2026-07-22T00:00:00Z
+
+classification:
+  round_trip_cost_bps: 14.0
+  good_min_mfe_bps: 28.0
+  good_max_mae_bps: 75.0
+  good_min_mfe_mae_ratio: 1.25
+  bad_low_mfe_bps: 14.0
+  bad_high_mae_bps: 100.0
+  bad_extreme_mae_bps: 200.0
+  bad_max_mfe_mae_ratio: 0.50
+  bad_extreme_max_mfe_mae_ratio: 0.75
+
+model:
+  type: LOGISTIC_REGRESSION_BALANCED
+  c: 0.25
+  maximum_iterations: 2000
+  threshold_grid: [0.30, 0.40, 0.50, 0.60, 0.70, 0.80]
+  minimum_discovery_rejections: 20
+  minimum_good_retention: 0.70
+  features:
+    - turbo_score
+    - entry_quality_score
+    - tail_risk_score
+    - regime_confidence
+    - chop_risk
+    - exhaustion_risk
+    - atr_percentile
+    - atr_pct
+    - adx
+    - choppiness
+    - return30m
+    - return60m
+    - close_location
+    - volume_ratio
+
+validation_gate:
+  minimum_validation_allowed: 50
+  minimum_relative_bad_rate_reduction: 0.25
+  minimum_good_retention: 0.70
+  bootstrap_samples: 10000
+  confidence_level: 0.95
+
+multitimeframe:
+  source_dir: data/live_entry_quality_audit_20260815/candles_1m
+  timeframes_minutes: [1, 5, 15, 60]
+  chart_bad_entries: 30
+  chart_good_entries: 30
+  lookback_chart_minutes: 120
+  forward_chart_minutes: 240
+  model:
+    type: LOGISTIC_REGRESSION_BALANCED
+    c: 0.20
+    maximum_iterations: 3000
+    threshold_grid: [0.30, 0.40, 0.50, 0.60, 0.70, 0.80]
+    minimum_discovery_rejections: 20
+    minimum_good_retention: 0.70
+
+restrictions:
+  production_modified: false
+  live_rules_modified: false
+  orders_sent: false
+  pnl_is_secondary_due_to_manual_position_resizing: true

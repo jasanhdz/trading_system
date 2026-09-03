@@ -1,0 +1,117 @@
+schema_version: aegis-v19-preregistration-v1
+experiment_id: aegis-monotonic-clean-utility-v19-01
+registered_date_utc: '2026-08-12'
+mode: RESEARCH_ONLY
+selection_effect: NONE
+exchange_authority: false
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  design_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  design_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  design_data_end: '2026-08-09T06:55:00+00:00'
+  entry_rule: NEXT_BAR_OPEN
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  directions: [LONG, SHORT]
+  timeframe: 5m
+  v15_feature_contracts: [V15_LONG_129, V15_SHORT_168]
+
+partitions:
+  retrospective_design_train:
+    end: '2026-08-09T06:55:00+00:00'
+    evidence_role: DESIGN_AND_NESTED_TRAIN_ONLY
+  fresh_validation:
+    start: '2026-08-13T00:00:00+00:00'
+    end: '2026-09-30T23:55:00+00:00'
+    access_policy: ONCE_AFTER_WINDOW_MATURES
+  final_holdout:
+    start: '2026-10-01T00:00:00+00:00'
+    end: '2026-11-30T23:55:00+00:00'
+    minimum_open_date: '2026-12-01T00:00:00Z'
+    access_policy: ONCE_AFTER_SHADOW_GATE_AND_WINDOW_MATURITY
+  purge_minutes: 120
+
+hypothesis:
+  statement: >-
+    A monotonic clean-entry ranker combined with independently estimated danger,
+    q90 MAE, protected-path success, and lower-tail economic utility can select
+    entries with positive net expectancy without calibration rank inversion.
+  v18_not_reused_as_confirmation: true
+
+targets:
+  clean: v11_clean_entry_label
+  danger: [ADVERSE_FIRST, SAME_BAR_AMBIGUOUS]
+  mae: mae_fraction
+  protected_success: CURRENT_TS_WORST_NET_RETURN_GT_ZERO
+  conservative_utility: ROE_10_H12_REALIZED_UTILITY_Q10
+
+models:
+  clean_ranker: STANDARDIZED_LOGISTIC_REGRESSION_BALANCED_C1
+  danger_ranker: STANDARDIZED_LOGISTIC_REGRESSION_BALANCED_C1
+  mae_q90: HISTOGRAM_GRADIENT_BOOSTING_QUANTILE
+  protected_success: STANDARDIZED_LOGISTIC_REGRESSION_BALANCED_C1
+  utility_q10: HISTOGRAM_GRADIENT_BOOSTING_QUANTILE
+  seed: 190019
+  seed_search: PROHIBITED
+  feature_search: PROHIBITED
+
+calibration:
+  method: PLATT_WITH_NONNEGATIVE_SLOPE
+  fitting_partition: NESTED_CHRONOLOGICAL_CALIBRATION_ONLY
+  zero_or_negative_slope: FAIL_CLOSED
+  rank_inversion: PROHIBITED
+  validation_or_holdout_calibration: PROHIBITED
+
+selection_policy:
+  clean_score: TOP_DECILE_THRESHOLD_FROZEN_FROM_NESTED_TRAIN_OOF
+  maximum_danger_probability: 0.25
+  maximum_mae_q90_fraction: 0.005
+  minimum_protected_success_probability: 0.50
+  minimum_utility_q10: 0.0
+  maximum_candidates_per_timestamp_per_side: 1
+  threshold_tuning_on_fresh_validation_or_final_holdout: PROHIBITED
+
+economics:
+  cost_contract: FROZEN_ROE_10_H12
+  funding: INCLUDE_WHEN_AVAILABLE_OTHERWISE_REPORT_UNAVAILABLE
+  metrics: [net_expectancy, pnl, profit_factor, win_rate, mae, mfe, maximum_drawdown, cvar_05, frequency, opportunity_gap, temporal_stability]
+  uncertainty: MOVING_BLOCK_BOOTSTRAP_95_PERCENT
+
+ready_for_shadow_gate:
+  fresh_validation_required: true
+  minimum_selected_per_direction: 100
+  mean_net_expectancy_ci_lower_gt: 0.0
+  profit_factor_ci_lower_gt: 1.0
+  maximum_mean_mae: 0.004
+  maximum_cvar_05: -0.004
+  positive_validation_thirds: 2
+  calibration_rank_inversions: 0
+  no_material_regression_vs_v15: true
+  both_directions_required: true
+
+ready_for_live_gate:
+  independent_from_ready_for_shadow: true
+  final_holdout_required: true
+  minimum_shadow_nonoverlapping_opportunities_per_direction: 300
+  minimum_shadow_calendar_days: 30
+  positive_shadow_expectancy_ci_lower_required: true
+  durable_execution_compatibility_required: true
+  separate_owner_authorization_required: true
+
+anti_overfitting:
+  fresh_validation_accesses: 1
+  final_holdout_accesses: 1
+  threshold_mining: PROHIBITED
+  feature_mining: PROHIBITED
+  best_seed_selection: PROHIBITED
+  failed_results_retained: true
+
+deployment:
+  V19_READY_FOR_SHADOW: false
+  V19_READY_FOR_LIVE: false
+  model_export: PROHIBITED_UNTIL_FRESH_VALIDATION_GATE
+  shadow_runtime_change: NONE
+  live_runtime_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0

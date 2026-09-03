@@ -1,0 +1,39 @@
+{
+  "schema_version": "e5-blind-fold12-export-config-v1",
+  "source": {
+    "schema_version": "e3-economic-report-static-contract-v1",
+    "path": "reports/experiments/e3_validation_official/attempt_1/aegis-short-candidate-e3/runs/d742d9bc0ae867bb/econ_report.json",
+    "sha256": "bff472758eacc211dff1b3e2209cbd96e8a845a68f45b9e31526ca2968e6e085",
+    "authority_config": "config/diagnostics/exit_excursion_d1a.json",
+    "partition_selector": "signal.fold",
+    "strategy_id": "full_stack",
+    "scenario_id": "B_BASE",
+    "side": "SHORT"
+  },
+  "output": {
+    "root": "reports/governance/e5_signal_edge_protocol/phase1a",
+    "manifest_name": "fold12_historical_entry_manifest_v1.jsonl",
+    "manifest_schema_version": "e5-historical-entry-manifest-v1",
+    "ordering": "IMMUTABLE_COMBINED_SOURCE_ORDINAL"
+  },
+  "authority": {
+    "execution_specification_sha256": "751b4014f1072e6fd0a49fb3a8820ba60b1b3c556eb94f9fbb7911d70516ae09",
+    "phase0_report_sha256": "a11502e7334d2a288c1b9aae0ef9761540cb2d6ae103d4212b106d6509314d5d",
+    "amendment_05_sha256": "5a3a71f64c105df417fdf0067c222f1a71879756feddae6fbfa389ae4e5475de",
+    "amendment_06_sha256": "c1428c195a897fca399d91e20aec157c8ebc016fa7fce534816a201b40c78413",
+    "trade_id_authority": "OWNER_AUTHORIZED_CANONICAL_DERIVED_IDENTITY",
+    "trade_id_scheme": "e5-historical-trade-id-v1"
+  },
+  "allowed_output_fields": [
+    "trade_id",
+    "symbol",
+    "fold",
+    "signal_timestamp",
+    "entry_timestamp",
+    "entry_price",
+    "side",
+    "score",
+    "strategy_id"
+  ],
+  "components": ["D3", "RV2", "TRRM", "QMAE", "EQM", "ECON1", "AEGIS"]
+}

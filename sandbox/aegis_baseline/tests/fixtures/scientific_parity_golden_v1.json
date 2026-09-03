@@ -1,0 +1,26 @@
+{
+  "schema_version": "aegis-scientific-parity-golden-v1",
+  "scenario": "SHORT",
+  "request_id": "golden-request",
+  "decision_cycle_id": "golden-cycle",
+  "tolerance": 1e-12,
+  "expected": {
+    "status": "SELECTED",
+    "selected_symbol": "ADAUSDT",
+    "selected_score": 0.02999629816272041,
+    "selected_candidate_hash": "ac0097f765a1dfdfcfa8379a4f81c19765d188f81bbc9a95348f8ebe19758119",
+    "layer_scores": {
+      "ADAUSDT": 0.02999629816272041,
+      "AVAXUSDT": 0.02999629816272041,
+      "BNBUSDT": 0.02999629816272041,
+      "BTCUSDT": 0.02999629816272041,
+      "DOGEUSDT": 0.02999629816272041,
+      "ETHUSDT": 0.02999629816272041,
+      "LINKUSDT": 0.02999629816272041,
+      "LTCUSDT": 0.02999629816272041,
+      "SOLUSDT": 0.02999629816272041,
+      "SUIUSDT": 0.02999629816272041,
+      "XRPUSDT": 0.02999629816272041
+    }
+  }
+}

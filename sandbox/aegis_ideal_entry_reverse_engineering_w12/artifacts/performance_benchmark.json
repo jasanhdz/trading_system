@@ -1,0 +1,24 @@
+{
+  "cpu_parallel": {
+    "deterministic_match": true,
+    "seconds": 0.18934108699977514,
+    "speedup": 1.7288015516780446,
+    "workers": 4
+  },
+  "gpu": {
+    "attempted": true,
+    "device": 0,
+    "eligible_for_pipeline": false,
+    "error": "HIP error: invalid device function\nHIP kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing AMD_SERIALIZE_KERNEL=3\nCompile with `TORCH_USE_HIP_DSA` to enable device-side assertions.\n",
+    "reason": "ROCm enumerates the devices but the representative kernel failed; GPU is disabled fail-closed."
+  },
+  "schema_version": "aegis-w12-performance-benchmark-v1",
+  "seed": 20260826,
+  "selected": "CPU_VECTORIZED_PROCESS_POOL",
+  "selection_reason": "Same outputs, bounded workers, and direct compatibility with frozen NumPy/pandas/sklearn methods.",
+  "single_worker": {
+    "seconds": 0.3273331650016189,
+    "workers": 1
+  },
+  "workload": "8 independent synthetic 25000x60 future-path label reductions"
+}

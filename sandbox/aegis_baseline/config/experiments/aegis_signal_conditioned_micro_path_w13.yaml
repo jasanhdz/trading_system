@@ -1,0 +1,121 @@
+schema_version: aegis-signal-conditioned-micro-path-w13-v1
+experiment_id: AEGIS_W13_SIGNAL_CONDITIONED_MICRO_PATH_CONFIRMATION
+registered_at_utc: '2026-08-15T00:00:00Z'
+mode: PYTHON_OFFLINE_RESEARCH_FIRST
+runtime_effect: NONE
+
+authority:
+  prior_holdouts: SEALED_W1_THROUGH_W12
+  prior_retuning: PROHIBITED
+  aegis_direction: FROZEN
+  direction_changes: PROHIBITED
+  production_changes: PROHIBITED
+  network_collection: DISABLED_NOT_DEPLOYED
+
+sources:
+  signal_dataset: data/feature_information_v14/canonical_dataset.jsonl.gz
+  signal_dataset_sha256: dc5cfef8d13d00e999cfcda86d84e739de078f68c8f5085027fe285d54bbb286
+  signal_manifest: data/feature_information_v14/dataset_manifest.json
+  signal_manifest_sha256: 51a5d2c9f24816ea657b9f3ddbac35deaef87147be1c126f3bc591de68fbe229
+  frozen_brain_bundle: config/bundles/aegis-prospective-shadow-candidate-v1.json
+  frozen_brain_bundle_sha256: 23b22403b70f7d6c385d1214e6543197f4ca4e57269af19b1013987891ed550a
+  frozen_brain_qualified_at_utc: '2026-07-21T16:33:52Z'
+  frozen_brain_training_config: config/experiments/aegis_short_candidate_e3.yaml
+  frozen_brain_training_config_sha256: 281e27f93f8be0f9c4fbe78673d55f1a4f3391aa421c3fcaf90823113dc81e62
+  frozen_brain_training_state: reports/experiments/e3_validation_official/attempt_1/aegis-short-candidate-e3/runs/d742d9bc0ae867bb/state.json
+  frozen_brain_training_state_sha256: 3869991ce0a8a3497ad36f72b6a74c56e51ed000addd7d3f40c2352e784031a0
+  l2_manifest: data/historical_orderbook_direction_w9_1/episodes/w9_1_dataset_manifest.json
+  l2_manifest_sha256: 5906ced6a57aa369e59d7ba329d2546165cf74e66a487eaa40d2021ab13c9897
+  l2_data_types: [incremental_book_L2, quotes, trades]
+  replay_semantics: FROZEN_CURRENT_BRAIN_COUNTERFACTUAL_REPLAY
+  strict_no_lookahead_replay_available: false
+  production_signal_claim: PROHIBITED
+
+partitions:
+  train_dates: ['2025-09-01', '2025-12-01']
+  validation_dates: ['2026-03-01']
+  final_holdout:
+    identity: FUTURE_INDEPENDENT_W13_PROSPECTIVE_EVIDENCE
+    state: SEALED_NOT_OPENED
+
+sample_gate:
+  minimum_train_episodes: 1000
+  minimum_validation_episodes: 500
+  minimum_symbols_per_partition: 4
+  minimum_temporal_days_per_partition: 3
+  minimum_directions_per_partition: 1
+  long_transfer_requires_independent_long_evidence: true
+  action_on_failure: STOP_BEFORE_FEATURES_LABELS_OR_MODELING
+
+state_machine:
+  states: [PENDING, ENTER, CANCEL]
+  terminal_transitions: [PENDING_TO_ENTER, PENDING_TO_CANCEL]
+  maximum_entries_per_signal: 1
+  reentry: PROHIBITED
+  flip: PROHIBITED
+
+observation:
+  causal_windows_ms: [100, 250, 500, 1000, 2000, 5000, 10000, 20000, 30000]
+  collector_pre_signal_seconds: 30
+  collector_post_signal_seconds: 180
+  event_types: [BOOK, QUOTE, TRADE]
+  require_exchange_timestamp: true
+  require_local_receive_timestamp: true
+  synthetic_microdata: PROHIBITED
+
+targets:
+  from_each_decision_time: true
+  outcomes: [remaining_MFE, remaining_MAE, favorable_barrier_first, adverse_barrier_first, expected_net_return]
+  favorable_barrier_bps: [25, 50]
+  adverse_barrier_bps: [20, 35]
+  horizon_seconds: [30, 60, 180]
+  future_data_as_feature: PROHIBITED
+
+features:
+  ablations: [MICRO_PRICE_PATH, PLUS_TRADE_FLOW, PLUS_FLOW_RESPONSE, PLUS_ORDER_BOOK, PLUS_ABSORPTION, FULL]
+  direction_orientation: POSITIVE_IS_FAVORABLE_TO_FROZEN_AEGIS_SIDE
+
+models:
+  families: [REGULARIZED_LOGISTIC, CALIBRATED_LOGISTIC, SHALLOW_TREE, HIST_GRADIENT_BOOSTING, SIMPLE_SEQUENTIAL_BAYES]
+  no_deep_learning: true
+  no_reinforcement_learning: true
+
+economics:
+  baseline_round_trip_cost_bps: 14.0
+  stress_round_trip_cost_bps: 20.0
+  minimum_net_expectancy_bps_per_executed_trade: 2.0
+  minimum_net_expectancy_bps_per_original_signal: 0.0
+  skipped_signal_return_bps: 0.0
+  leverage_in_objective: false
+
+latency:
+  scenarios_ms: [0, 100, 250, 500, 1000]
+  required_survival_ms: 250
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: aegis_signal_episode_id
+  temporal_block_bootstrap: true
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+
+collector_design:
+  enabled: false
+  deployment: PROHIBITED
+  network_client: NONE
+  exchange_client: NONE
+  execution_callback: NONE
+  pre_signal_seconds: 30
+  post_signal_seconds: 180
+
+deployment:
+  production: PROHIBITED
+  typescript: PROHIBITED
+  brain: PROHIBITED
+  guards: PROHIBITED
+  leverage: PROHIBITED
+  pm2: PROHIBITED
+  shadow: PROHIBITED
+  live: PROHIBITED
+  authenticated_requests: 0
+  exchange_mutations: 0

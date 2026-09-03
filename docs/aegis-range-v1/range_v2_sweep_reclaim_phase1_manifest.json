@@ -1,0 +1,113 @@
+{
+  "artifacts": {
+    "contract_eligibility.jsonl.gz": {
+      "rows": 0,
+      "sha256": "471bca732c742e1b5e345b262c55c05c700029e1bd52440c7c5a9aefc5d3d518"
+    },
+    "diagnostic_summary.json": {
+      "rows": 1,
+      "sha256": "0e7b0a490cedabe65261092a2c69247ceaa537ab3aba8ba258c555ac56917d3a"
+    },
+    "first_passage.jsonl.gz": {
+      "rows": 18346,
+      "sha256": "9e40ece8a0ad968d392e83503000f281a19f87932674e5d7808dd56f5ab2c237"
+    },
+    "reclaim_entries.jsonl.gz": {
+      "rows": 19070,
+      "sha256": "0ee40bf60793e9014da53d10ce724ce1f1bd2b369071ad14d1cec9afa961b6d3"
+    },
+    "sweep_opportunities.jsonl.gz": {
+      "rows": 31769,
+      "sha256": "6c5def57f30a9027cd3d1493856ab344d6dd5f0bafa8b5cc651fed4a199ecc85"
+    },
+    "symbol_month_diagnostics.json": {
+      "rows": 1,
+      "sha256": "a3f6a473e291e7f797caf3ab945a1cc3b1eae78cec5548001aa338e9d62541a4"
+    }
+  },
+  "audit": {
+    "adjacent_5m_contiguous": true,
+    "adverse_first_same_bar": true,
+    "canonical_ids_deterministic": true,
+    "no_future_setup_use": true,
+    "no_oos": true,
+    "reclaim_decision_eq_entry_at": true,
+    "same_segment": true,
+    "sweep_lt_reclaim": true
+  },
+  "bootstrap": {
+    "draws": 10000,
+    "percentile": "NEAREST_RANK",
+    "seed": 20260825,
+    "synthetic_days": 365,
+    "utc_block_days": 7
+  },
+  "candidate_count": 384,
+  "determinism": {
+    "ascii": true,
+    "bootstrap_seed": 20260825,
+    "gzip_mtime": 0,
+    "json_sorted_keys": true,
+    "percentile": "NEAREST_RANK",
+    "stable_row_sort": true
+  },
+  "head_authority": "d917602b2c7e065d18b29f87df14febb935d8ad8",
+  "input_hashes": {
+    "prior_discovery": {
+      "confirmation_counterfactuals.jsonl.gz": "aaca07c8055d96753fc56a5b83e0d57a0be69c90f67938c3f8794aab2c40044c",
+      "diagnostic_summary.json": "38ff8f28bc4b6a5dc204c14fe1aa6b6bd3d57fe56df3873cf467fd6303fd56fb",
+      "diagnostics_manifest.json": "77b27abf29efa2cffae853ea991da4af2183dad9b1feff150b7d527bba4346e3",
+      "opportunity_paths.jsonl.gz": "796af43415a7398f04704a4ca22d60d7c7f5b9e7d54b9589ea1700c3aaaf9b00",
+      "stop_recovery.jsonl.gz": "796fec88152c7cd08161691f2198b3cdd1486f7eeec8d6719fafa8bdedce86f7",
+      "symbol_suitability.jsonl.gz": "6061ff4b5102f1227ce85578674144e2c9be1b9d5eddff80312df1cff7b9ac34"
+    },
+    "regime_caches": {
+      "ADAUSDT": "3c78717f759f3c66a42ef1c6fe7974a91391745e02167a27fe398ec655363619",
+      "AVAXUSDT": "b8b2abf5ac54b0c7d3b5ca6311f6c9264355c21c39f7ebcecb11f46056d587cf",
+      "BNBUSDT": "29a4ede0c4e4da3ea30abcebe3880a59bbdc4d47c4bd20b68ff5e4ca0713e896",
+      "BTCUSDT": "edcc68b7ad58b67c1eddfb1099464f0b472ac2c210b40af60bddff72af79ca24",
+      "DOGEUSDT": "c5a292c19c392c78d3b8f7426a1da252604a739c3c225e5303c07ef45e310fc2",
+      "ETHUSDT": "81b378ccf9f9ca659810649cb30514c58745e1e29320ab5d58a50616c68bae3f",
+      "LINKUSDT": "2e674b7fbe0819c47898b7d20a66980de0b45ed935faaa86f62b7a8e4c153111",
+      "LTCUSDT": "05ebced82fd0a6c25194e4903b64e060e1edf70f04d13ab42e5da0bafdee4936",
+      "SOLUSDT": "eb035d7f62d3317175796fbade11b964a2580966550849c71d7793ca73b5dc16",
+      "SUIUSDT": "b8b47c2c39d6b1abb017bbac817802054e91b6b0d80231ae480b182e6c72b6d0",
+      "XRPUSDT": "3256e72f1dee88aa5c0b027bce846d762af5621b0cea5d8cdab58e0a224a79a6"
+    },
+    "run_a": {
+      "candidate_metrics.json": "12f72be45420099d7ab0a56524ca934e791dfbaa9da0c0add87277d7939b656f",
+      "episodes.jsonl.gz": "82989a83a68935ed44866afb2f5904e703c81e27b50acde5fe1c2fabd6af5270",
+      "regime_cache_manifest.json": "a9699e874537bcdf14042e3d811594448e886b6811f48741b9b6ce5ad7e9c22b",
+      "run_manifest.json": "5f62022f35fb38de174e6f7c573397d1c1ceebc75d76f7d848260c35456012b8",
+      "trades.jsonl.gz": "125f31dcb1bf27e6f183bbbb02da901a5133847e577196a9bd6a59be42cd4537"
+    }
+  },
+  "labels": [
+    "DISCOVERY_ONLY",
+    "HYPOTHESIS_GENERATION_ONLY",
+    "NO_SELECTION_AUTHORITY",
+    "NO_PROMOTION_AUTHORITY",
+    "NO_WHITELIST_AUTHORITY"
+  ],
+  "partition_flags": {
+    "CALIBRATION": false,
+    "HOLDOUT": false,
+    "TRAIN": true,
+    "VALIDATION": false
+  },
+  "phase1_expansion": "NO_64X_NO_LIFECYCLE_NO_ECONOMICS",
+  "range_sweep_code_authority": "d917602b2c7e065d18b29f87df14febb935d8ad8",
+  "schema_version": "aegis-range-v2-sweep-reclaim-phase1-manifest-v1",
+  "source_hashes": {
+    "phase1_module": "1088d4c6a49c00e761d1ac940c6ee1b1fb312dbee05b68ce2bc8fc9d56676704",
+    "platform": "Linux-x86_64",
+    "python_version": "3.12.3",
+    "sweep_reclaim_discovery": "008cccfafbab03b9033d7139a5e43ec22eeb32043c2cd25df8c1c1eef03298eb"
+  },
+  "status": "AEGIS_RANGE_V2_SWEEP_RECLAIM_PHASE1_READY_FOR_REVIEW",
+  "structural_configs": 6,
+  "train": {
+    "end_exclusive": "2025-01-01T00:00:00.000Z",
+    "start_inclusive": "2024-01-01T00:00:00.000Z"
+  }
+}

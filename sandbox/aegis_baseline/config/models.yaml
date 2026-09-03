@@ -1,0 +1,25 @@
+schema_version: aegis-model-config-v1
+model_bundle_id: aegis-offline-reference-v1
+feature_schema_version: aegis-features-v1
+artifact_registry: bundles
+layers:
+  - REGIME
+  - RV2
+  - TRRM
+  - QMAE
+  - EQM
+thresholds:
+  direction_probability: 0.50
+  selection_score: 0.50
+  selection_policy_status: PLACEHOLDER_REFERENCE_ONLY
+  trrm_max_tail_probability: 0.70
+  qmae_max_fraction: 0.03
+  eqm_min_score: 0.0
+regime_thresholds:
+  schema_version: aegis-regime-thresholds-v1
+  provenance: clean-rebuild-reference-golden; not part of ranking score
+  high_volatility_fraction: 0.035
+  expansion_ratio: 1.0
+  chop_ratio: 0.70
+  trend_fraction: 0.002
+maximum_decision_age_seconds: 30

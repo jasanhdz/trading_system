@@ -1,0 +1,170 @@
+schema_version: aegis-adaptive-profit-guard-w6-preregistration-v1
+experiment_id: aegis-adaptive-profit-guard-w6-01
+registered_at_utc: '2026-08-14T12:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+hypothesis:
+  statement: >-
+    After an independent Aegis position reaches the existing trailing activation,
+    causal wave and regime state can select a wider, unchanged, or tighter ATR
+    protection distance and improve net expectancy over the current fixed guard.
+  primary_question: CAN_CAUSAL_STATE_IMPROVE_PROFIT_MANAGEMENT_NOT_ENTRY
+  forbidden_interpretations:
+    - ENTRY_SIGNAL
+    - DIRECTIONAL_SIGNAL
+    - POSITION_SIZING
+    - W1_TO_W5_RETUNING
+
+population:
+  source: data/momentum_exhaustion_w2/dataset_train_validation_01
+  source_partition_allowed: TRAIN
+  outcome_source: SIMULATED
+  unit: position_episode_id
+  entry_policy: FROZEN_INDEPENDENT_AEGIS_CANDIDATE
+  maximum_episode_minutes: 480
+  note: >-
+    W6 reuses only W2 TRAIN episode paths and causal decision rows. W2 VALIDATION,
+    W2 HOLDOUT and all W1-W5 holdouts are prohibited.
+
+partitions:
+  train: ['2024-01-08T00:00:00Z', '2024-05-01T00:00:00Z']
+  validation: ['2024-05-01T00:00:00Z', '2024-10-01T00:00:00Z']
+  purge_minutes: 480
+  final_holdout:
+    state: SEALED
+    source: FUTURE_INDEPENDENT_EPISODES_NOT_ACCESSED
+  repeated_holdout_selection: PROHIBITED
+
+current_guard:
+  source:
+    - binance-futures-bot-ts/src/domain/services/ProfitGuardian.ts
+    - binance-futures-bot-ts/src/app/services/TradingService.ts
+    - binance-futures-bot-ts/regime_config.live.yaml
+  leverage_for_roe_mapping: 20
+  break_even_trigger_roe: 0.08
+  break_even_offset_underlying_fraction: 0.003
+  trailing_activation_roe: 0.15
+  atr_multiplier: 1.5
+  hard_stop_roe: -0.40
+  maximum_hold_minutes: 480
+  replay_resolution: CLOSED_5M_CONSERVATIVE_STOP_EFFECTIVE_NEXT_BAR
+  exact_runtime_replay: false
+  limitation: >-
+    Production evaluates mark price more frequently than the historical 5m path.
+    W6 therefore cannot authorize a production change even if validation passes.
+
+adaptive_actions:
+  DEFENSIVE: 0.75
+  NORMAL: 1.5
+  EXPANSION: 2.25
+  activation: CURRENT_TRAILING_ACTIVATION_UNCHANGED
+  state_refresh: ONCE_AT_FIRST_TRAILING_ACTIVATION
+  break_even_changes: NONE
+  hard_stop_changes: NONE
+
+features:
+  source: W2_CAUSAL_DECISION_ROW_AT_ACTIVATION
+  columns:
+    - peak_mfe_atr
+    - current_return_atr
+    - giveback_atr
+    - giveback_ratio
+    - bars_since_peak
+    - distance_from_peak_atr
+    - directional_velocity_1
+    - directional_velocity_2
+    - directional_velocity_3
+    - velocity_decay
+    - velocity_slope
+    - directional_acceleration
+    - volume_ratio_20
+    - volume_z_20
+    - volume_slope
+    - volume_decay
+    - directional_taker_imbalance
+    - taker_imbalance_slope
+    - taker_imbalance_decay
+    - opposite_body_ratio
+    - opposite_volume_ratio
+    - retracement_fraction
+    - favorable_structure
+    - structure_deterioration
+    - directional_price_vs_ma7_atr
+    - directional_price_vs_ma25_atr
+    - directional_ma7_slope_atr
+    - directional_ma25_slope_atr
+    - directional_rsi_extension
+    - rsi_slope
+    - atr_percentile
+    - atr_slope
+    - realized_volatility_12
+    - directional_15m_return
+    - directional_15m_ma25_slope
+    - directional_btc_5m_return
+    - directional_btc_15m_return
+    - directional_btc_taker_imbalance
+    - btc_opposes_position
+  future_columns_allowed: false
+  symbol_and_side_inputs: true
+
+models:
+  discovery_only:
+    - MULTINOMIAL_LOGISTIC_L2
+    - SHALLOW_DECISION_TREE
+  selection_partition: TRAIN_ONLY
+  internal_train_fit_fraction: 0.70
+  label: BEST_OF_DEFENSIVE_NORMAL_EXPANSION_BY_EPISODE_NET_RETURN
+  tie_breaker: NORMAL_THEN_DEFENSIVE_THEN_EXPANSION
+  logistic_C: 0.25
+  tree_max_depth: 3
+  tree_min_samples_leaf: 250
+  random_seed: 618001
+
+baselines:
+  primary: CURRENT_GUARD_1_5_ATR
+  fixed_trailing_atr: [0.75, 1.0, 1.5, 2.0, 2.25]
+  fixed_percentage_giveback: [0.20, 0.30, 0.40, 0.50]
+  fixed_tp_atr: [0.25, 0.50, 0.75, 1.00]
+  time_exit_bars_after_activation: [1, 2, 3, 6, 12]
+
+economics:
+  base_round_trip_cost_bps: 14
+  stress_round_trip_cost_bps: 20
+  leverage_in_objective: false
+  primary_metric: NET_EXPECTANCY_BPS_PER_POSITION_EPISODE
+  no_reentry: true
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: UTC_ENTRY_DAY
+  walk_forward_folds: 4
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+  minimum_validation_episodes: 2000
+
+gate:
+  minimum_mean_improvement_vs_current_bps: 2.0
+  require_paired_ci_lower_above_zero: true
+  minimum_positive_symbols: 7
+  minimum_positive_walk_forward_folds: 3
+  require_profit_factor_not_worse: true
+  maximum_p95_giveback_degradation_bps: 1.0
+  require_outperform_best_simple_baseline: true
+  require_stress_cost_survival: true
+  holdout_open_condition: ALL_TRAIN_VALIDATION_GATES_PASS
+
+gates:
+  W6_ADAPTIVE_GUARD_EDGE_FOUND: false
+  W6_MODELING_JUSTIFIED: false
+  W6_READY_FOR_SHADOW: false
+  W6_READY_FOR_LIVE: false
+
+safety:
+  production_changes: NONE
+  authenticated_requests: 0
+  exchange_mutations: 0
+  websocket_changes: NONE
+  pm2_changes: NONE

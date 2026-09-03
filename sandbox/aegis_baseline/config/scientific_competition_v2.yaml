@@ -1,0 +1,111 @@
+schema_version: aegis-scientific-competition-v2
+protocol_id: aegis-short-stability-competition-v2
+status: PRE_REGISTERED
+side: SHORT
+timeframe: 5m
+universe_id: aegis-operational-eleven-v1
+feature_schema_version: aegis-features-v2
+label_schema_version: aegis-labels-short-v4
+base_seed: 20260718
+fold_seed_derivation: BASE_SEED_PLUS_FOLD_ID
+production_hyperparameters:
+  trrm_logistic_baseline:
+    C: 1.0
+    max_iter: 1000
+  trrm_random_forest:
+    n_estimators: 300
+    max_depth: 12
+    min_samples_leaf: 20
+    class_weight: balanced_subsample
+  trrm_hist_gradient_boosting:
+    max_iter: 300
+    learning_rate: 0.06
+    max_depth: null
+    max_leaf_nodes: 31
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+  eqm_linear_net_baseline:
+    alpha: 1.0
+  eqm_extra_trees_net:
+    n_estimators: 300
+    max_depth: 14
+    min_samples_leaf: 25
+  eqm_hgb_net:
+    max_iter: 250
+    learning_rate: 0.06
+    max_leaf_nodes: 31
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+  eqm_logistic_clean_baseline:
+    max_iter: 1000
+    class_weight: balanced
+    solver: liblinear
+  eqm_random_forest_clean:
+    n_estimators: 200
+    max_depth: 12
+    min_samples_leaf: 25
+    class_weight: balanced_subsample
+  eqm_hgb_clean:
+    max_iter: 250
+    learning_rate: 0.06
+    max_leaf_nodes: 31
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+  qmae_hist_gradient_boosting:
+    max_iter: 300
+    learning_rate: 0.06
+    max_leaf_nodes: 31
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+smoke_overrides:
+  production_use: FORBIDDEN
+  n_estimators: 24
+  max_iter: 30
+eqm_training_population:
+  fold_train: TRRM_VETO_SURVIVORS_OF_FOLD_TRAIN
+  fold_scoring: TRRM_VETO_SURVIVORS_OF_FOLD_SCORING
+  refit: TRRM_VETO_SURVIVORS_OF_FINAL_TRAIN
+trrm_veto:
+  mechanics: RANK_BASED_BUDGET
+  veto_budget: 0.30
+  calibrated_survival_quantile: 0.70
+  raw_probability_0_70: FORBIDDEN
+econ_baselines:
+  directional:
+    - no_trade
+    - random_directional_with_veto
+    - momentum_rule
+    - mean_reversion_rule
+    - volatility_rule
+  diagnostic:
+    - eqm_only
+    - trrm_only
+  seed: 20260718
+  same_costs: true
+  same_holding_period: true
+  same_selection_budget: true
+  best_directional_baseline:
+    rule: max_directional_baseline_expectancy
+    candidates:
+      - no_trade
+      - random_directional_with_veto
+      - momentum_rule
+      - mean_reversion_rule
+      - volatility_rule
+calibration:
+  candidates: [RAW, PLATT, ISOTONIC]
+  selection_order: [mean_ece_ascending, mean_brier_ascending, complexity_ascending]
+  ece_bins: 10
+  require_out_of_fold: true
+ranking:
+  stability_first_order:
+    - worst_fold_descending
+    - mean_descending
+    - standard_deviation_ascending
+    - compute_cost_ascending
+publication:
+  artifact_format: INSPECTABLE_JSON
+  pickle_allowed: false
+  deterministic_evaluator_required: true
+  smoke_results_can_select_winner: false
+

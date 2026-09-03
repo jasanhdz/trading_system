@@ -1,0 +1,57 @@
+schema_version: aegis-candle-momentum-audit-v1
+audit_id: aegis-candle-momentum-5m-20260727
+mode: RESEARCH_ONLY
+
+universe:
+  timeframe: 5m
+  symbols:
+    - ETHUSDT
+    - BTCUSDT
+    - SOLUSDT
+    - BNBUSDT
+    - XRPUSDT
+    - DOGEUSDT
+    - ADAUSDT
+    - AVAXUSDT
+    - LINKUSDT
+    - SUIUSDT
+    - LTCUSDT
+
+source:
+  database: data/binance_candles.db
+  table: ohlcv_data
+  lookback_days: 730
+  finalized_candles_only: true
+
+pattern:
+  exact_run_lengths: [2, 3, 4]
+  volume_baseline_bars: 20
+  trend_ema_bars: 20
+  trend_slope_bars: 3
+  breakout_lookback_bars: 20
+  strong_body_minimum_fraction: 0.50
+
+evaluation:
+  discovery_fraction: 0.70
+  round_trip_cost_fraction: 0.001
+  minimum_validation_events: 500
+  minimum_continuation_lift: 0.02
+  require_positive_net_ci95: true
+
+conditions:
+  - ALL_EXACT_RUN
+  - VOLUME_ALL_ABOVE_MEDIAN
+  - VOLUME_ALL_ABOVE_MEDIAN_RISING
+  - STRONG_BODY_VOLUME
+  - TREND_ALIGNED_VOLUME
+  - BREAKOUT_TREND_VOLUME
+
+outputs:
+  json_report: data/candle_momentum_audit/aegis_candle_momentum_audit_v1.json
+  markdown_report: data/candle_momentum_audit/aegis_candle_momentum_audit_v1.md
+
+authority:
+  live_changes: false
+  automatic_promotion: false
+  automatic_training: false
+  owner_review_required: true

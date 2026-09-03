@@ -1,0 +1,23 @@
+{
+  "experiment_id": "AEGIS_W12_IDEAL_ENTRY_REVERSE_ENGINEERING",
+  "external_holdouts_accessed": false,
+  "gates": {
+    "baseline_superiority": false,
+    "bootstrap_lower_positive": false,
+    "leakage_audit": true,
+    "minimum_symbols": true,
+    "minimum_trades": true,
+    "multiple_periods": false,
+    "negative_controls_fail": false,
+    "net14_positive": false,
+    "net20_positive": false,
+    "precision_lift": false,
+    "symbol_concentration": true
+  },
+  "grade": "C",
+  "leakage_audit": "PASS",
+  "merits_shadow": false,
+  "merits_w12_1": false,
+  "no_production_authority": true,
+  "verdict": "NO_IDEAL_ENTRY_PREDICTIVE_EDGE"
+}

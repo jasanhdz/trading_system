@@ -1,0 +1,89 @@
+{
+  "cpu": {
+    "logical_cores": 12,
+    "physical_cores": 6,
+    "processor": "x86_64"
+  },
+  "gpus": [
+    {
+      "index": 0,
+      "name": "AMD Radeon RX 6600",
+      "vram_bytes": 8573157376
+    },
+    {
+      "index": 1,
+      "name": "AMD Radeon RX 6600",
+      "vram_bytes": 8573157376
+    }
+  ],
+  "libraries": {
+    "joblib": {
+      "available": true,
+      "version": "1.5.2"
+    },
+    "lightgbm": {
+      "available": false,
+      "version": null
+    },
+    "numpy": {
+      "available": true,
+      "version": "2.3.3"
+    },
+    "pandas": {
+      "available": true,
+      "version": "2.3.3"
+    },
+    "polars": {
+      "available": false,
+      "version": null
+    },
+    "psutil": {
+      "available": true,
+      "version": "7.2.2"
+    },
+    "pyarrow": {
+      "available": true,
+      "version": "25.0.0"
+    },
+    "sklearn": {
+      "available": true,
+      "version": "1.7.2"
+    },
+    "torch": {
+      "available": true,
+      "version": "2.5.1+rocm6.2"
+    },
+    "xgboost": {
+      "available": true,
+      "version": "3.1.2"
+    }
+  },
+  "memory": {
+    "available_bytes_at_audit": 15421300736,
+    "total_bytes": 41888493568
+  },
+  "parallelism": {
+    "blas_thread_environment": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "gpu_reason": "Frozen sklearn models have no same-method ROCm backend; GPU is not forced.",
+    "physical_cores_reserved": 2,
+    "selected_backend": "CPU_VECTORIZED_PROCESS_POOL",
+    "threads_per_worker": 1,
+    "workers": 4
+  },
+  "platform": "Linux-6.8.0-110-generic-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "pytorch": {
+    "available": true,
+    "cuda_version": null,
+    "device_count": 2,
+    "hip_version": "6.2.41133-dd7f95766",
+    "version": "2.5.1+rocm6.2"
+  },
+  "rocm_available": true,
+  "rocm_smi_detected": true,
+  "schema_version": "aegis-w12-compute-environment-v1"
+}

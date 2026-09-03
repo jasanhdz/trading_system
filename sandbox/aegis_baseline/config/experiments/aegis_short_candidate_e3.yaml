@@ -1,0 +1,209 @@
+schema_version: aegis-candidate-preregistration-v3
+experiment_id: aegis-short-candidate-e3
+protocol_version: 3
+status: PRE_REGISTERED_UNEXECUTED
+side: SHORT
+allowed_sides: [SHORT]
+timeframe: 5m
+universe_id: aegis-operational-eleven-v1
+symbol_set_hash: f6448e67daf1d017e16cc6b331f6494e97e178824474994fff08864303ccd348
+feature_schema_version: aegis-features-v2
+feature_hash: 2dc278b4353585fe22503233187e12832cabfd67e2a2e58f4cd683ee6f3b9454
+label_schema_version: aegis-labels-short-v4
+
+supersedes:
+  experiment_id: aegis-short-candidate-e2
+  parent_physical_sha256: 759a7c87d2afaec2f6ede7b6451154a287ea5527e00036e040beb26c32732b8e
+  parent_canonical_hash: dad3d088f41d8aec7fd52f79a0dac8d53c87d6e201c22f7098220991ca8af308
+  parent_status: SUPERSEDED_UNDERSPECIFIED_NEVER_CONSUMED_LOCKBOX
+  parent_validation_run:
+    run_id: b49f1ec7c71fcf70
+    classification: VALID_DIAGNOSTIC_NONCOMPARABLE
+    threshold_draft_status: RETAINED_FOR_AUDIT_ONLY
+  reason_for_supersession: >-
+    E2 froze model families but not exact hyperparameters, froze the EQM
+    survivor population only for final refit, and did not freeze TRRM veto
+    semantics or the complete ECON baseline set. E3 freezes these values
+    using only pre-lockbox historical evidence. No semi-blind data was
+    inspected and no post-result optimization was performed.
+  no_semi_blind_inspection: true
+  shared_lockbox_authority: true
+  additional_lockbox_budget: 0
+
+source:
+  kind: canonical_d3_series
+  path: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+  read_only: true
+  finality_gate_required: true
+
+protocol:
+  seed: 20260718
+  embargo_minutes: 120
+  horizon_bars: 12
+  fold_count: 4
+  threshold_value: null
+
+sampling:
+  schema_version: aegis-sampling-v1
+  cadence: HOURLY_ANCHOR
+  stride_bars: 12
+  anchor_rule: CLOSE_TIME_ON_THE_HOUR
+  timezone: UTC
+  closed_final_candles_only: true
+  coordinated_symbols_required: 11
+  history_bars: 288
+  horizon_bars: 12
+  label_window: "(t, t + 60min]"
+  entry_rule: NEXT_BAR_OPEN
+  overlap_policy: NONE_BY_CONSTRUCTION
+  gap_policy:
+    history_gap: SKIP_CYCLE_AND_COUNT
+    future_gap: QUARANTINE_LABEL_AND_COUNT
+    interpolation: FORBIDDEN
+  expected_rows:
+    first_anchor_utc: "2024-07-12T16:00:00Z"
+    last_dev_anchor_utc: "2026-04-26T23:00:00Z"
+    approximate_maximum_dev_rows: 172500
+    hard_stop_if_valid_rows_below_fraction: 0.90
+
+fold_protocol:
+  schema_version: aegis-fold-protocol-v1
+  embargo_minutes: 120
+  internal_split_formula: >-
+    calibration_end = validation_start +
+    floor(((validation_end - validation_start) / 2) / 300s) * 300s;
+    scoring_start = calibration_end + 120min.
+    Las fechas literales son la autoridad y el parser verifica que
+    coinciden exactamente con esta fórmula.
+  folds:
+    - {id: 1, train_start: "2024-07-11T15:20:00Z", train_end: "2025-02-28T23:59:59Z", calibration_start: "2025-03-01T02:00:00Z", calibration_end: "2025-04-16T00:55:00Z", scoring_start: "2025-04-16T02:55:00Z", scoring_end: "2025-05-31T23:59:59Z"}
+    - {id: 2, train_start: "2024-07-11T15:20:00Z", train_end: "2025-05-31T23:59:59Z", calibration_start: "2025-06-01T02:00:00Z", calibration_end: "2025-07-17T00:55:00Z", scoring_start: "2025-07-17T02:55:00Z", scoring_end: "2025-08-31T23:59:59Z"}
+    - {id: 3, train_start: "2024-07-11T15:20:00Z", train_end: "2025-08-31T23:59:59Z", calibration_start: "2025-09-01T02:00:00Z", calibration_end: "2025-10-16T12:55:00Z", scoring_start: "2025-10-16T14:55:00Z", scoring_end: "2025-11-30T23:59:59Z"}
+    - {id: 4, train_start: "2024-07-11T15:20:00Z", train_end: "2025-11-30T23:59:59Z", calibration_start: "2025-12-01T02:00:00Z", calibration_end: "2026-01-15T00:55:00Z", scoring_start: "2026-01-15T02:55:00Z", scoring_end: "2026-02-28T23:59:59Z"}
+
+calibration:
+  fit_block: CALIBRATION
+  applies_to: [trrm_tail_probability, eqm_clean_probability]
+  qmae_conformal_residuals_block: CALIBRATION
+  measurement_block: SCORING
+  family_selection_rule: config/scientific_competition_v2.yaml
+  forbidden: [fitting_on_scoring, model_selection_on_calibration_block, conformal_residuals_from_scoring]
+
+scoring:
+  model_selection_metrics: RAW_RANKING_METRICS_STABILITY_FIRST
+  selection_rule: config/scientific_competition_v2.yaml
+  econ_per_fold_block: SCORING
+  fitting: FORBIDDEN
+
+refit:
+  final_train_start: "2024-07-11T15:20:00Z"
+  final_train_end: "2026-02-28T23:59:59Z"
+  embargo_minutes: 120
+  final_calibration_reserve_start: "2026-03-01T02:00:00Z"
+  final_calibration_reserve_end: "2026-04-26T23:59:59Z"
+  reserve_used_for: [final_calibrators, final_conformal_adjustment, threshold_derivation]
+  reserve_forbidden_for: [model_selection, promotion_criteria_evaluation, winner_changes]
+  eqm_refit_population: TRRM_VETO_SURVIVORS_OF_FINAL_TRAIN
+
+threshold_derivation:
+  method: ABSOLUTE_QUANTILE_ON_RESERVE_SURVIVORS
+  quantile: 0.90
+  population: REFIT_BUNDLE_EQM_SCORES_ON_TRRM_VETO_SURVIVORS_IN_RESERVE
+  executed: PRE_LOCKBOX
+  out_of_sample_note: >-
+    El threshold se deriva sobre una reserva dev no utilizada para
+    seleccionar modelos. Esto mejora el threshold in-sample histórico.
+  value: null
+
+econ_overlap_note: >-
+  Con cadencia horaria y H12 de 60 minutos no existen posiciones temporalmente solapadas
+  del mismo simbolo. La concentracion cross-symbol se reporta bajo los criterios congelados.
+
+models:
+  competition_protocol:
+    path: config/scientific_competition_v2.yaml
+    physical_sha256: 70c889223b1466ed3e0817a63e7cfafb5b0966bf7c4d3eb3d06544c70c097f79
+  trrm: [trrm_logistic_baseline, trrm_random_forest, trrm_hist_gradient_boosting]
+  qmae: [qmae_unconditional_baseline, qmae_hist_gradient_boosting]
+  eqm_clean: [eqm_logistic_clean_baseline, eqm_random_forest_clean, eqm_hgb_clean]
+  eqm_net_quality: [eqm_linear_net_baseline, eqm_extra_trees_net, eqm_hgb_net]
+
+eqm_population:
+  fold_train: TRRM_VETO_SURVIVORS_OF_FOLD_TRAIN
+  fold_scoring: TRRM_VETO_SURVIVORS_OF_FOLD_SCORING
+  refit: TRRM_VETO_SURVIVORS_OF_FINAL_TRAIN
+
+trrm_veto:
+  mechanics: RANK_BASED_BUDGET
+  veto_budget: 0.30
+  operative_absolute_threshold:
+    derivation: calibrated_probability_quantile
+    quantile: 0.70
+    source: FINAL_TRAIN
+    freeze_in_bundle: true
+  raw_probability_0_70_placeholder: FORBIDDEN
+
+econ_baselines:
+  config_source: config/scientific_competition_v2.yaml
+  equal_budget_required: true
+  equal_costs_required: true
+  fixed_seed_required: true
+
+econ:
+  entry: NEXT_BAR_OPEN
+  exit: H12_CLOSE
+  scenarios: [A_OPTIMISTIC, B_BASE, C_PESSIMISTIC]
+  bootstrap_block: ISO_WEEK
+  bootstrap_repetitions: 2000
+  bootstrap_seed: 20260718
+
+promotion:
+  mandatory:
+    minimum_test_signals: 100
+    minimum_positive_folds: 3
+    fold_count: 4
+    minimum_profit_factor_base: 1.05
+    minimum_net_expectancy_base: 0.0
+    minimum_worst_fold_expectancy: 0.0
+    beat_best_directional_baseline_expectancy: true
+    maximum_symbol_concentration: 0.30
+    require_no_known_leakage: true
+    require_side_separated_metrics: true
+    qmae_coverage_minimum_each_fold: 0.87
+    qmae_coverage_maximum_each_fold: 0.93
+    maximum_ece_each_fold: 0.08
+  desirable:
+    positive_pessimistic_expectancy: true
+    minimum_worst_to_mean_ratio: 0.75
+  informative: [brier, cvar_05, maximum_drawdown, turnover, per_symbol, per_regime]
+
+lockbox:
+  authority_path: reports/experiments/lockbox_semi_blind_20260427_20260711.json
+  window_id: semi-blind-20260427-20260711
+  semi_blind_start: "2026-04-27T00:00:00Z"
+  semi_blind_end: "2026-07-11T09:20:00Z"
+  maximum_queries_total_across_preregistrations: 1
+  shared_with: [aegis-short-candidate-e1, aegis-short-candidate-e2, aegis-short-candidate-e3]
+  additional_lockbox_budget: 0
+  final_test_is_lockbox: true
+
+validation_run_policy:
+  required_runs: 2
+  byte_identical_required: true
+
+publication:
+  initial_state: EXPERIMENTAL
+  success_state: CANDIDATE
+  failure_state: REJECTED_EXPERIMENT
+  artifact_format: INSPECTABLE_JSON
+  pickle_allowed: false
+  automatic_promotion: false
+
+resources:
+  estimated_wall_time: 2-6 hours
+  estimated_peak_memory_gib: 16
+  device: CPU
+
+rollback:
+  strategy: retain immutable failed report and leave active configuration unchanged

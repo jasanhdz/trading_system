@@ -1,0 +1,31 @@
+schema_version: aegis-hybrid-directional-shadow-runtime-v1
+enabled: true
+mode: SHADOW
+runtime_authority: OBSERVATIONAL_ONLY
+feature_schema: aegis-features-v2
+feature_count: 83
+
+artifact:
+  path: config/bundles/aegis-hybrid-directional-committee-v1.json
+  sha256: f52dcaa12fe94b6cc9023c25cf95ea2d6fc16296c9b65c2c93d00e13e66ba0e8
+  readiness_path: config/bundles/aegis-hybrid-directional-committee-v1-readiness.json
+  readiness_sha256: 27e2df2fce83044a4fdb248619cc974badbf8c7e4f6d6c2ebd185800edec3e7a
+  offline_validation_state: FAILED
+
+evidence:
+  journal_root: ../data/hybrid_directional_shadow
+  signal_journal: signals.jsonl
+  outcome_journal: outcomes.jsonl
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+
+selection:
+  maximum_counterfactual_candidates_per_side_per_cycle: 1
+  ranking: OPPORTUNITY_DANGER_PATH_EFFICIENCY_NET_FACTOR
+  canonical_selection_effect: NONE
+
+promotion:
+  automatic_training: false
+  automatic_live_activation: false
+  current_live_eligible: false
+  owner_authorization_required: true

@@ -1,0 +1,64 @@
+schema_version: aegis-contextual-regime-arbitration-w14-v1
+experiment_id: AEGIS_W14_CONTEXTUAL_REGIME_ARBITRATION
+scope: PYTHON_OFFLINE_RETROSPECTIVE_RESEARCH_ONLY
+seed: 20260817
+
+sources:
+  w11_dataset: data/entry_safety_gate_w11/run_01/w11_candidates_train_validation.parquet
+  candle_dir: data/live_entry_quality_audit_20260815/candles_1m
+  added_timeframes_minutes: [240, 1440]
+  sealed_holdout_start: 2026-08-01T00:00:00Z
+  sealed_holdout_status: SEALED_NOT_OPENED
+
+thresholds:
+  local_return_bps: 0.0
+  local_taker_imbalance: 0.0
+  higher_ema_slope_atr: 0.0
+  higher_ema_extension_atr: 0.0
+  minimum_higher_alignment_votes: 2
+  minimum_local_alignment_votes: 2
+  rsi_remaining_room_exhausted: 30.0
+  ema_extension_atr_exhausted: 1.0
+  prior_move_atr_mature: 1.5
+  favorable_space_atr_minimum: 0.75
+  range_path_efficiency: 0.35
+  range_ema_slope_abs_atr: 0.20
+  shock_atr_percentile: 0.90
+  shock_volume_ratio: 2.50
+  mean_reversion_prior_move_atr: -0.50
+
+policy:
+  maximum_wait_minutes: 3
+  actions: [ENTER_NOW, WAIT_REALIGNMENT, SKIP]
+  enter_states: [TREND_CONTINUATION, BREAKOUT_OR_RETEST, RANGE_MEAN_REVERSION]
+  wait_states: [PULLBACK_WITHIN_TREND]
+  skip_states: [MATURE_OR_EXHAUSTED, REGIME_TRANSITION, SHOCK_OR_UNCERTAIN, UNCERTAIN]
+
+economics:
+  baseline_cost_bps: 14.0
+  stress_cost_bps: 20.0
+  minimum_material_improvement_bps_per_signal: 2.0
+
+validation_gates:
+  minimum_episodes: 100
+  minimum_executed: 35
+  minimum_execution_rate: 0.20
+  maximum_execution_rate: 0.90
+  minimum_net_bps_per_signal: 0.0
+  minimum_net_bps_per_trade: 0.0
+  minimum_good_retention: 0.50
+  minimum_bad_avoidance: 0.20
+  minimum_symbols: 4
+  bootstrap_samples: 10000
+  require_stress_positive: true
+  require_bootstrap_improvement_ci_positive: true
+
+restrictions:
+  production_modified: false
+  typescript_modified: false
+  live_guard_modified: false
+  pm2_modified: false
+  authenticated_api_used: false
+  orders_sent: false
+  holdout_opened: false
+

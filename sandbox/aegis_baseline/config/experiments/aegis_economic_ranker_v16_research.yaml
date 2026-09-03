@@ -1,0 +1,101 @@
+schema_version: aegis-economic-ranker-v16-preregistration-v1
+experiment_id: aegis-economic-ranker-v16-research-01
+mode: RESEARCH_ONLY
+selection_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  source_v15_config: config/experiments/aegis_directional_contract_v15_research.yaml
+  source_v15_config_sha256: 57a8c3dd3ba6171efcb6825fc804ed103a400e2447995e4b7362639fa42cfe12
+  source_v15_validation: data/directional_contract_v15/validation.json
+  source_v15_validation_sha256: a581a0986c7f0debb2cd79752e19e60cc9995dd8cc4aacd8feaecd5840cdb558
+  source_v15_report: reports/governance/aegis_prospective_validation/live/directional_contract_v15/aegis_directional_contract_v15_research_report.md
+  source_v15_report_sha256: 76be1a3cfd9d31a71d3428a5577846b386f7371704c0fb2f52ba1386cdedf6e1
+  source_v15_verdict: reports/governance/aegis_prospective_validation/live/directional_contract_v15/directional_contract_v15_verdict.json
+  source_v15_verdict_sha256: 0d052f2c16fa355da48b74202f634d0b25ebb853208ebc7547e310a0a414f9e6
+  evidence_status: RETROSPECTIVE_AFTER_V15
+  entry_rule: NEXT_BAR_OPEN
+
+feature_contracts:
+  LONG: V15_LONG_129
+  SHORT: V15_SHORT_168
+  add_features: NONE
+  remove_features: NONE
+
+control:
+  identity: V15_INDEPENDENT_HEAD_COMPOSITE
+  components: [CLEAN_PROBABILITY, DANGER_PROBABILITY, Q90_MAE]
+  policy: V15_CALIBRATION_ONLY_SCORE_QUANTILE
+
+candidate:
+  identity: V16_PAIRWISE_TRAJECTORY_RANKER
+  estimator: STANDARDIZED_SGD_LOGISTIC_PAIRWISE
+  loss: LOG_LOSS
+  alpha: 0.0001
+  maximum_iterations: 2000
+  tolerance: 0.0001
+  one_model_per_side: true
+  compare_within_same_timestamp_only: true
+  include_both_pair_orientations: true
+  pairwise_preference:
+    primary: TRAJECTORY_TIER
+    tiers:
+      3: CLEAN_POSITIVE_NON_ADVERSE
+      2: POSITIVE_NON_ADVERSE
+      1: NON_ADVERSE
+      0: ADVERSE_OR_AMBIGUOUS
+    secondary: HIGHER_ROE_10_H12_REALIZED_UTILITY
+    tertiary: LOWER_MAE
+    quaternary: LOWER_TIME_UNDERWATER
+  prohibit_cross_timestamp_pairs: true
+  prohibit_test_pair_training: true
+
+calibration:
+  threshold_source: CALIBRATION_ONLY
+  score_quantiles: [0.80, 0.90, 0.95]
+  maximum_selected_per_timestamp: 1
+  subgroup_roles:
+    regime: REPORT_ONLY_UNTIL_GLOBAL_RANKING_SKILL
+    symbol: REPORT_ONLY_UNTIL_GLOBAL_RANKING_SKILL
+  prohibit_test_threshold_tuning: true
+
+validation:
+  method: PURGED_EXPANDING_WALK_FORWARD_WITH_CALIBRATION
+  embargo_minutes: 120
+  minimum_rows_per_partition: 500
+  minimum_training_pairs: 10000
+  minimum_selected_per_fold: 30
+  minimum_pairwise_accuracy: 0.50
+  required_improvement_folds: 3
+  folds:
+    - {id: 1, train_end: '2025-11-26T18:55:00+00:00', calibration_end: '2026-01-02T06:55:00+00:00', test_end: '2026-02-07T18:55:00+00:00'}
+    - {id: 2, train_end: '2026-01-02T06:55:00+00:00', calibration_end: '2026-02-07T18:55:00+00:00', test_end: '2026-03-16T06:55:00+00:00'}
+    - {id: 3, train_end: '2026-03-16T06:55:00+00:00', calibration_end: '2026-04-21T18:55:00+00:00', test_end: '2026-05-28T06:55:00+00:00'}
+    - {id: 4, train_end: '2026-07-03T18:55:00+00:00', calibration_end: '2026-07-17T18:55:00+00:00', test_end: '2026-08-09T06:55:00+00:00'}
+  require_pairwise_skill: true
+  require_positive_mean_utility: true
+  require_mean_utility_improvement: true
+  require_cvar_not_worse: true
+  require_positive_rate_not_worse: true
+  require_adverse_first_rate_not_worse: true
+  require_mean_mae_not_worse: true
+  require_clean_rate_not_worse: true
+
+promotion:
+  current_experiment_can_promote: false
+  reason: NO_POST_V15_UNTOUCHED_HOLDOUT
+  future_holdout_required: true
+  shadow_authorization_required: true
+  live_promotion: PROHIBITED
+
+deployment:
+  model_export: PROHIBITED
+  feature_contract_change: NONE
+  shadow_runtime: PROHIBITED_UNTIL_SEPARATE_AUTHORIZATION
+  live_runtime: PROHIBITED
+  exchange_authority: false
+  exchange_calls: 0
+  exchange_mutations: 0

@@ -1,0 +1,100 @@
+{
+  "schema_version": "aegis-range-r1-implementation-manifest-v2",
+  "created_timestamp_utc": "2026-08-24T17:43:19Z",
+  "status": "AEGIS_RANGE_R1_DEFECT_CORRECTION_READY_FOR_REVIEW",
+  "hash_algorithm": "sha256",
+  "previous_r1_manifest_sha256": "5b93160123aa7a8059e92ce256df135e7bdfe71ae055bc195ce6854a1c16ac81",
+  "defect_fixed": "R1_ACTIVE_PAIR_POST_MUTATION_VALIDITY",
+  "repository": {
+    "path": "/home/jasan/Develop/trading_system",
+    "branch": "work/entry-quality-evidence-20260726",
+    "head_base": "2d1c3785dd3ae797324f704b9be897a69b0525cc",
+    "r1_root": "sandbox/aegis_range_strategy_v1"
+  },
+  "authority_artifacts": {
+    "docs/aegis-range-v1/AEGIS_RANGE_STRATEGY_V1_PLAN.md": "2b6976fa9a90949084640991b5643da407a55cf97f3a8d435de8ba1cf6fc7288",
+    "docs/aegis-range-v1/AEGIS_RANGE_R0_PREREGISTRATION_REPORT.md": "6cf7faef4590f80f1c9a224957a3064fa6999f00661e440e9b278521d06e6342",
+    "docs/aegis-range-v1/AEGIS_RANGE_R0_OWNERSHIP_AMENDMENT.md": "f1d2b61d90019e91a8dfaccf704828b220744c0a1a13de38cc0f08dfe238a603",
+    "docs/aegis-range-v1/AEGIS_RANGE_R1_SPEC_AMBIGUITY_REPORT.md": "ad634209f66ce284e98519a2a83d55f215dd901fcff590fba57ae90919762f50",
+    "docs/aegis-range-v1/AEGIS_RANGE_R0_TECHNICAL_CLARIFICATION_AMENDMENT.md": "40ad447d328df0848b95ea15a2af4bae6e27f2472f3bbe463f0764725a32a5b1",
+    "docs/aegis-range-v1/r0_source_manifest.json": "39cd5b8371ef4d193fcce22e6d6392ceaff8b802b52b4589d0c27cfa583a7704",
+    "docs/aegis-range-v1/r0_split_manifest.json": "a67766d8ab446c657260550d37c55589d94cc11afba064ae3f043db803868c03",
+    "docs/aegis-range-v1/r0_ownership_manifest.json": "d8bee965c3e0094779e20f894556298421bb508019719de80bf2ebf4ee3764a2",
+    "docs/aegis-range-v1/r0_technical_clarification_manifest.json": "edab338d7d5118029989566f12e9b170ed69d4fed49d05b1d31ec0a215ad18ae",
+    "docs/aegis-range-v1/README.md": "d6fd0ae1f3f6bb74e1dc56d2ae69cfc98ae54c305d7126c755f7ce6e8fadfba8",
+    "docs/aegis-range-v1/AEGIS_RANGE_R2_TRAIN_IMPLEMENTATION_DEFECT.md": "a09e20b0cabd76a04a6f7edc8df00d765d0d0b275cdb415f1ade7883d1e5b9b4"
+  },
+  "source_files": {
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/__init__.py": "e5b54c2e75d91536866d8839f68a6c543d3dfcb6c9bf8f91901122b658c2f58c",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/atr.py": "9d26d2068f430df796626460e5a38742a2512119320367b8c17b365c45cc1ad1",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/breakout.py": "dd80d860184181c168bd04ae27c3b316430b3cbaed2f71cbef6f9c54013579ef",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/candidates.py": "3397a4eaf076bd17cb46e93f2a276361c23e26ba5fe5669542d852a0c7bb0508",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/costs.py": "c225760d5f9adff115b163a7cd85fb8c74fc838ce4add93622c2bbd3339a7d34",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/data_adapter.py": "4ca792bb0bdefe1ac91821be889a2036d13c3a324f043bf2df447b4f655cf73e",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/detector.py": "1187612c1be077c6bde06715c28a60fef52b89d514bd86ef6572fda16205faf1",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/engine.py": "632f49e315d1542ca2d77095a768c2ca7505cf50a32f344a295d42448cd50006",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/levels.py": "93b2fc9c8479fc3e71e28ddfe40c85808dd8b635f9ddb4c76df53bc53e0c399a",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/lifecycle.py": "e6a6d54b58e83d96bbda73ab4fc7f120268249d073c6ac2a429af50709f7ef58",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/models.py": "a6834f4587ea3ce65476d26103c46e19e22a9726bec6ae093917938b14335aa6",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/numeric.py": "06cbb74fec3d10b26bdac458f2f4453ad08fa49c0dd25c4bcfa2f3bbe754bb4f",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/regime.py": "1da43f30be06f4f049049564f0034af61401eda624a4fa000d16b97eca792655",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/safety.py": "83eb3947da33677029371d36840706bb14c3333adabdf807cdeb1a6ccaab952f",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/signal.py": "2677f4b4848445ae3c6a3f9b262455b37e96d778615116512e8cb556a17e37b8",
+    "sandbox/aegis_range_strategy_v1/src/aegis_range_v1/thesis.py": "865b233e2a9ec4f38574881ca731ebb8b999bafc68976e69b5ce97d4376ffc7f"
+  },
+  "test_files": {
+    "sandbox/aegis_range_strategy_v1/tests/conftest.py": "e5281d1c9626109073fce3dbf0a04a6283d319dc417ba8eba05d789ac6f5ba4b",
+    "sandbox/aegis_range_strategy_v1/tests/test_breakout_episode.py": "9376af385b9332a9cd44843a9c0e85de24addc781b33c9bc1dbea0e0d43dd69d",
+    "sandbox/aegis_range_strategy_v1/tests/test_costs.py": "158bd70765d0d272097760b14548d0a688bc152058373717374c70f9af95ee5b",
+    "sandbox/aegis_range_strategy_v1/tests/test_data_regime_atr.py": "6ddd633c127a773517d9600a16d1ec6e47481c43b32d47262971552cf0c1c835",
+    "sandbox/aegis_range_strategy_v1/tests/test_engine_master.py": "2435d3d62114f39dc3f7eafb57f8ce8cc335c54fd5db0f42344580b10f01f570",
+    "sandbox/aegis_range_strategy_v1/tests/test_levels_signal_safety.py": "1578b1f97f34cf5513d5572270ff2a1ca5fc829c080420db8c37311f0a265d04",
+    "sandbox/aegis_range_strategy_v1/tests/test_lifecycle_fills.py": "100ca53bea62ca821e13399480a144e7cc437b9477ac75fe6a8fb4c6123e4131",
+    "sandbox/aegis_range_strategy_v1/tests/test_numeric_thesis_candidates.py": "ffc52276ae5a9535a9a199deabd4d7b876f693c13a3709ede0f00fa6046cb96c"
+  },
+  "support_files": {
+    "sandbox/aegis_range_strategy_v1/config/candidate_grid.json": "2cae6c3c607b06360b874b75b8893f685dfe40ac4e38e46ff068092203460f1a",
+    "sandbox/aegis_range_strategy_v1/fixtures/thesis_golden_v1.json": "de6cb6b32c5e342253b9cc1d2617fe214f025f899985fecd1f1e23b1359fe0ea",
+    "sandbox/aegis_range_strategy_v1/README.md": "f6a3a5022ba096f0f1f7e6d262bdd86712359ec475effb4d98da594448a67736",
+    "sandbox/aegis_range_strategy_v1/artifacts/README.md": "277620a249b508a40e9f8f0824f0e0827e85ee3020a1d47e23528bc26877ab69",
+    "sandbox/aegis_range_strategy_v1/pyproject.toml": "b275b2ae00fb091d3c2584fd7ca487fbea5131ceaa08691a11923d5de6e18264",
+    "docs/aegis-range-v1/AEGIS_RANGE_R1_IMPLEMENTATION_REPORT.md": "2db20570527e5f73b09a01965c84e3ab1496254b3a3b68e42b574df11d79e7d6",
+    "docs/aegis-range-v1/AEGIS_RANGE_R1_DEFECT_CORRECTION_REPORT.md": "7bd0a6c00def02922e192c9edaffa6a930abdb87209e0137a05b4eec21a57c1d"
+  },
+  "verification": {
+    "tests_total": 79,
+    "tests_passed": 79,
+    "tests_failed": 0,
+    "no_lookahead_master": "PASS",
+    "determinism_master": "PASS",
+    "post_mutation_no_lookahead": "PASS",
+    "post_mutation_determinism": "PASS",
+    "regression_r1_active_pair_amplitude_invalidated_by_new_pivot": "PASS",
+    "atr_parity": "PASS",
+    "typescript_tests_total": 17,
+    "typescript_tests_passed": 17,
+    "typescript_python_parity": "PASS",
+    "candidate_count": 384,
+    "thesis_golden_sha256": "dbc38ff08459e9673c96cfa72d675c4c6a817871a999604f13177e8ba2a745cb"
+  },
+  "phase_boundary": {
+    "datasets_read": "none",
+    "train_read": false,
+    "calibration_read": false,
+    "validation_opened": false,
+    "holdout_opened": false,
+    "r2_executed": false,
+    "pre_validation_spec_frozen": false,
+    "production_modified": false,
+    "e4_modified": false,
+    "regime_engine_v2_modified": false,
+    "child_repo_modified": false
+  },
+  "downstream_lineage": {
+    "r2_data_readiness_manifest": "REVALIDATION_REQUIRED",
+    "r2_source_gap_manifest": "REVALIDATION_REQUIRED",
+    "derived_manifests_with_previous_r1_hash": "SUPERSEDED_PENDING_REVALIDATION",
+    "data_content_change_expected": false
+  },
+  "self_hash_policy": "The R1 implementation manifest intentionally excludes its own hash; report it from final read-only verification."
+}

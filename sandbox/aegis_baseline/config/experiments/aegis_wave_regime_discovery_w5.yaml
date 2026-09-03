@@ -1,0 +1,123 @@
+schema_version: aegis-wave-regime-discovery-w5-preregistration-v1
+experiment_id: aegis-wave-good-bad-regime-w5-01
+registered_at_utc: '2026-08-14T18:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+integrity:
+  w1_w2_w3_artifacts_immutable: true
+  existing_validation_access: PROHIBITED
+  existing_holdout_access: PROHIBITED
+  w1_retuning: PROHIBITED
+  objective: EXPLAIN_GOOD_NEUTRAL_BAD_WAVE_REGIMES
+
+population:
+  source: data/volume_wave_w1/dataset_2025_08_2026_07_minute_v2
+  sample_source: WAVE_CANDIDATE
+  entry_variant: A_IMMEDIATE
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  episode_identity: SYMBOL_SIDE_EVENT_TIMESTAMP
+  correlation_cluster: UTC_15_MINUTE
+
+partitions:
+  discovery: ['2025-08-01T00:00:00Z', '2025-11-01T00:00:00Z']
+  development_validation: ['2025-11-01T00:00:00Z', '2026-02-01T00:00:00Z']
+  forbidden_existing_w1_validation: ['2026-02-01T00:00:00Z', '2026-05-01T00:00:00Z']
+  forbidden_existing_w1_holdout: ['2026-05-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_minutes: 180
+  promotion_authority: false
+  limitation: BOTH_PARTITIONS_WERE_PART_OF_PRIOR_W1_TRAIN
+
+outcome:
+  horizon_minutes: 30
+  favorable_barrier_atr: 0.50
+  adverse_barrier_atr: 0.25
+  same_minute_order: ADVERSE_FIRST
+  round_trip_cost_bps: 14
+  stress_cost_bps: 20
+  good_wave:
+    barrier_outcome: FAVORABLE
+    net_return_gt_bps: 0
+    maximum_mae_atr: 0.25
+    minimum_mfe_mae_ratio: 1.50
+    minimum_path_efficiency: 0.25
+  bad_wave:
+    any:
+      - barrier_outcome: ADVERSE
+      - net_return_lte_bps: -14
+  otherwise: NEUTRAL_WAVE
+
+causal_features:
+  cutoff: IMPULSE_CLOSE_INCLUSIVE
+  groups:
+    - IMPULSE_VOLUME_AND_BODY
+    - FIVE_AND_FIFTEEN_MINUTE_TREND
+    - TREND_MATURITY_PROXIES
+    - VOLATILITY_AND_RSI
+    - TAKER_FLOW
+    - MOVING_AVERAGE_DISTANCE_AND_SLOPE
+    - MARKET_STRUCTURE
+    - BTC_ALIGNMENT_AND_CORRELATION
+    - SESSION_AND_CALENDAR
+    - CONSOLIDATION_AND_BREAKOUT_PROXIES
+  exact_trend_age: NOT_PRESENT_USE_PREREGISTERED_MATURITY_PROXY
+  exact_support_resistance_distance: NOT_PRESENT_USE_MA99_AND_EXTENSION_PROXIES
+  future_features: PROHIBITED
+
+discovery:
+  descriptive_bins: TRAIN_QUINTILES_PLUS_FIXED_VOLUME_BINS
+  fixed_volume_bins: [1.25, 1.50, 2.00, 3.00, 4.00, INF]
+  methods:
+    - DISTRIBUTION_EFFECT_SIZES
+    - MUTUAL_INFORMATION
+    - LOGISTIC_L2
+    - DECISION_TREE_DEPTH_3
+    - KMEANS_6
+  clustering_k: 6
+  models_fit_on: DISCOVERY_ONLY
+  candidate_families:
+    - LOGISTIC_TOP_DECILE
+    - LOGISTIC_TOP_QUINTILE
+    - POSITIVE_SHALLOW_TREE_LEAVES
+    - POSITIVE_KMEANS_CLUSTERS
+  minimum_discovery_episodes: 2000
+  maximum_candidates_forwarded: 10
+  selection: DISCOVERY_NET_EXPECTANCY_THEN_SAMPLE_SIZE
+
+validation:
+  one_shot: true
+  refit: PROHIBITED
+  threshold_change: PROHIBITED
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+  bootstrap_repetitions: 10000
+  bootstrap_unit: UTC_DAY_OF_CORRELATION_CLUSTER
+
+gate:
+  minimum_validation_episodes: 2000
+  minimum_independent_clusters: 500
+  minimum_net_expectancy_bps: 2.0
+  bootstrap_expectancy_lower_95_gt_bps: 0.0
+  stress_20bps_expectancy_gt_bps: 0.0
+  minimum_positive_symbols: 7
+  minimum_positive_temporal_thirds: 2
+  maximum_symbol_share: 0.20
+  fdr_significant: true
+
+deployment:
+  W5_REGIME_DIFFERENTIATION_FOUND: false
+  W5_ECONOMIC_REGIME_EDGE_FOUND: false
+  W5_READY_FOR_FUTURE_CONFIRMATION: false
+  W5_READY_FOR_SHADOW: false
+  W5_READY_FOR_LIVE: false
+
+safety:
+  authenticated_requests: 0
+  exchange_mutations: 0
+  production_changes: NONE
+  typescript_changes: NONE
+  websocket_changes: NONE
+  pm2_changes: NONE

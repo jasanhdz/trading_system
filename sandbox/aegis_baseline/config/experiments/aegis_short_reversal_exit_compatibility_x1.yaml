@@ -1,0 +1,121 @@
+schema_version: aegis-short-reversal-exit-compatibility-x1-preregistration-v1
+experiment_id: aegis-short-reversal-exit-compatibility-x1-01
+registered_date_utc: '2026-08-12'
+mode: RESEARCH_ONLY
+selection_effect: NONE
+exchange_authority: false
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_dataset: data/calibrated_horizon_v11/canonical_dataset.jsonl.gz
+  source_dataset_sha256: 2c270a7b38b2f05c2b4ab78960b788c387e5d98bfae29da16a167f4f54548747
+  source_manifest: data/calibrated_horizon_v11/dataset_manifest.json
+  source_manifest_sha256: 8648567317d7d7690c917afcb36049e1f4af01168c2f9f8b871718cbc41934f4
+  candle_database: data/binance_candles.db
+  candle_database_sha256: fdc3f3ab88950ca4c217b3b132ba8552a256db25db7ed9cd27402f52b5716021
+  v21_config: config/experiments/aegis_alpha_laboratory_v21.yaml
+  v21_config_sha256: bdfd3fa8c4ce5f4d09f204d1a41737e6ed420aad78a52a85ca0388b414dc1a94
+  v21_preregistration_commit: 9899f23
+  v21_result_commit: 894eebe
+  protection_replay: src/aegis/research/hybrid_ts_protection_replay.py
+  protection_replay_sha256: 433792de841e5accc7d715cf0cce806ffef84dde2c6b8bb49ce675b81517a48a
+  typescript_gate: binance-futures-bot-ts/src/domain/services/AegisMicroLiveGate.ts
+  typescript_gate_sha256: 35a30b4e03c048d74fccfe0d255a791b400ea93d17ba1be6b59a065c133efa80
+  typescript_guardian: binance-futures-bot-ts/src/domain/services/ProfitGuardian.ts
+  typescript_guardian_sha256: b362c2939238ead4d5708e3a49ceb12e6b2fa9666e07b1a88eec8dd7faea4932
+  typescript_runtime_config: binance-futures-bot-ts/regime_config.live.yaml
+  typescript_runtime_config_sha256: 1306688131baf9f3ed01dcde00dd0ee6d7ef942352764cc7f005b8546964474f
+
+future_evidence:
+  start_inclusive: '2026-07-17T19:00:00+00:00'
+  end_inclusive: '2026-08-09T06:55:00+00:00'
+  strictly_after_v21_holdout: true
+  one_shot_only: true
+  minimum_event_spacing_minutes_per_symbol: 60
+  side: SHORT
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  timeframe: 5m
+  entry_rule: NEXT_BAR_OPEN
+
+entry_rule:
+  identity: V21_EXTREME_REVERSAL_SHORT_BYTE_BOUND
+  source: strategies.EXTREME_REVERSAL
+  modifications: NONE
+  threshold_search: PROHIBITED
+  feature_search: PROHIBITED
+  symbol_overrides: PROHIBITED
+
+exit_hypothesis:
+  statement: >-
+    The unchanged V21 SHORT extreme-reversal entry may have better economic
+    compatibility with the current TypeScript protection profile than with
+    the preregistered V21 LOCK_AT_5_ROE profile.
+  candidate_profile: CURRENT_TS
+  frozen_control_profile: LOCK_AT_5_ROE
+  other_profiles:
+    status: DIAGNOSTIC_ONLY_NOT_ELIGIBLE_FOR_SELECTION
+    profiles: [LOCK_AT_10_ROE, LOCK_AT_20_ROE]
+  primary_outcome: CURRENT_TS_WORST_INTRABAR_PROTECTED_NET_RETURN
+  secondary_outcomes:
+    - WIN_RATE
+    - PROFIT_FACTOR
+    - MAE_FRACTION
+    - MFE_FRACTION
+    - TIME_UNDERWATER_BARS
+    - BARS_HELD
+    - EXIT_REASON
+    - BREAK_EVEN_ARMED
+    - TRAILING_ARMED
+
+cost_contract:
+  embedded_round_trip_cost_fraction: 0.001
+  stress_additional_round_trip_cost_fraction: [0.0005, 0.001]
+  primary_stress_level: 0.0005
+  funding_pnl: NOT_INCLUDED_SOURCE_OUTCOME_UNAVAILABLE
+
+controls:
+  random_seed: 220001
+  definitions:
+    - NO_TRADE_ZERO_RETURN
+    - V21_LOCK_AT_5_ROE_SAME_EVENTS
+    - RANDOM_SHORT_FUTURE_PERIOD_MATCHED_COUNT_CURRENT_TS
+    - UNCONDITIONAL_SHORT_FUTURE_PERIOD_CURRENT_TS
+
+uncertainty:
+  block_unit: UTC_DAY
+  bootstrap_resamples: 2000
+  confidence_interval: 0.95
+  seed: 220002
+
+gate:
+  minimum_candidate_events: 20
+  require_positive_mean_current_ts_net: true
+  require_positive_mean_at_primary_cost_stress: true
+  minimum_profit_factor: 1.10
+  maximum_mean_mae: 0.006
+  minimum_positive_temporal_thirds: 2
+  require_outperformance_of_v21_exit: true
+  require_outperformance_of_random_control: true
+  require_lower_daily_block_bootstrap_bound_non_negative: true
+
+anti_overfitting:
+  no_threshold_search: true
+  no_exit_search: true
+  no_seed_selection: true
+  no_symbol_selection: true
+  no_result_based_gate_changes: true
+  no_reuse_as_x1_confirmation_after_opening: true
+  negative_result_preservation_required: true
+
+deployment:
+  X1_READY_FOR_MODELING: false
+  X1_READY_FOR_SHADOW: false
+  X1_READY_FOR_LIVE: false
+  model_training: PROHIBITED
+  model_export: PROHIBITED
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0
+

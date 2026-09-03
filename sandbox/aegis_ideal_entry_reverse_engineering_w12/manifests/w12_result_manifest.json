@@ -1,0 +1,51 @@
+{
+  "code_sha256": {
+    "src/aegis_ideal_entry_reverse_engineering_w12/__init__.py": "9e5983fcf3f203ba86cb98b869bc580d866d934443632b5cd555529acc3081b4",
+    "src/aegis_ideal_entry_reverse_engineering_w12/cli.py": "08ccd0aa7a206e371b53611909394c6b9d10f60bf6b8f7ad6d2082840ca64674",
+    "src/aegis_ideal_entry_reverse_engineering_w12/data.py": "d67769559117b5524f6f07ab8d455f4f93b3480225ceef92b4dcc942735ac429",
+    "src/aegis_ideal_entry_reverse_engineering_w12/experiment.py": "d4985426ec5d411fcecad87d807bfe50743faa079335c9f357d59e2336234b19",
+    "src/aegis_ideal_entry_reverse_engineering_w12/modeling.py": "2f869ec602d398471579a33c1f62bbbbe08a2115788839739a0e6d909938c076",
+    "src/aegis_ideal_entry_reverse_engineering_w12/performance.py": "1c08ae746c37c5f38ddc3345c78b1d880e651ea6a15d640e4d0698c54e13d1a6",
+    "src/aegis_ideal_entry_reverse_engineering_w12/reporting.py": "1da6f5ccf749ff1b18b6de67aeadb32e6387ddb1300e0cf7917dd18d233c3412"
+  },
+  "config_sha256": "01a7aa6451cbc6cab34a57984cc114ad22618b90f624d6d3c239859342bccac3",
+  "environment": {
+    "numpy": "2.3.3",
+    "pandas": "2.3.3",
+    "python": "3.12.3",
+    "sklearn": "1.7.2"
+  },
+  "experiment_id": "AEGIS_W12_IDEAL_ENTRY_REVERSE_ENGINEERING",
+  "external_holdouts_accessed": false,
+  "feature_schema_sha256": "8ca90beb9d59f35ddcc15b2743a2da8fab77ec236ae1b38d57362357ac200019",
+  "output_sha256": {
+    "artifacts/candidate_metrics.csv": "84738da1caf9ad6d81efb9b0980705ee93a02e01f909da9c4c7cf3a0353a742e",
+    "artifacts/economic_metrics.csv": "8e4f226a1fe2fcaca7026f3cf3410c83bd58d059d5e7b87b1ca68fa0eeebd1f7",
+    "artifacts/feature_analysis.csv": "8a34935981ffd70dbae0e326785a4aac02b422356a2fa80a5c094f99e79bd0d9",
+    "artifacts/label_analysis.csv": "77dbf5357658636e646ce22342c0006ab758c33c373718c1ec1e1dd0d79a26ad",
+    "artifacts/negative_controls.csv": "9c89a8f20a3dc35b90e4fb7add090de607ce4d1ec7b462b94b4fe07a785c949e",
+    "artifacts/prospective_predictions.csv": "0d220ed5b71d9960cebb44328655c2db6f4dfa85eea1a15224138fbd06dd8e97",
+    "artifacts/prospective_trades.csv": "ca4396f40a38738e158d148fffa07fa51c4eb1eb747c5bbed950b12ae9d40738",
+    "artifacts/selected_model.joblib": "20755282f910215c6d5ab658503299e7ba8a7085fd718fbaeaeec44030361b1b",
+    "artifacts/stability.csv": "2cbacc8545643303a42bdb6f3c1abafef0dbb87d42d1409e88745035684618e5",
+    "artifacts/summary.json": "90d8c4b68e3f3d5576bc5c616355ed7c7ccdcc5e5245de2d5dfa62d24a794db3",
+    "w12_ideal_entry_result.md": "5a34f526215953856ac89c387daa03131d90cbd71eda300d9e4fd7ae246cf3e9",
+    "w12_ideal_entry_verdict.json": "e832b60f9a0ec45a20358a1cd8088c9b16199ab2eb44586af25fd3e65c9442a6"
+  },
+  "preregistration_checkpoint": "0484906",
+  "schema_version": "aegis-w12-result-manifest-v1",
+  "seed": 20260826,
+  "source_manifest_sha256": "a68b643564f53bcff6b5eae333ddcf02a3a1eb02b67260023e2fc9e83be0f6f2",
+  "source_sha256": {
+    "ADAUSDT": "adf9da382b5323a37ee23696606e712179a3650c3563a4f0b31f3d9ee2ed4cfa",
+    "AVAXUSDT": "1f506388d369502e6ae2bb1ef420872c453adab47120b60521e9da7e2325ddbe",
+    "BNBUSDT": "f16cae7d0e6a025444c6c43d56b7dcb972f6bbeb98ba6b559ff84c51092723fd",
+    "BTCUSDT": "d57999f7b4f4b039c2ce4e9b5dbf74ac16f3309ec7ac7ffb5943bb97547ecf12",
+    "DOGEUSDT": "00571db78e03d5de2a0ee512584b315ea6df03863a5bc4da6e69235b0bfd3006",
+    "ETHUSDT": "95395990acc68f33665b1bee05c7e82c622bef1dd66b33955a0a258a1dda19fc",
+    "LINKUSDT": "799429246126e3fe2e227698b559f14c8ff41c9591bea819b40b965b187126c8",
+    "LTCUSDT": "689583ad576447c5fcb4185b604e11a14278605ad42c353e511085f1a6c7851e",
+    "SOLUSDT": "521f8a0a5d894af05805b4049e50859df3d821c64746529c046ff27a31d132a2",
+    "XRPUSDT": "9e2954395f45942f55a9e7bd8f7d1ab4af57a9d97ca2c504ed26c8f7d5d4d94d"
+  }
+}

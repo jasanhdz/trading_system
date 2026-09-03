@@ -1,0 +1,72 @@
+{
+  "schema_version": "aegis-ideal-entry-reverse-engineering-w12-v1",
+  "experiment_id": "AEGIS_W12_IDEAL_ENTRY_REVERSE_ENGINEERING",
+  "seed": 20260826,
+  "source": {
+    "candle_dir": "data/directional_alpha_v1/candles_1m",
+    "manifest": "data/directional_alpha_v1/candles_1m/dataset_manifest.json",
+    "symbols": ["ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT", "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "XRPUSDT"],
+    "start_inclusive": "2022-04-03T00:00:00Z",
+    "end_exclusive": "2023-04-01T00:00:00Z",
+    "decision_cadence_minutes": 15,
+    "entry_rule": "NEXT_1M_OPEN"
+  },
+  "partitions": {
+    "discovery": ["2022-04-03T00:00:00Z", "2022-09-01T00:00:00Z"],
+    "validation": ["2022-09-01T00:00:00Z", "2022-12-01T00:00:00Z"],
+    "prospective": ["2022-12-01T00:00:00Z", "2023-04-01T00:00:00Z"],
+    "purge_minutes": 60,
+    "external_holdouts": "SEALED_NOT_OPENED"
+  },
+  "teachers": {
+    "horizons_minutes": [15, 30, 60],
+    "sides": ["LONG", "SHORT"],
+    "mfe_mae": {"minimum_mfe_bps": 30.0, "maximum_mae_bps": 20.0, "minimum_ratio": 2.0},
+    "barrier": {"favorable_bps": 30.0, "adverse_bps": 20.0, "same_minute_resolution": "ADVERSE_FIRST"},
+    "risk_reward": {"minimum_ratio": 2.0, "mae_epsilon_bps": 5.0, "minimum_net_room_bps": 10.0},
+    "path": {"minimum_efficiency": 0.35, "maximum_time_fraction_to_mfe": 0.5, "maximum_pre_mfe_adverse_bps": 20.0, "minimum_directional_persistence": 0.25},
+    "economic": {"minimum_mfe_bps": 30.0, "require_favorable_first": true},
+    "quality_weights": {"economic": 0.30, "risk_reward": 0.25, "barrier": 0.20, "path": 0.25},
+    "consensus": {"primary": "MAJORITY", "majority_minimum": 3, "strict_minimum": 5, "weighted_minimum": 0.70, "teacher_weights": {"A": 0.20, "B": 0.25, "C": 0.15, "D": 0.15, "E": 0.25}}
+  },
+  "zones": {"maximum_gap_minutes": 15, "primary_unit": "ZONE_BEST_ENTRY", "negative_exclusion_minutes": 30},
+  "costs_bps": {"fee_round_trip": 10.0, "baseline_slippage_round_trip": 4.0, "baseline_total": 14.0, "stress_total": 20.0, "severe_total": 30.0},
+  "features": {
+    "version": "w12-causal-features-v1",
+    "lookbacks_minutes": [1, 3, 5, 10, 15, 30, 60],
+    "feature_groups": ["returns", "volatility", "structure", "trend", "volume", "flow", "cross_market", "temporal_profile"],
+    "maximum_lookback_minutes": 240
+  },
+  "models": {
+    "classification": [
+      {"name": "LOGISTIC", "type": "LogisticRegression", "c": 0.25, "class_weight": "balanced"},
+      {"name": "HIST_GB", "type": "HistGradientBoostingClassifier", "max_iter": 120, "max_leaf_nodes": 15, "learning_rate": 0.05},
+      {"name": "RANDOM_FOREST", "type": "RandomForestClassifier", "trees": 200, "max_depth": 8, "min_samples_leaf": 20, "class_weight": "balanced_subsample"}
+    ],
+    "regression": {"name": "HIST_GB_REGRESSION", "type": "HistGradientBoostingRegressor", "max_iter": 120, "max_leaf_nodes": 15, "learning_rate": 0.05},
+    "formulations": ["IDEAL_LONG", "IDEAL_SHORT", "QUALITY_REGRESSION", "OPPORTUNITY_THEN_SIDE"],
+    "selection_metric": "VALIDATION_NET14_TOP2_PERCENT",
+    "tie_break": ["HIGHER_VALIDATION_PRECISION_TOP2", "SIMPLER_MODEL", "SHORTER_HORIZON"]
+  },
+  "selection": {
+    "top_percentiles": [1, 2, 5, 10],
+    "primary_percentile": 2,
+    "minimum_prospective_trades": 100,
+    "minimum_symbols": 4,
+    "maximum_symbol_fraction": 0.50,
+    "bootstrap_draws": 10000,
+    "bootstrap_block": "UTC_DAY"
+  },
+  "negative_controls": {"label_shuffle": true, "time_shift_hours": 24, "random_feature_count": 8, "random_entry_repetitions": 100},
+  "performance": {"physical_cores_reserved": 2, "maximum_workers": 4, "threads_per_worker": 1, "gpu_policy": "BENCHMARK_THEN_ONLY_IF_SAME_METHOD_FASTER", "cache": "HASH_VALIDATED", "resume": true},
+  "success": {
+    "minimum_net14_bps": 0.0,
+    "minimum_net20_bps": 0.0,
+    "require_bootstrap_ci_lower_positive": true,
+    "require_precision_lift_top2": 1.50,
+    "require_multiple_periods": true,
+    "require_negative_controls_fail": true,
+    "require_baseline_superiority": true,
+    "require_leakage_audit_pass": true
+  }
+}

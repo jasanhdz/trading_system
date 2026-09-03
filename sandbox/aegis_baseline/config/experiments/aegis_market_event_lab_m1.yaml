@@ -1,0 +1,165 @@
+schema_version: aegis-market-event-lab-m1-preregistration-v1
+experiment_id: aegis-market-event-lab-m1-01
+registered_date_utc: '2026-08-12'
+mode: RESEARCH_ONLY
+selection_effect: NONE
+exchange_authority: false
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+objective:
+  statement: >-
+    Determine whether explicitly detected market events contain stable economic
+    information that is absent from the candle-only Aegis experiments.
+  primary_metric: NET_EXPECTANCY_AFTER_BASE_COSTS
+  optimization_target: ECONOMIC_UTILITY_NOT_ACCURACY
+  live_strategy_change: NONE
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  timeframe: 5m
+  directions: [LONG, SHORT]
+  entry_rule: NEXT_CLOSED_BAR_OPEN
+
+data_contract:
+  schema_id: aegis-market-event-contract-v1
+  collection_start_utc: '2026-08-12T00:00:00Z'
+  closed_observations_only: true
+  event_time_cutoff_inclusive: true
+  future_data_in_features: PROHIBITED
+  synthetic_fill: PROHIBITED
+  missing_required_source: FAMILY_BLOCKED
+  sources:
+    futures_klines: REQUIRED
+    aggregate_trade_buckets: REQUIRED_FOR_FLOW_FAMILIES
+    open_interest: REQUIRED_FOR_OI_FAMILIES
+    funding: REQUIRED_FOR_BASIS_FAMILY
+    mark_price: REQUIRED_FOR_BASIS_FAMILY
+    spot_reference: REQUIRED_FOR_BASIS_FAMILY
+    basis: DERIVED_CAUSALLY_FROM_MARK_AND_SPOT
+    depth_snapshots: REQUIRED_FOR_DEPTH_FAMILY
+    liquidation_events: REQUIRED_FOR_LIQUIDATION_FAMILY
+  validation:
+    reject_missing_feature: true
+    reject_extra_feature: true
+    reject_wrong_order: true
+    reject_wrong_dtype: true
+    reject_non_finite: true
+    reject_schema_mismatch: true
+    reject_hash_mismatch: true
+    reject_stale_source: true
+
+event_families:
+  LIQUIDATION_CASCADE_REVERSAL:
+    hypothesis: >-
+      An extreme one-sided liquidation cascade followed by price absorption and
+      a causal reclaim may have short-horizon reversal utility.
+    required_sources: [futures_klines, aggregate_trade_buckets, liquidation_events, depth_snapshots]
+    threshold_source: TRAIN_QUANTILES_ONLY
+  OI_CONFIRMED_BREAKOUT:
+    hypothesis: >-
+      A price breakout accompanied by aligned aggressive flow and expanding open
+      interest may have continuation utility.
+    required_sources: [futures_klines, aggregate_trade_buckets, open_interest]
+    threshold_source: TRAIN_QUANTILES_ONLY
+  SPOT_FUTURES_DISLOCATION:
+    hypothesis: >-
+      An extreme causal spot-futures basis or funding dislocation followed by
+      convergence evidence may identify a directional opportunity.
+    required_sources: [futures_klines, funding, mark_price, spot_reference, basis]
+    threshold_source: TRAIN_QUANTILES_ONLY
+  DEPTH_ABSORPTION_REVERSAL:
+    hypothesis: >-
+      Aggressive flow with limited price response and a subsequent order-book
+      imbalance reversal may identify exhausted pressure.
+    required_sources: [futures_klines, aggregate_trade_buckets, depth_snapshots]
+    threshold_source: TRAIN_QUANTILES_ONLY
+
+partitions:
+  minimum_collection_days_before_design: 60
+  design_train_fraction: 0.60
+  calibration_fraction: 0.20
+  final_holdout_fraction: 0.20
+  chronological_only: true
+  purge_bars: 24
+  embargo_bars: 24
+  final_holdout_accesses: 1
+
+labels:
+  horizons_bars: [3, 6, 12, 24]
+  outcomes:
+    - NET_RETURN_AFTER_COSTS
+    - MAE_FRACTION
+    - MFE_FRACTION
+    - TARGET_BEFORE_STOP
+    - TIME_TO_TARGET
+    - TIME_TO_STOP
+  side_specific: true
+
+economics:
+  fee_bps_per_side: 5.0
+  slippage_bps_per_side: 2.0
+  funding_bps_per_hour: 1.0
+  stress_slippage_bps_per_side: [5.0, 10.0]
+  funding_included: true
+  next_bar_open_entry: true
+  incomplete_path_policy: OMIT_FAIL_CLOSED
+
+controls:
+  definitions:
+    - NO_TRADE
+    - RANDOM_DIRECTION_TIME_MATCHED
+    - SIMPLE_MOMENTUM_EVENT
+    - SIMPLE_MEAN_REVERSION_EVENT
+    - V15_FROZEN_WHEN_COMPARABLE
+    - V17_FROZEN_WHEN_COMPARABLE
+  event_spacing_minutes_per_symbol: 60
+  correlated_cluster_window_minutes: 15
+  maximum_one_event_per_cluster_per_family: true
+
+models:
+  first_stage_only:
+    - REGULARIZED_LOGISTIC_REGRESSION
+    - SHALLOW_HISTOGRAM_GRADIENT_BOOSTING
+  complex_model_gate: SIMPLE_MODEL_HAS_POSITIVE_VALIDATION_EDGE
+  seed: 180001
+  seed_search: PROHIBITED
+  feature_search_on_validation: PROHIBITED
+  threshold_search_on_validation: PROHIBITED
+
+trial_ledger:
+  schema_id: aegis-research-trial-ledger-v1
+  append_only: true
+  hash_chain_required: true
+  duplicate_trial_id: PROHIBITED
+  failed_trials_retained: true
+  negative_results_retained: true
+
+ready_for_experiment_gate:
+  minimum_days_per_required_source: 60
+  minimum_symbols_per_family: 11
+  minimum_independent_events_per_direction: 300
+  maximum_missing_required_source_rate: 0.0
+  causal_contract_validation_required: true
+
+ready_for_shadow_gate:
+  final_holdout_required: true
+  mean_net_expectancy_ci_lower_gt: 0.0
+  profit_factor_ci_lower_gt: 1.0
+  maximum_mean_mae: 0.006
+  positive_temporal_thirds: 2
+  minimum_temporal_thirds: 3
+  maximum_symbol_share: 0.25
+  outperform_time_matched_random: true
+  stable_long_and_short_reported_separately: true
+  zero_material_leakage_findings: true
+
+deployment:
+  M1_READY_FOR_EXPERIMENTS: false
+  M1_READY_FOR_SHADOW: false
+  M1_READY_FOR_LIVE: false
+  model_export: PROHIBITED_UNTIL_GATE
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0

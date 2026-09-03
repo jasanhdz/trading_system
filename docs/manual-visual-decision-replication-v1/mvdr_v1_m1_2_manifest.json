@@ -1,0 +1,28 @@
+{
+  "program": "MANUAL_VISUAL_DECISION_REPLICATION_V1",
+  "phase": "MVDR_V1_M1_2_COMPACT_SR_CORRIDOR_GRAMMAR",
+  "status": "MVDR_V1_M1_2_COMPACT_SR_CORRIDOR_GRAMMAR_READY_FOR_REVIEW",
+  "m1_authority": "522ebcd43711ca1bd75770384f5a6026fa46e467",
+  "m1_1_authority": "9cc915424b9be5985a4a84b851c54c6d670f550d",
+  "artifact_manifest": "sandbox/manual_visual_decision_replication_v1/artifacts/m1_2_compact_corridor/m1_2_manifest.json",
+  "labels": [
+    "POST_M1_1_HYPOTHESIS",
+    "RETROSPECTIVE_SANITY_ONLY",
+    "PROSPECTIVE_CONFIRMATION_REQUIRED",
+    "NO_PROFITABILITY_AUTHORITY",
+    "NO_AUTOMATION_AUTHORITY"
+  ],
+  "flags": {
+    "COMPACT_SR_GRAMMAR_IMPLEMENTED": true,
+    "LEVEL_RESPECT_RECONSTRUCTION_COMPLETE": true,
+    "COMPACT_GRAMMAR_RETROSPECTIVE_FIT": false,
+    "PROSPECTIVE_SHADOW_RECORDER_READY": true,
+    "PROSPECTIVE_REPLICATION_SIGNAL": "NOT_EVALUATED",
+    "FULL_AUTOMATION_RESEARCH_JUSTIFIED": false
+  },
+  "interpretation": "COMPACT_CORRIDOR_GRAMMAR_INSUFFICIENT",
+  "determinism": "M1_2_DETERMINISM_PASS",
+  "production_modified": false,
+  "orders_sent": false,
+  "commit_authority": false
+}

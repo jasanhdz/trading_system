@@ -1,0 +1,20 @@
+schema_version: aegis-universe-v1
+universe_id: aegis-operational-eleven-v1
+source_of_truth: binance-futures-bot-ts/regime_config.live.yaml#symbols.entries
+timeframe: 5m
+symbols:
+  - ETHUSDT
+  - BTCUSDT
+  - SOLUSDT
+  - BNBUSDT
+  - XRPUSDT
+  - DOGEUSDT
+  - ADAUSDT
+  - AVAXUSDT
+  - LINKUSDT
+  - SUIUSDT
+  - LTCUSDT
+symbol_set_hash: f6448e67daf1d017e16cc6b331f6494e97e178824474994fff08864303ccd348
+minimum_history_bars: 48
+maximum_snapshot_age_seconds: 600
+maximum_gap_bars: 0

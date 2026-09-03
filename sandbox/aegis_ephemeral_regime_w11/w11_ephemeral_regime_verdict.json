@@ -1,0 +1,18 @@
+{
+  "all_success_gates_passed": false,
+  "experiment_id": "AEGIS_W11_EPHEMERAL_REGIME_ALPHA",
+  "gates": {
+    "baseline_net_positive": false,
+    "guardian_improvement": true,
+    "minimum_instances": true,
+    "minimum_prospective_trades": true,
+    "minimum_symbols": true,
+    "similarity_edge_relationship": false,
+    "stress_net_positive": false,
+    "symbol_concentration": true,
+    "temporal_bootstrap_ci_lower_positive": false
+  },
+  "grade": "B",
+  "no_production_authority": true,
+  "verdict": "EPHEMERAL_SIGNAL_DETECTED_NOT_YET_ECONOMIC"
+}

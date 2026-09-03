@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aegis-ephemeral-regime-decision-attribution-v1",
+  "type": "object",
+  "required": [
+    "decision_id", "decision_at", "model_family", "model_version",
+    "model_instance_id", "training_window", "validation_window", "created_at",
+    "expires_at", "regime_similarity_at_decision", "expected_edge_bps",
+    "expected_direction", "horizon_minutes", "decision", "reason"
+  ],
+  "properties": {
+    "decision_id": {"type": "string"},
+    "decision_at": {"type": "string", "format": "date-time"},
+    "model_family": {"enum": ["ERE", "E4"]},
+    "model_version": {"type": "string"},
+    "model_instance_id": {"type": "string"},
+    "training_window": {"type": "object"},
+    "validation_window": {"type": "object"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "regime_similarity_at_decision": {"type": "number"},
+    "expected_edge_bps": {"type": "number"},
+    "expected_direction": {"enum": ["LONG", "SHORT", "SKIP"]},
+    "horizon_minutes": {"type": "integer"},
+    "decision": {"enum": ["LONG", "SHORT", "SKIP"]},
+    "reason": {"type": "string"},
+    "confidence": {"type": ["number", "null"]},
+    "symbol": {"type": "string"},
+    "expiration_reason": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

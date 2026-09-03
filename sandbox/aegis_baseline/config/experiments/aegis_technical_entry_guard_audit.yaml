@@ -1,0 +1,55 @@
+schema_version: aegis-technical-entry-guard-audit-v1
+experiment_id: AEGIS_TECHNICAL_ENTRY_GUARD_RETROSPECTIVE_AUDIT
+scope: PYTHON_OFFLINE_RETROSPECTIVE_AUDIT_ONLY
+seed: 20260817
+
+sources:
+  w11_dataset: data/entry_safety_gate_w11/run_01/w11_candidates_train_validation.parquet
+  evaluated_delay_minutes: 0
+  sealed_holdout_start: 2026-08-01T00:00:00Z
+  sealed_holdout_status: SEALED_NOT_OPENED
+
+costs:
+  baseline_bps: 14.0
+  stress_bps: 20.0
+
+# Fixed before running this audit. These are conventional, coarse risk levels,
+# not values optimized against W11 VALIDATION.
+guard:
+  rsi_remaining_room_critical: 30.0
+  ema25_extension_atr_critical: 1.0
+  prior_move_atr_critical: 1.5
+  ema25_opposition_atr: -0.75
+  directional_return_1m_bps_opposed: -5.0
+  directional_return_5m_bps_opposed: -5.0
+  taker_imbalance_opposed: -0.10
+  favorable_space_atr_critical: 0.75
+  atr_percentile_shock: 0.90
+  volume_ratio_shock: 2.50
+  path_efficiency_disorder: 0.35
+  minimum_opposition_votes: 3
+
+validation_gates:
+  minimum_validation_episodes: 100
+  minimum_executed: 35
+  minimum_execution_rate: 0.25
+  maximum_execution_rate: 0.90
+  minimum_improvement_bps_per_original_signal: 2.0
+  minimum_good_retention: 0.50
+  minimum_bad_avoidance: 0.20
+  minimum_symbols_executed: 4
+  bootstrap_samples: 10000
+  confidence_level: 0.95
+  require_positive_net_per_original_signal: true
+  require_positive_stress_net_per_original_signal: true
+  require_improvement_ci_lower_above_zero: true
+
+restrictions:
+  production_modified: false
+  typescript_modified: false
+  live_guard_modified: false
+  pm2_modified: false
+  authenticated_api_used: false
+  orders_sent: false
+  holdout_opened: false
+

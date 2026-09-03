@@ -1,0 +1,90 @@
+schema_version: aegis-short-profitability-semantics-v1-preregistration
+experiment_id: aegis-short-profitability-semantics-v1
+side: SHORT
+runtime_authority: SHADOW_ONLY
+automatic_live_activation: false
+
+source:
+  preregistration_path: config/experiments/aegis_short_candidate_e3.yaml
+  preregistration_sha256: 281e27f93f8be0f9c4fbe78673d55f1a4f3391aa421c3fcaf90823113dc81e62
+  canonical_series_path: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  canonical_manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+  expected_dataset_sha256: 1ffd0eaf07515d3a1a5fd6363f09c2d8ffe1e1f3925989486dee398e25b8c294
+  qualified_brain_path: config/bundles/aegis-prospective-shadow-candidate-v1.json
+  qualified_brain_sha256: 23b22403b70f7d6c385d1214e6543197f4ca4e57269af19b1013987891ed550a
+
+population:
+  source: ALL_DIRECTIONAL_ROWS
+  label: TERMINAL_NET_POSITIVE_H12_AFTER_COSTS
+
+training:
+  seed: 20260728
+  label_schema: aegis-short-profitability-terminal-net-v1
+  label_field: terminal_net_positive_h12_after_costs
+  objective: CALIBRATED_TERMINAL_NET_POSITIVE_PROBABILITY
+  horizon_bars: 12
+  round_trip_cost_fraction: 0.001
+  maximum_acceptable_mae: 0.00275
+  minimum_symbol_calibration_rows: 100
+  symbol_calibration_shrinkage_rows: 500
+  candidates:
+    eqm_logistic_clean_baseline:
+      C: 1.0
+      max_iter: 1000
+      class_weight: balanced
+      solver: liblinear
+    eqm_random_forest_clean:
+      n_estimators: 200
+      max_depth: 12
+      min_samples_leaf: 25
+      class_weight: balanced_subsample
+    eqm_hgb_clean:
+      max_iter: 250
+      learning_rate: 0.06
+      max_leaf_nodes: 31
+      min_samples_leaf: 40
+      l2_regularization: 1.0
+
+selection:
+  schema_version: aegis-directional-selection-contract-v1
+  threshold_source: CALIBRATION_ONLY_WITHIN_SYMBOL_PERCENTILE
+  probability_quantiles: [0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.925, 0.95, 0.975]
+  maximum_candidates_per_timestamp: 1
+  minimum_calibration_selections: 100
+  minimum_scoring_selections: 20
+  maximum_mean_mae: 0.00275
+  maximum_symbol_concentration: 0.30
+  bootstrap_resamples: 2000
+  bootstrap_seed: 20260728
+  bootstrap_block_minutes: 720
+  minimum_calibration_blocks: 20
+  minimum_scoring_blocks: 20
+  variants:
+    - MODEL_ONLY
+    - BEAR_TREND_CONFIRMED
+
+promotion:
+  fold_count: 4
+  minimum_positive_folds: 3
+  minimum_passing_folds: 3
+  minimum_total_scoring_signals: 100
+  minimum_worst_fold_expectancy: 0.0
+  minimum_mean_expectancy: 0.0
+  minimum_average_precision_lift_over_prevalence: 0.01
+  maximum_ece_each_fold: 0.08
+  maximum_brier_each_fold: 0.25
+  require_all_symbols_observed: true
+  owner_promotion_required: true
+  automatic_promotion: false
+
+live_shadow_evidence:
+  feedback_report_path: data/entry_quality_v3_feedback/feedback_report.json
+  minimum_non_overlapping_episodes: 300
+  minimum_challenger_selected_outcomes: 50
+  live_only_training_allowed: false
+  historical_replay_required: true
+
+outputs:
+  artifact_path: data/short_profitability_semantics_v1/profitability_model.json
+  validation_report_path: data/short_profitability_semantics_v1/validation_report.json
+  readiness_record_path: data/short_profitability_semantics_v1/readiness.json

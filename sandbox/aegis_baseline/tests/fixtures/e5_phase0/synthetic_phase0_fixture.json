@@ -1,0 +1,16 @@
+{
+  "schema_version": "e5-phase0-synthetic-fixture-v1",
+  "synthetic": true,
+  "scientific_use": false,
+  "symbols": ["BTCUSDT", "ETHUSDT"],
+  "funding_events": [
+    {"symbol": "BTCUSDT", "funding_time_utc_ms": 1001, "funding_rate_decimal": "0.0001"},
+    {"symbol": "BTCUSDT", "funding_time_utc_ms": 2000, "funding_rate_decimal": "-0.0002"}
+  ],
+  "c1": {"experimental_symbol": "BTCUSDT", "candidates": ["BTCUSDT", "ETHUSDT"]},
+  "c2": {
+    "experimental_symbol": "BTCUSDT",
+    "experimental_cycle_id": "cycle-a",
+    "candidate_pairs": [["BTCUSDT", "cycle-a"], ["BTCUSDT", "cycle-b"], ["ETHUSDT", "cycle-c"]]
+  }
+}

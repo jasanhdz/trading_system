@@ -1,0 +1,156 @@
+schema_version: aegis-alpha-laboratory-v21-preregistration-v1
+experiment_id: aegis-alpha-laboratory-v21-01
+registered_date_utc: '2026-08-12'
+mode: RESEARCH_ONLY
+selection_effect: NONE
+exchange_authority: false
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+authority:
+  source_dataset: data/feature_information_v14/canonical_dataset.jsonl.gz
+  source_dataset_sha256: dc5cfef8d13d00e999cfcda86d84e739de078f68c8f5085027fe285d54bbb286
+  source_manifest: data/feature_information_v14/dataset_manifest.json
+  source_manifest_sha256: 51a5d2c9f24816ea657b9f3ddbac35deaef87147be1c126f3bc591de68fbe229
+  source_validation: data/feature_information_v14/validation.json
+  source_validation_sha256: b6d8c29d64ead1283e8e0e55e2818c54a413e8b3e0c0109c9a2fc24b992f8ecc
+  funding_database: data/long_entry_v3_shadow/public_microstructure.db
+  funding_database_sha256: fd7f5a4af37d09ad6a3b76000ec819843efe94f718922e993ae3d607e904b2f1
+  feature_schema: V9_176_PLUS_V14_TAKER_FLOW_10_PLUS_CAUSAL_FUNDING_2
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  timeframe: 5m
+  entry_rule: NEXT_BAR_OPEN
+
+hypothesis:
+  statement: >-
+    A small set of economically explicit, causal opportunity rules may exhibit
+    stable net expectancy before machine learning when evaluated with a
+    family-specific exit contract and realistic costs.
+  simple_rule_must_have_edge_before_model: true
+  model_training_in_this_experiment: PROHIBITED
+  failed_rule_redefinition_after_results: PROHIBITED
+
+temporal_protocol:
+  discovery:
+    start_inclusive: '2025-08-09T06:55:00+00:00'
+    end_exclusive: '2026-02-01T00:00:00+00:00'
+  validation:
+    start_inclusive: '2026-02-01T00:00:00+00:00'
+    end_exclusive: '2026-05-01T00:00:00+00:00'
+  final_holdout:
+    start_inclusive: '2026-05-01T00:00:00+00:00'
+    end_inclusive: '2026-07-17T18:55:00+00:00'
+    one_shot_only: true
+  minimum_event_spacing_minutes_per_symbol_side_family: 60
+
+strategies:
+  CROSS_SECTIONAL_MOMENTUM:
+    description: Buy relative leaders and short relative laggards only with aligned flow.
+    selected_rank_per_timestamp: 2
+    side_rolling_4h_return_min_exclusive: 0.0
+    side_ret_3_min_exclusive: 0.0
+    volume_ratio_6_24_min: 1.0
+    side_taker_imbalance_6_min_exclusive: 0.0
+    exit_profile: CURRENT_TS
+  EXTREME_REVERSAL:
+    description: Trade a confirmed reversal after a cross-sectional adverse extreme.
+    adverse_rank_per_timestamp: 2
+    side_rolling_4h_return_max_exclusive: 0.0
+    side_ret_1_min_exclusive: 0.0
+    side_acceleration_min_exclusive: 0.0
+    favorable_wick_must_exceed_adverse: true
+    side_taker_imbalance_3_min_exclusive: 0.0
+    side_taker_acceleration_min_exclusive: 0.0
+    exit_profile: LOCK_AT_5_ROE
+  BREAKOUT_FLOW_FUNDING:
+    description: Trade a directional breakout with expansion, aggressive flow, and non-crowded funding.
+    soft_breakout_min: 0.5
+    side_ret_3_min_exclusive: 0.0
+    favorable_close_location_min: 0.65
+    volume_ratio_6_24_min: 1.2
+    range_expansion_min: 1.0
+    side_taker_imbalance_6_min_exclusive: 0.0
+    side_taker_acceleration_min_exclusive: 0.0
+    maximum_side_adjusted_funding_rate: 0.0001
+    maximum_funding_age_hours: 12
+    exit_profile: LOCK_AT_10_ROE
+  FUNDING_BASIS_CARRY:
+    description: Delta-neutral funding and basis carry requiring both futures and spot legs.
+    required_inputs: [futures_mark_price, spot_price, executable_basis, funding_rate, both_leg_costs]
+    proxy_substitution: PROHIBITED
+    exit_profile: FUNDING_EVENT_AND_BASIS_CONVERGENCE
+
+economic_contract:
+  leverage: 15.0
+  round_trip_cost_fraction: 0.001
+  outcome_source: PRECOMPUTED_HASH_BOUND_V14_PROTECTION_PROFILES
+  intrabar_value: WORST_OF_OPEN_HIGH_LOW_CLOSE_AND_OPEN_LOW_HIGH_CLOSE
+  outcomes:
+    - PROTECTED_NET_RETURN
+    - CONTRACT_UTILITY
+    - MAE_FRACTION
+    - MFE_FRACTION
+    - TIME_UNDERWATER_BARS
+    - BARS_HELD
+    - EXIT_REASON
+    - BREAK_EVEN_ARMED
+    - TRAILING_ARMED
+  funding_treatment:
+    directional_strategies: SIGNAL_CONTEXT_ONLY
+    realized_funding_pnl: NOT_AVAILABLE_IN_V14_PROTECTION_OUTCOME
+    carry_strategy: REQUIRES_COMPLETE_FUNDING_AND_BASIS_ACCOUNTING
+
+gate:
+  minimum_discovery_events: 50
+  minimum_validation_events: 30
+  minimum_holdout_events: 30
+  require_positive_validation_mean_net: true
+  require_positive_holdout_mean_net: true
+  require_positive_holdout_utility: true
+  minimum_holdout_profit_factor: 1.10
+  maximum_holdout_mean_mae: 0.006
+  minimum_positive_holdout_temporal_thirds: 2
+  require_holdout_outperform_no_trade: true
+  require_holdout_outperform_random_matched_control: true
+  require_validation_and_holdout_same_sign: true
+
+controls:
+  random_seed: 210021
+  definitions:
+    - NO_TRADE_ZERO_RETURN
+    - UNCONDITIONAL_SIDE_POPULATION
+    - RANDOM_SIDE_AND_PERIOD_MATCHED_COUNT
+    - CURRENT_TS_EXIT_FOR_SAME_EVENTS
+
+anti_overfitting:
+  no_threshold_search: true
+  no_feature_search: true
+  no_seed_selection: true
+  no_family_selection_before_holdout: true
+  no_holdout_reuse_for_v21_changes: true
+  all_negative_results_preserved: true
+
+model_stage:
+  status: BLOCKED_UNTIL_SIMPLE_RULE_GATE
+  allowed_future_models:
+    - LOGISTIC_REGRESSION
+    - HISTOGRAM_GRADIENT_BOOSTING
+    - QUANTILE_REGRESSION
+  allowed_future_targets:
+    - POSITIVE_PROTECTED_RETURN
+    - PROTECTED_NET_RETURN
+    - MAE_Q90
+    - MFE_Q50
+    - TIME_TO_POSITIVE
+  role: ABSTENTION_AND_RISK_RANKING_NOT_SIGNAL_FABRICATION
+
+deployment:
+  V21_READY_FOR_MODELING: false
+  V21_READY_FOR_SHADOW: false
+  V21_READY_FOR_LIVE: false
+  current_live_change: NONE
+  current_shadow_change: NONE
+  exchange_calls: 0
+  exchange_mutations: 0
+

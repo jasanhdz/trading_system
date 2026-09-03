@@ -1,0 +1,11 @@
+{
+  "schema_version": "aegis-range-candidate-grid-v1",
+  "cluster_tolerance_atr": [0.2, 0.3],
+  "min_range_amplitude_pct": [0.0125, 0.02, 0.03],
+  "rejection_min_wick_body_ratio": [1.0, 1.5],
+  "stop_buffer_atr": [0.35, 0.5],
+  "target_buffer_atr": [0.0, 0.1],
+  "max_adx": [20, 25],
+  "min_chop_risk": [0.62, 0.7],
+  "min_safety_volume_ratio": [0.5, 0.75]
+}

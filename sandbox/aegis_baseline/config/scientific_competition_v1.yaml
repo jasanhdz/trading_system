@@ -1,0 +1,76 @@
+schema_version: aegis-scientific-competition-v1
+protocol_id: aegis-short-stability-competition-v1
+status: PRE_REGISTERED
+side: SHORT
+timeframe: 5m
+universe_id: aegis-operational-eleven-v1
+feature_schema_version: aegis-features-v2
+label_schema_version: aegis-labels-short-v4
+data:
+  source_kind: canonical_d3_series
+  source: /home/jasan/Develop/aegis_gen2/d3/canonical_series/v1
+  manifest_sha256: 00177a1b8e9e9db9b0cb105b63034bd4b3e5a9c859be3053e59d16be04e52916
+  read_only: true
+validation:
+  fold_count: 4
+  expanding_window: true
+  embargo_minutes: 120
+  calibration_block: temporally_held_out_within_fold
+  final_test_is_lockbox: true
+  seed: 20260718
+calibration:
+  candidates: [RAW, PLATT, ISOTONIC]
+  selection_order: [mean_ece_ascending, mean_brier_ascending, complexity_ascending]
+  ece_bins: 10
+  require_out_of_fold: true
+trrm:
+  target: tail_event
+  candidates:
+    - {id: trrm_logistic_baseline, family: LOGISTIC_LINEAR, publishable_json: true}
+    - {id: trrm_random_forest, family: RANDOM_FOREST, publishable_json: true}
+    - {id: trrm_hist_gradient_boosting, family: HIST_GRADIENT_BOOSTING, publishable_json: true}
+  primary_metric: average_precision
+qmae:
+  target: mae_fraction_h12
+  candidates:
+    - {id: qmae_unconditional_baseline, family: UNCONDITIONAL_QUANTILE, publishable_json: true}
+    - {id: qmae_hist_gradient_boosting, family: HIST_GRADIENT_BOOSTING_QUANTILE, publishable_json: true}
+  quantiles: [0.50, 0.90]
+  pinball_ratio_to_baseline_maximum: 0.90
+  conformal: one_sided_split
+  coverage_band: [0.87, 0.93]
+  coverage_required_in_every_fold: true
+eqm:
+  separate_targets: true
+  net_quality_candidates:
+    - {id: eqm_linear_net_baseline, family: RIDGE_LINEAR, publishable_json: true}
+    - {id: eqm_extra_trees_net, family: EXTRA_TREES, publishable_json: true}
+    - {id: eqm_hgb_net, family: HIST_GRADIENT_BOOSTING, publishable_json: true}
+  clean_candidates:
+    - {id: eqm_logistic_clean_baseline, family: LOGISTIC_LINEAR, publishable_json: true}
+    - {id: eqm_random_forest_clean, family: RANDOM_FOREST, publishable_json: true}
+    - {id: eqm_hgb_clean, family: HIST_GRADIENT_BOOSTING, publishable_json: true}
+ranking:
+  stability_first_order:
+    - worst_fold_descending
+    - mean_descending
+    - standard_deviation_ascending
+    - compute_cost_ascending
+  concentration_top_decile_maximum_per_symbol: 0.30
+hypotheses:
+  H1:
+    description: calibrated TRRM exceeds fold prevalence in every fold
+    minimum_lift_over_prevalence: 1.10
+  H2:
+    description: candidate retains a material fraction of mean quality in its worst fold
+    minimum_worst_to_mean_ratio: 0.75
+  H3:
+    description: full calibrated stack improves independent ECON expectancy over signal without gates
+    minimum_incremental_expectancy: 0.0
+publication:
+  artifact_format: INSPECTABLE_JSON
+  pickle_allowed: false
+  deterministic_evaluator_required: true
+  cross_process_determinism_required: true
+  smoke_results_can_select_winner: false
+  maximum_state_before_phase_e: EXPERIMENTAL

@@ -1,0 +1,687 @@
+"""Owner-authorized LONG/SHORT hybrid selection for a bounded Live experiment."""
+
+from __future__ import annotations
+
+import math
+from collections import Counter
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Mapping
+
+import yaml
+
+from .config import CANONICAL_SYMBOLS
+from .directional_confirmation import (
+    ConfirmationState,
+    DirectionalConfirmationPolicy,
+    assess_directional_confirmation,
+    directional_confirmation_features,
+    directional_relative_quality,
+)
+from .features import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
+from .research.shadow_runtime import _AppendOnlyJournal, _mapping
+from .research.entry_path_meta_model_shadow import (
+    EntryPathMetaModelShadow,
+    EntryPathMetaModelShadowError,
+)
+from .research.entry_methodology_v2_shadow import (
+    assess_entry_methodology_v2_shadow,
+)
+from .research.long_entry_specialist_model_shadow import (
+    LongEntrySpecialistModelShadow,
+    LongEntrySpecialistModelShadowError,
+)
+from .research.long_entry_specialists_shadow import classify_long_archetype_v2
+from .research.seven_point_entry_shadow import assess_seven_point_entry_shadow
+from .utils import Sha256HashProvider, sha256_file
+
+CONFIG_SCHEMA = "aegis-hybrid-directional-live-experiment-v2"
+CONTRACT_VERSION = "aegis-hybrid-directional-live-decision-v2"
+AUTHORITY = "OWNER_AUTHORIZED_HYBRID_DIRECTIONAL_MULTI_SYMBOL_5M_QUALITY_SELECTION_V2"
+MODEL_IDENTIFIER = "aegis-hybrid-directional-committee-v1"
+MODEL_SHA256 = "f52dcaa12fe94b6cc9023c25cf95ea2d6fc16296c9b65c2c93d00e13e66ba0e8"
+CONFIGURATION_SHA256 = (
+    "26507443adf07dfc5a90d48a1c5f472f989a26cfe929740bd9e2009c39aaa3a9"
+)
+DECISION_SCHEMA = "aegis-hybrid-directional-live-evidence-v2"
+
+
+class HybridLiveExperimentError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class HybridLiveExperimentConfig:
+    path: Path
+    artifact_path: Path
+    readiness_path: Path
+    decision_journal: Path
+    maximum_selected_per_cycle: int
+    maximum_selected_per_symbol: int
+    confirmation_policy: DirectionalConfirmationPolicy
+
+
+def load_hybrid_live_experiment_config(
+    path: Path, *, repo_root: Path
+) -> HybridLiveExperimentConfig:
+    resolved = path.resolve()
+    root = repo_root.resolve()
+    try:
+        payload = _mapping(yaml.safe_load(resolved.read_text()), "hybrid_live")
+        artifact = _mapping(payload["artifact"], "artifact")
+        selection = _mapping(payload["selection"], "selection")
+        quality = _mapping(payload["quality"], "quality")
+        confirmation = _mapping(payload["confirmation"], "confirmation")
+        evidence = _mapping(payload["evidence"], "evidence")
+        execution = _mapping(payload["execution"], "execution")
+        validation = _mapping(payload["validation_evidence"], "validation")
+        artifact_path = (root / str(artifact["path"])).resolve()
+        readiness_path = (root / str(artifact["readiness_path"])).resolve()
+        journal_root = (resolved.parent / str(evidence["journal_root"])).resolve()
+    except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_CONFIG_INVALID") from exc
+
+    data_root = (root / "data").resolve()
+    expected_symbols = list(CANONICAL_SYMBOLS)
+    if (
+        sha256_file(resolved) != CONFIGURATION_SHA256
+        or payload.get("schema_version") != CONFIG_SCHEMA
+        or payload.get("enabled") is not True
+        or payload.get("mode") != "LIVE"
+        or payload.get("runtime_authority") != "OWNER_AUTHORIZED_REAL_MONEY_EXPERIMENT"
+        or payload.get("owner_authorization") != AUTHORITY
+        or payload.get("owner_acknowledges_offline_validation_failed") is not True
+        or payload.get("feature_schema") != FEATURE_SCHEMA_VERSION
+        or int(payload.get("feature_count", 0)) != len(FEATURE_NAMES)
+        or list(payload.get("symbols", ())) != expected_symbols
+        or artifact.get("sha256") != MODEL_SHA256
+        or artifact.get("offline_validation_state") != "FAILED"
+        or artifact.get("artifact_runtime_authority") != "SHADOW_ONLY"
+        or artifact.get("artifact_contents_modified") is not False
+        or not artifact_path.is_file()
+        or sha256_file(artifact_path) != MODEL_SHA256
+        or not readiness_path.is_file()
+        or sha256_file(readiness_path) != str(artifact["readiness_sha256"])
+        or selection.get("cadence") != "EVERY_CLOSED_5M_BAR"
+        or selection.get("anchor_rule") != "EVERY_NEW_COORDINATED_CLOSED_BAR"
+        or selection.get("candidate_population") != "ALL_11_SYMBOLS_X_LONG_SHORT"
+        or selection.get("cross_side_arbitration") != "QUALITY_CONFIRMED_PER_SYMBOL"
+        or int(selection.get("maximum_selected_per_cycle", 0)) != len(CANONICAL_SYMBOLS)
+        or int(selection.get("maximum_selected_per_symbol", 0)) != 1
+        or selection.get("minimum_score") != "REPLACED_BY_QUALITY_POLICY"
+        or selection.get("idempotency_identity") != "DECISION_CYCLE_X_SYMBOL_X_SIDE"
+        or int(selection.get("fabricated_votes", -1)) != 0
+        or evidence.get("record_all_candidates") is not True
+        or evidence.get("record_non_selected_candidates") is not True
+        or evidence.get("record_confirmation_features") is not True
+        or execution.get("typescript_guards_unchanged") is not True
+        or execution.get("typescript_sizing_unchanged") is not True
+        or execution.get("typescript_leverage_unchanged") is not True
+        or execution.get("typescript_brackets_unchanged") is not True
+        or int(execution.get("python_exchange_mutations", -1)) != 0
+        or quality.get("semantics") != "CROSS_SECTIONAL_CALIBRATED_WITH_NET_TOLERANCE"
+        or execution.get("selection_authority")
+        != "HYBRID_DIRECTIONAL_RELATIVE_QUALITY_AND_CONFIRMATION"
+        or validation.get("replay_conclusion")
+        != "PRICE_PROTECTION_DOES_NOT_ESTABLISH_POSITIVE_EXPECTANCY"
+        or validation.get("robust_positive_folds_and_directions") != "0_of_8"
+        or (journal_root != data_root and data_root not in journal_root.parents)
+    ):
+        raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_AUTHORITY_INVALID")
+    journal = journal_root / str(evidence["decision_journal"])
+    if journal.parent != journal_root:
+        raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_JOURNAL_PROHIBITED")
+    try:
+        policy = DirectionalConfirmationPolicy(
+            round_trip_cost_fraction=0.001,
+            minimum_opportunity_probability_long=float(
+                quality["minimum_opportunity_probability_long"]
+            ),
+            minimum_opportunity_probability_short=float(
+                quality["minimum_opportunity_probability_short"]
+            ),
+            maximum_danger_probability=float(quality["maximum_danger_probability"]),
+            minimum_net_return_fraction=float(quality["minimum_net_return_fraction"]),
+            minimum_opportunity_percentile=float(
+                quality["minimum_opportunity_percentile"]
+            ),
+            minimum_danger_quality_percentile=float(
+                quality["minimum_danger_quality_percentile"]
+            ),
+            minimum_net_return_percentile=float(
+                quality["minimum_net_return_percentile"]
+            ),
+            minimum_path_efficiency_percentile=float(
+                quality["minimum_path_efficiency_percentile"]
+            ),
+            minimum_confirmation_components=int(
+                confirmation["minimum_components_passed"]
+            ),
+            minimum_close_location=float(confirmation["minimum_close_location"]),
+            minimum_volume_zscore=float(confirmation["minimum_volume_zscore"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_POLICY_INVALID") from exc
+    return HybridLiveExperimentConfig(
+        path=resolved,
+        artifact_path=artifact_path,
+        readiness_path=readiness_path,
+        decision_journal=journal,
+        maximum_selected_per_cycle=len(CANONICAL_SYMBOLS),
+        maximum_selected_per_symbol=1,
+        confirmation_policy=policy,
+    )
+
+
+class HybridLiveExperimentSelector:
+    """Rank the real hybrid outputs without changing any predicted value."""
+
+    def __init__(self, config: HybridLiveExperimentConfig) -> None:
+        self.config = config
+        self._hashing = Sha256HashProvider()
+        self._journal = _AppendOnlyJournal(config.decision_journal, "event_id")
+        self._processed_cycles: set[str] = set()
+        self._entry_methodology_state: dict[tuple[str, str], Mapping[str, Any]] = {}
+        self._methodology_records = 0
+        self._methodology_tier_counts: Counter[str] = Counter()
+        self._meta_model_status_counts: Counter[str] = Counter()
+        self._long_specialist_status_counts: Counter[str] = Counter()
+        self._long_archetype_records = 0
+        self._long_archetype_counts: Counter[str] = Counter()
+        self._entry_path_meta_model: EntryPathMetaModelShadow | None = None
+        self._entry_path_meta_model_status = "ARTIFACT_NOT_PRESENT"
+        self._long_specialist_model: LongEntrySpecialistModelShadow | None = None
+        self._long_specialist_model_status = "ARTIFACT_NOT_PRESENT"
+        meta_model_path = (
+            config.decision_journal.parents[1]
+            / "entry_methodology_v2_shadow"
+            / "meta_model_validation.json"
+        )
+        if meta_model_path.is_file():
+            try:
+                self._entry_path_meta_model = EntryPathMetaModelShadow(meta_model_path)
+                self._entry_path_meta_model_status = "LOADED_SHADOW_ONLY"
+            except EntryPathMetaModelShadowError:
+                self._entry_path_meta_model_status = "ARTIFACT_INVALID_IGNORED"
+        long_specialist_path = (
+            config.decision_journal.parents[1]
+            / "long_entry_specialists_shadow"
+            / "validation.json"
+        )
+        if long_specialist_path.is_file():
+            try:
+                self._long_specialist_model = LongEntrySpecialistModelShadow(
+                    long_specialist_path
+                )
+                self._long_specialist_model_status = "LOADED_SHADOW_ONLY"
+            except LongEntrySpecialistModelShadowError:
+                self._long_specialist_model_status = "ARTIFACT_INVALID_IGNORED"
+        for row in self._journal.rows:
+            self._processed_cycles.add(str(row["decision_cycle_id"]))
+            assessment = row.get("entry_methodology_v2_shadow")
+            if isinstance(assessment, Mapping):
+                self._methodology_records += 1
+                tier = assessment.get("tier")
+                if tier in ("A", "B", "C"):
+                    self._methodology_tier_counts[tier] += 1
+                self._entry_methodology_state[
+                    (str(row["symbol"]), str(row["side"]))
+                ] = assessment
+            meta_model = row.get("entry_path_meta_model_shadow")
+            if isinstance(meta_model, Mapping):
+                self._meta_model_status_counts[str(meta_model.get("status"))] += 1
+            long_specialist = row.get("long_entry_specialist_shadow")
+            if isinstance(long_specialist, Mapping):
+                self._long_specialist_status_counts[
+                    str(long_specialist.get("status"))
+                ] += 1
+            long_archetype = row.get("long_entry_archetype_v2_shadow")
+            if isinstance(long_archetype, Mapping):
+                self._long_archetype_records += 1
+                archetype = long_archetype.get("archetype")
+                if archetype is not None:
+                    self._long_archetype_counts[str(archetype)] += 1
+
+    @staticmethod
+    def _timestamp(value: object) -> datetime:
+        if not isinstance(value, str):
+            raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_TIMESTAMP_INVALID")
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_TIMESTAMP_INVALID")
+        return parsed
+
+    @staticmethod
+    def _prediction(
+        overlay: Mapping[str, Any], symbol: str, side: str
+    ) -> Mapping[str, float]:
+        try:
+            hybrid = _mapping(overlay[symbol]["hybrid_directional_shadow"], "hybrid")
+            if (
+                hybrid.get("mode") != "SHADOW"
+                or hybrid.get("status") != "OFFLINE_VALIDATION_FAILED_OBSERVATION_ONLY"
+            ):
+                raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_INPUT_INVALID")
+            raw = _mapping(hybrid["predictions"][side], "prediction")
+            result = {
+                name: float(raw[name])
+                for name in (
+                    "opportunity_probability",
+                    "danger_probability",
+                    "mae_q50",
+                    "mae_q90",
+                    "mfe_q50",
+                    "net_return_mean",
+                    "shadow_rank_score",
+                )
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_INPUT_INVALID") from exc
+        if not all(math.isfinite(value) for value in result.values()):
+            raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_INPUT_NONFINITE")
+        return result
+
+    def apply(self, batch: Mapping[str, Any]) -> Mapping[str, Any]:
+        overlay = _mapping(batch.get("_entry_quality_v2", {}), "research_overlay")
+        if set(overlay) != set(CANONICAL_SYMBOLS):
+            raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_SYMBOLS_INVALID")
+        timestamp = self._timestamp(batch.get("market_timestamp"))
+        if timestamp.minute % 5 != 0 or timestamp.second != 0:
+            raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_TIMESTAMP_INVALID")
+        results = _mapping(batch.get("results", {}), "results")
+        if set(results) != set(CANONICAL_SYMBOLS):
+            raise HybridLiveExperimentError("AEGIS_HYBRID_LIVE_SYMBOLS_INVALID")
+        candidates: list[dict[str, Any]] = []
+        research_features_by_symbol: dict[str, Mapping[str, Any]] = {}
+        for symbol in CANONICAL_SYMBOLS:
+            research_features = _mapping(
+                results[symbol].get("research_features", {}), "research_features"
+            )
+            research_features_by_symbol[symbol] = research_features
+            for side in ("LONG", "SHORT"):
+                prediction = self._prediction(overlay, symbol, side)
+                confirmation_features = directional_confirmation_features(
+                    research_features, side
+                )
+                candidates.append(
+                    {
+                        "symbol": symbol,
+                        "side": side,
+                        **prediction,
+                        "confirmation_features": confirmation_features,
+                    }
+                )
+        relative_quality = directional_relative_quality(candidates)
+        for candidate, quality_values in zip(candidates, relative_quality):
+            candidate["confirmation"] = assess_directional_confirmation(
+                candidate,
+                candidate["confirmation_features"],
+                quality_values,
+                self.config.confirmation_policy,
+            )
+        confirmed = [
+            item
+            for item in candidates
+            if item["confirmation"]["state"] == ConfirmationState.CONFIRMED.value
+        ]
+        confirmed_by_side = {
+            side: sum(item["side"] == side for item in confirmed)
+            for side in ("LONG", "SHORT")
+        }
+        for candidate in candidates:
+            symbol = str(candidate["symbol"])
+            symbol_result = _mapping(results[symbol], symbol)
+            layer = _mapping(symbol_result.get("layer", {}), "layer")
+            intelligence = _mapping(
+                overlay[symbol].get("entry_intelligence_shadow", {}),
+                "entry_intelligence_shadow",
+            )
+            candidate["seven_point_entry_shadow"] = assess_seven_point_entry_shadow(
+                side=str(candidate["side"]),
+                prediction=candidate,
+                confirmation=candidate["confirmation"],
+                confirmation_features=candidate["confirmation_features"],
+                current_layer=layer,
+                entry_intelligence=intelligence,
+                confirmed_same_side=confirmed_by_side[str(candidate["side"])],
+                confirmed_total=len(confirmed),
+            )
+            candidate["entry_methodology_v2_shadow"] = (
+                assess_entry_methodology_v2_shadow(
+                    market_timestamp=str(batch["market_timestamp"]),
+                    side=str(candidate["side"]),
+                    prediction=candidate,
+                    confirmation=candidate["confirmation"],
+                    confirmation_features=candidate["confirmation_features"],
+                    current_layer=layer,
+                    entry_intelligence=intelligence,
+                    confirmed_same_side=confirmed_by_side[str(candidate["side"])],
+                    confirmed_total=len(confirmed),
+                    previous=self._entry_methodology_state.get(
+                        (symbol, str(candidate["side"]))
+                    ),
+                )
+            )
+            if self._entry_path_meta_model is None:
+                candidate["entry_path_meta_model_shadow"] = {
+                    "schema_id": "aegis-entry-path-meta-model-shadow-score-v1",
+                    "mode": "SHADOW",
+                    "side": str(candidate["side"]),
+                    "status": self._entry_path_meta_model_status,
+                    "probability": None,
+                    "counterfactual_pass": False,
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            else:
+                try:
+                    candidate["entry_path_meta_model_shadow"] = (
+                        self._entry_path_meta_model.assess(
+                            side=str(candidate["side"]),
+                            prediction=candidate,
+                            confirmation=candidate["confirmation"],
+                            confirmation_features=candidate["confirmation_features"],
+                            entry_intelligence=intelligence,
+                        )
+                    )
+                except (EntryPathMetaModelShadowError, ValueError):
+                    candidate["entry_path_meta_model_shadow"] = {
+                        "schema_id": "aegis-entry-path-meta-model-shadow-score-v1",
+                        "mode": "SHADOW",
+                        "side": str(candidate["side"]),
+                        "status": "FEATURES_INCOMPLETE_IGNORED",
+                        "probability": None,
+                        "counterfactual_pass": False,
+                        "selection_effect": "NONE",
+                        "exchange_authority": False,
+                        "exchange_mutations": 0,
+                    }
+            if str(candidate["side"]) != "LONG":
+                candidate["long_entry_archetype_v2_shadow"] = {
+                    "schema_id": "aegis-long-entry-archetype-shadow-v2",
+                    "mode": "SHADOW",
+                    "archetype": None,
+                    "status": "NOT_APPLICABLE_TO_SHORT",
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            else:
+                try:
+                    candidate["long_entry_archetype_v2_shadow"] = {
+                        **classify_long_archetype_v2(
+                            research_features_by_symbol[symbol]
+                        ),
+                        "status": "OBSERVATION_ONLY",
+                    }
+                except ValueError:
+                    candidate["long_entry_archetype_v2_shadow"] = {
+                        "schema_id": "aegis-long-entry-archetype-shadow-v2",
+                        "mode": "SHADOW",
+                        "archetype": None,
+                        "status": "FEATURES_INCOMPLETE_IGNORED",
+                        "selection_effect": "NONE",
+                        "exchange_authority": False,
+                        "exchange_mutations": 0,
+                    }
+            if str(candidate["side"]) != "LONG":
+                candidate["long_entry_specialist_shadow"] = {
+                    "schema_id": "aegis-long-entry-specialist-shadow-score-v1",
+                    "mode": "SHADOW",
+                    "archetype": None,
+                    "status": "NOT_APPLICABLE_TO_SHORT",
+                    "success_probability": None,
+                    "danger_probability": None,
+                    "counterfactual_action": "NOT_APPLICABLE",
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            elif self._long_specialist_model is None:
+                candidate["long_entry_specialist_shadow"] = {
+                    "schema_id": "aegis-long-entry-specialist-shadow-score-v1",
+                    "mode": "SHADOW",
+                    "archetype": None,
+                    "status": self._long_specialist_model_status,
+                    "success_probability": None,
+                    "danger_probability": None,
+                    "counterfactual_action": "OBSERVE_ONLY",
+                    "selection_effect": "NONE",
+                    "exchange_authority": False,
+                    "exchange_mutations": 0,
+                }
+            else:
+                try:
+                    candidate["long_entry_specialist_shadow"] = (
+                        self._long_specialist_model.assess(
+                            research_features_by_symbol[symbol]
+                        )
+                    )
+                except (LongEntrySpecialistModelShadowError, ValueError):
+                    candidate["long_entry_specialist_shadow"] = {
+                        "schema_id": "aegis-long-entry-specialist-shadow-score-v1",
+                        "mode": "SHADOW",
+                        "archetype": None,
+                        "status": "FEATURES_INCOMPLETE_IGNORED",
+                        "success_probability": None,
+                        "danger_probability": None,
+                        "counterfactual_action": "OBSERVE_ONLY",
+                        "selection_effect": "NONE",
+                        "exchange_authority": False,
+                        "exchange_mutations": 0,
+                    }
+        ranking = sorted(
+            candidates,
+            key=lambda item: (
+                -float(item["shadow_rank_score"]),
+                -float(item["net_return_mean"]),
+                float(item["danger_probability"]),
+                float(item["mae_q90"]),
+                str(item["symbol"]),
+                str(item["side"]),
+            ),
+        )
+        selected_by_symbol: dict[str, dict[str, Any]] = {}
+        for candidate in ranking:
+            if (
+                candidate["confirmation"]["state"] == ConfirmationState.CONFIRMED.value
+                and candidate["symbol"] not in selected_by_symbol
+            ):
+                selected_by_symbol[str(candidate["symbol"])] = candidate
+        selected_candidates = list(selected_by_symbol.values())[
+            : self.config.maximum_selected_per_cycle
+        ]
+        cycle_id = str(batch["decision_cycle_id"])
+        rows = []
+        for rank, candidate in enumerate(ranking, start=1):
+            is_selected = candidate in selected_candidates
+            row = {
+                "schema_id": DECISION_SCHEMA,
+                "decision_cycle_id": cycle_id,
+                "market_timestamp": batch["market_timestamp"],
+                "closed_bar_evaluation": True,
+                "rank": rank,
+                **candidate,
+                "selected": is_selected,
+                "contract_version": CONTRACT_VERSION,
+                "authority": AUTHORITY,
+                "model_identifier": MODEL_IDENTIFIER,
+                "model_sha256": MODEL_SHA256,
+                "configuration_sha256": CONFIGURATION_SHA256,
+                "fabricated_votes": 0,
+                "python_exchange_mutations": 0,
+            }
+            row["event_id"] = self._hashing.digest_value(row)
+            rows.append(row)
+        if cycle_id not in self._processed_cycles:
+            for row in rows:
+                if self._journal.append(row):
+                    assessment = row["entry_methodology_v2_shadow"]
+                    self._methodology_records += 1
+                    tier = assessment.get("tier")
+                    if tier in ("A", "B", "C"):
+                        self._methodology_tier_counts[tier] += 1
+                    self._entry_methodology_state[
+                        (str(row["symbol"]), str(row["side"]))
+                    ] = assessment
+                    meta_model = row.get("entry_path_meta_model_shadow")
+                    if isinstance(meta_model, Mapping):
+                        self._meta_model_status_counts[
+                            str(meta_model.get("status"))
+                        ] += 1
+                    long_specialist = row.get("long_entry_specialist_shadow")
+                    if isinstance(long_specialist, Mapping):
+                        self._long_specialist_status_counts[
+                            str(long_specialist.get("status"))
+                        ] += 1
+                    long_archetype = row.get("long_entry_archetype_v2_shadow")
+                    if isinstance(long_archetype, Mapping):
+                        self._long_archetype_records += 1
+                        archetype = long_archetype.get("archetype")
+                        if archetype is not None:
+                            self._long_archetype_counts[str(archetype)] += 1
+            self._processed_cycles.add(cycle_id)
+        by_symbol: dict[str, Any] = {}
+        for symbol in CANONICAL_SYMBOLS:
+            symbol_rows = [row for row in rows if row["symbol"] == symbol]
+            selected_row = next((row for row in symbol_rows if row["selected"]), None)
+            by_symbol[symbol] = {
+                "schema_id": "aegis-hybrid-directional-live-http-v2",
+                "mode": "LIVE",
+                "closed_bar_evaluation": True,
+                "selected": selected_row is not None,
+                "selected_side": selected_row["side"] if selected_row else None,
+                "selected_prediction": dict(selected_row) if selected_row else None,
+                "predictions": {
+                    row["side"]: {
+                        key: row[key]
+                        for key in (
+                            "opportunity_probability",
+                            "danger_probability",
+                            "mae_q50",
+                            "mae_q90",
+                            "mfe_q50",
+                            "net_return_mean",
+                            "shadow_rank_score",
+                        )
+                    }
+                    for row in symbol_rows
+                },
+                "ranks": {row["side"]: row["rank"] for row in symbol_rows},
+                "confirmation": {
+                    row["side"]: dict(row["confirmation"]) for row in symbol_rows
+                },
+                "fabricated_votes": 0,
+                "exchange_authority": True,
+                "python_exchange_mutations": 0,
+            }
+        return {
+            "schema_id": "aegis-hybrid-directional-live-batch-v2",
+            "mode": "LIVE",
+            "closed_bar_evaluation": True,
+            "selected_symbol": (
+                selected_candidates[0]["symbol"]
+                if len(selected_candidates) == 1
+                else None
+            ),
+            "selected_side": (
+                selected_candidates[0]["side"]
+                if len(selected_candidates) == 1
+                else None
+            ),
+            "selected_symbols": [item["symbol"] for item in selected_candidates],
+            "selected_sides": {
+                item["symbol"]: item["side"] for item in selected_candidates
+            },
+            "selected_count": len(selected_candidates),
+            "candidate_count": len(rows),
+            "by_symbol": by_symbol,
+        }
+
+    def health(self) -> Mapping[str, Any]:
+        return {
+            "status": "ACTIVE",
+            "mode": "LIVE",
+            "contract_version": CONTRACT_VERSION,
+            "authority": AUTHORITY,
+            "model_identifier": MODEL_IDENTIFIER,
+            "model_sha256": MODEL_SHA256,
+            "configuration_sha256": CONFIGURATION_SHA256,
+            "minimum_opportunity_probability_long": (
+                self.config.confirmation_policy.minimum_opportunity_probability_long
+            ),
+            "minimum_opportunity_probability_short": (
+                self.config.confirmation_policy.minimum_opportunity_probability_short
+            ),
+            "decision_records": len(self._journal.rows),
+            "entry_methodology_v2_shadow": {
+                "status": "ACTIVE",
+                "mode": "SHADOW",
+                "records": self._methodology_records,
+                "tier_counts": {
+                    tier: self._methodology_tier_counts[tier]
+                    for tier in ("A", "B", "C")
+                },
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
+            "entry_path_meta_model_shadow": {
+                "mode": "SHADOW",
+                "status": self._entry_path_meta_model_status,
+                "artifact_content_hash": (
+                    self._entry_path_meta_model.content_hash
+                    if self._entry_path_meta_model is not None
+                    else None
+                ),
+                "side_status_counts": dict(
+                    sorted(self._meta_model_status_counts.items())
+                ),
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
+            "long_entry_specialist_shadow": {
+                "mode": "SHADOW",
+                "status": self._long_specialist_model_status,
+                "artifact_content_hash": (
+                    self._long_specialist_model.content_hash
+                    if self._long_specialist_model is not None
+                    else None
+                ),
+                "validation_pass": (
+                    self._long_specialist_model.validation_pass
+                    if self._long_specialist_model is not None
+                    else False
+                ),
+                "status_counts": dict(
+                    sorted(self._long_specialist_status_counts.items())
+                ),
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
+            "long_entry_archetype_v2_shadow": {
+                "mode": "SHADOW",
+                "status": "OBSERVATION_ONLY",
+                "records": self._long_archetype_records,
+                "archetype_counts": dict(
+                    sorted(self._long_archetype_counts.items())
+                ),
+                "selection_effect": "NONE",
+                "exchange_authority": False,
+                "exchange_mutations": 0,
+            },
+            "fabricated_votes": 0,
+            "python_exchange_mutations": 0,
+        }
+
+
+def build_hybrid_live_experiment_selector(
+    path: Path, *, repo_root: Path
+) -> HybridLiveExperimentSelector:
+    return HybridLiveExperimentSelector(
+        load_hybrid_live_experiment_config(path, repo_root=repo_root)
+    )

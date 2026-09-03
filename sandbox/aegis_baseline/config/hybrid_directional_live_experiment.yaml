@@ -1,0 +1,87 @@
+schema_version: aegis-hybrid-directional-live-experiment-v2
+experiment_id: aegis-hybrid-directional-real-money-learning-01
+enabled: true
+mode: LIVE
+runtime_authority: OWNER_AUTHORIZED_REAL_MONEY_EXPERIMENT
+owner_authorization: OWNER_AUTHORIZED_HYBRID_DIRECTIONAL_MULTI_SYMBOL_5M_QUALITY_SELECTION_V2
+owner_acknowledges_offline_validation_failed: true
+purpose: REAL_OPERATION_EVIDENCE_COLLECTION
+
+feature_schema: aegis-features-v2
+feature_count: 83
+timeframe: 5m
+symbols: [ETHUSDT, BTCUSDT, SOLUSDT, BNBUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, SUIUSDT, LTCUSDT]
+
+artifact:
+  path: config/bundles/aegis-hybrid-directional-committee-v1.json
+  sha256: f52dcaa12fe94b6cc9023c25cf95ea2d6fc16296c9b65c2c93d00e13e66ba0e8
+  readiness_path: config/bundles/aegis-hybrid-directional-committee-v1-readiness.json
+  readiness_sha256: 27e2df2fce83044a4fdb248619cc974badbf8c7e4f6d6c2ebd185800edec3e7a
+  offline_validation_state: FAILED
+  artifact_runtime_authority: SHADOW_ONLY
+  artifact_contents_modified: false
+
+selection:
+  cadence: EVERY_CLOSED_5M_BAR
+  anchor_rule: EVERY_NEW_COORDINATED_CLOSED_BAR
+  candidate_population: ALL_11_SYMBOLS_X_LONG_SHORT
+  cross_side_arbitration: QUALITY_CONFIRMED_PER_SYMBOL
+  maximum_selected_per_cycle: 11
+  maximum_selected_per_symbol: 1
+  minimum_score: REPLACED_BY_QUALITY_POLICY
+  idempotency_identity: DECISION_CYCLE_X_SYMBOL_X_SIDE
+  tie_break_order:
+    - shadow_rank_score_desc
+    - net_return_mean_desc
+    - danger_probability_asc
+    - mae_q90_asc
+    - symbol_asc
+    - side_asc
+  fabricated_votes: 0
+
+quality:
+  semantics: CROSS_SECTIONAL_CALIBRATED_WITH_NET_TOLERANCE
+  minimum_opportunity_probability_long: 0.44
+  minimum_opportunity_probability_short: 0.39
+  maximum_danger_probability: 0.63
+  minimum_net_return_fraction: -0.0015
+  minimum_opportunity_percentile: 0.60
+  minimum_danger_quality_percentile: 0.40
+  minimum_net_return_percentile: 0.60
+  minimum_path_efficiency_percentile: 0.40
+
+confirmation:
+  minimum_components_passed: 3
+  minimum_close_location: 0.55
+  minimum_volume_zscore: 0.0
+  components:
+    - FAST_EMA_RECLAIMED
+    - DIRECTIONAL_REVERSAL_CANDLE
+    - SHORT_HORIZON_MOMENTUM_ALIGNED
+    - VOLUME_CONFIRMS
+    - TREND_IMPROVING
+
+evidence:
+  journal_root: ../data/hybrid_directional_live_experiment
+  decision_journal: decisions.jsonl
+  record_all_candidates: true
+  record_non_selected_candidates: true
+  record_probabilities: true
+  record_path_metrics: true
+  record_confirmation_features: true
+
+execution:
+  selection_authority: HYBRID_DIRECTIONAL_RELATIVE_QUALITY_AND_CONFIRMATION
+  typescript_guards_unchanged: true
+  typescript_sizing_unchanged: true
+  typescript_leverage_unchanged: true
+  typescript_brackets_unchanged: true
+  python_exchange_mutations: 0
+  manual_signal_forcing: false
+  automatic_promotion_beyond_this_experiment: false
+
+validation_evidence:
+  replay_report: reports/experiments/aegis_hybrid_ts_protection_replay_v1.json
+  replay_report_sha256: 6efc7f3c40ec82d69b8008a256c26816a310ba42b47d5cab261d56066e7adbc3
+  replay_conclusion: PRICE_PROTECTION_DOES_NOT_ESTABLISH_POSITIVE_EXPECTANCY
+  robust_positive_folds_and_directions: 0_of_8

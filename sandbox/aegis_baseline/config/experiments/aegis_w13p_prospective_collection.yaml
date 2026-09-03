@@ -1,0 +1,31 @@
+schema_id: aegis-w13p-collector-config-v1
+enabled: true
+phase: PROSPECTIVE_PASSIVE_COLLECTION
+symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+signal_journal: data/prospective_shadow/cohort_1/journals/signal_evidence_v1.jsonl
+storage_root: data/w13p_prospective_collection
+public_websocket_url: wss://fstream.binance.com/public/stream
+public_snapshot_url: https://fapi.binance.com/fapi/v1/depth
+depth_snapshot_limit: 1000
+depth_stream_interval: 100ms
+pre_signal_seconds: 30
+post_signal_seconds: 180
+ring_retention_seconds: 90
+ring_max_events_per_symbol: 100000
+market_queue_max_events: 50000
+disk_queue_max_records: 100000
+parquet_batch_rows: 50000
+parquet_flush_seconds: 30
+minimum_free_disk_gb: 100
+maximum_collection_gb: 100
+quality:
+  minimum_pre_coverage_ratio: 0.95
+  minimum_post_coverage_ratio: 0.95
+  maximum_gap_ms: DESCRIPTIVE_ONLY_EVENT_DRIVEN_STREAMS
+  require_l2_sequence_valid: true
+  require_quotes: true
+  require_trades: true
+research_minimums:
+  train: 1000
+  validation: 500
+  final_holdout: SEALED_NOT_OPENED

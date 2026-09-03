@@ -1,0 +1,74 @@
+{
+  "schema": "aegis-strategy-router-retrospective-falsification-v1",
+  "study_classification": "RETROSPECTIVE_DISCOVERY_ONLY",
+  "frozen_at": "2026-08-18T06:15:00Z",
+  "repository_commit": "dcd445cb293d661cc6c184a75cd39df054447ab1",
+  "initial_experiment_mode": "INDEPENDENT_STRATEGY_DISCOVERY",
+  "symbols": [
+    "ADAUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT",
+    "ETHUSDT", "LINKUSDT", "LTCUSDT", "SOLUSDT", "SUIUSDT", "XRPUSDT"
+  ],
+  "source_start_inclusive": "2023-09-01T00:00:00Z",
+  "candidate_start_inclusive": "2024-01-01T00:00:00Z",
+  "candidate_last_inclusive": "2024-09-30T23:00:00Z",
+  "source_end_exclusive": "2024-10-01T00:00:00Z",
+  "anchor_cadence_minutes": 15,
+  "episode_overlap_minutes": 60,
+  "common_target": {
+    "reference_atr": "ATR14_LAST_FULLY_CLOSED_15M_AT_CANDIDATE",
+    "favorable_atr": 0.5,
+    "adverse_atr": 0.5,
+    "horizon_minutes": 60,
+    "same_bar_ambiguity": "ADVERSE_FIRST"
+  },
+  "economics": {
+    "underlying_returns_only": true,
+    "leverage": 1.0,
+    "conservative_round_trip_cost_bps": 20.0,
+    "economic_hurdle_bps": 20.0,
+    "latency_diagnostic": "NEXT_1M_OPEN_DIRECTIONAL_IMPLEMENTATION_SHORTFALL"
+  },
+  "temporal_blocks": [
+    "2024-01", "2024-02", "2024-03", "2024-04", "2024-05",
+    "2024-06", "2024-07", "2024-08", "2024-09"
+  ],
+  "statistics": {
+    "episode_bootstrap_samples": 10000,
+    "temporal_block_bootstrap_samples": 10000,
+    "seed": 20260818,
+    "fdr_method": "BENJAMINI_HOCHBERG",
+    "fdr_alpha": 0.05,
+    "tail_fraction": 0.05
+  },
+  "support": {
+    "minimum_independent_episodes": 500,
+    "minimum_symbols": 6,
+    "minimum_monthly_blocks": 4,
+    "minimum_side_episodes_for_side_claim": 150
+  },
+  "retrospective_promising_gate": {
+    "matched_baseline_improvement_ci_lower_gt_bps": 0.0,
+    "net_expectancy_ci_lower_gt_bps": 0.0,
+    "minimum_positive_block_fraction": 0.6666666667,
+    "minimum_positive_symbols": 6,
+    "maximum_best_symbol_positive_payoff_share": 0.35,
+    "fdr_required": true
+  },
+  "catalog_diversity_gate": {
+    "minimum_supported_strategies": 2,
+    "maximum_largest_strategy_episode_share": 0.80,
+    "minimum_multi_strategy_snapshot_fraction": 0.01
+  },
+  "rules": {
+    "document": "docs/15_PHASE2_RULE_FREEZE.md",
+    "document_sha256": "f48a0e4a1f8c03b3bb482f78e93742b182a8b29b18196bcc1a2bf47d7b09cdcf",
+    "generator_version": "aegis-strategy-router-candidates-v2-rule-freeze",
+    "base_sha256": "92e37ddfb552490d9268b61ed4d7080223cc4137fcff28a4f8c2c1f4bad37fe6",
+    "frozen_rules_sha256": "ce1b201a9d6e6cd966ea725bf13dfa9cf36da443711b61843c6fd9b9a769d366",
+    "generators_sha256": "da5d84a32671e090322b711acb4efa7daf051b945b7693f657fcf8aa9220d2e3"
+  },
+  "prohibited": [
+    "RULE_OR_THRESHOLD_CHANGES", "GRID_SEARCH", "MODEL_TRAINING",
+    "SPECIALISTS", "ROUTER", "SEALED_HOLDOUT_ACCESS", "PRODUCTION_CHANGES"
+  ]
+}

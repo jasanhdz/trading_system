@@ -1,0 +1,227 @@
+schema_version: aegis-volume-wave-w1-preregistration-v1
+experiment_id: aegis-volume-wave-w1-01
+registered_at_utc: '2026-08-14T00:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+hypothesis:
+  statement: >-
+    A closed 5-minute directional candle with abnormal volume may begin a
+    short-lived wave whose continuation, path quality and exhaustion become
+    economically informative only when candle quality, aggressive flow,
+    multi-timeframe context and remaining price space are jointly considered.
+  null: >-
+    Registered volume-wave configurations do not outperform matched random,
+    price-only momentum and the frozen C2A flow detectors after realistic costs.
+  refutation_first: true
+  candle_color_continuation_definition: PROHIBITED
+
+universe:
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  venue: BINANCE_USDM_PERPETUAL
+  decision_interval: 5m
+  context_interval: 15m
+  btc_context_symbol: BTCUSDT
+
+data:
+  source: BINANCE_PUBLIC_CHECKSUM_VERIFIED_ARCHIVES
+  start_month: '2025-08'
+  end_month: '2026-07'
+  required: [FUTURES_1M_KLINES, FUTURES_AGG_TRADES]
+  closed_candles_only: true
+  missing_bucket_policy: DROP_EVENT
+  forward_fill_policy: PROHIBITED
+  screenshots_role: INTUITION_ONLY_NOT_EVIDENCE
+
+causality:
+  feature_cutoff: FIVE_MINUTE_CANDLE_CLOSE_INCLUSIVE
+  higher_timeframe_cutoff: LAST_COMPLETED_15M_CANDLE_INCLUSIVE
+  normalizer_fit: TRAIN_ONLY
+  next_open_entry: true
+  future_data_in_features: PROHIBITED
+  future_fill: PROHIBITED
+  same_bar_barrier_order: ADVERSE_FIRST
+
+features:
+  volume_median_lookbacks: [10, 20, 30, 50]
+  volume_log_z_lookbacks: [10, 20, 30, 50]
+  volume_ratio_bins: [0.0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, INF]
+  volume_z_bins: [-INF, 1.0, 1.5, 2.0, 2.5, 3.0, INF]
+  body_ratio_bins: [0.0, 0.4, 0.6, 0.75, 1.0000001]
+  clv_long_bins: [0.0, 0.5, 0.65, 0.75, 0.9, 1.0000001]
+  side_taker_imbalance_bins: [-1.0, 0.0, 0.1, 0.25, 0.4, 1.0000001]
+  rsi_periods: [6, 12, 24]
+  atr_period: 14
+  moving_average_periods: [7, 25, 99]
+  rolling_btc_correlation_bars: 48
+  include:
+    - volume_ratio
+    - log_volume_zscore
+    - body_ratio
+    - close_location_value
+    - taker_buy_ratio
+    - taker_sell_ratio
+    - taker_imbalance
+    - delta_velocity
+    - delta_acceleration
+    - velocity_atr_1
+    - velocity_atr_2
+    - acceleration_atr
+    - atr_fraction
+    - rsi_6_12_24
+    - price_vs_ma_7_25_99_atr
+    - ma_slope_7_25_99_atr
+    - higher_high_higher_low_lower_high_lower_low
+    - directional_persistence
+    - path_efficiency
+    - completed_15m_context
+    - btc_5m_15m_context
+    - rolling_btc_correlation
+
+candidate_population:
+  minimum_volume_ratio_20: 1.25
+  minimum_absolute_body_atr: 0.10
+  direction: CANDLE_BODY_SIGN
+  cooldown_bars_by_symbol_side: 3
+  maximum_volume_ratio: NONE
+  reason: RETAIN_EXTREME_VOLUME_TO_TEST_EXHAUSTION_NONLINEARITY
+
+registered_additive_ladder:
+  VOLUME_DIRECTION:
+    requirements: [volume_ratio_20_gte_1_25, directional_body]
+  CLEAN_IMPULSE:
+    requirements: [VOLUME_DIRECTION, body_ratio_gte_0_60, side_clv_gte_0_70]
+  FLOW_ALIGNED:
+    requirements: [CLEAN_IMPULSE, side_taker_imbalance_gte_0_10]
+  TREND_5M_ALIGNED:
+    requirements: [FLOW_ALIGNED, side_price_vs_ma25_positive, side_ma25_slope_positive]
+  TREND_15M_ALIGNED:
+    requirements: [TREND_5M_ALIGNED, side_15m_return_positive, side_15m_ma25_slope_positive]
+  BTC_NOT_OPPOSING:
+    requirements: [TREND_15M_ALIGNED, side_btc_15m_return_gte_minus_0_10_atr]
+  SPACE_REMAINING:
+    requirements: [BTC_NOT_OPPOSING, side_rsi6_not_extreme, side_extension_ma25_lte_2_atr]
+
+entry_variants:
+  A_IMMEDIATE:
+    decision: IMPULSE_CANDLE_CLOSE
+    entry: NEXT_5M_OPEN
+  B_ONE_BAR_CONFIRMATION:
+    decision: NEXT_5M_CANDLE_CLOSE
+    conditions: [cumulative_side_displacement_positive, no_impulse_midpoint_invalidation]
+    entry: FOLLOWING_5M_OPEN
+  C_CAUSAL_PULLBACK:
+    decision: FIRST_OF_NEXT_TWO_CLOSED_5M_CANDLES_MATCHING_PULLBACK
+    conditions: [retracement_fraction_between_0_10_and_0_40, close_preserves_impulse_midpoint]
+    entry: FOLLOWING_5M_OPEN
+  D_EXTREME_BREAK_CONFIRMATION:
+    decision: FIRST_OF_NEXT_TWO_CLOSED_5M_CANDLES_CLOSING_BEYOND_IMPULSE_EXTREME
+    entry: FOLLOWING_5M_OPEN
+
+targets:
+  horizons_5m_bars: [1, 2, 3, 4, 6]
+  atr_barrier_pairs:
+    - [0.20, 0.10]
+    - [0.40, 0.20]
+    - [0.50, 0.25]
+    - [0.60, 0.30]
+    - [0.80, 0.40]
+    - [1.00, 0.60]
+  outputs:
+    - FAVORABLE_BEFORE_ADVERSE
+    - MFE_FRACTION
+    - MAE_FRACTION
+    - MFE_ATR
+    - MAE_ATR
+    - TIME_TO_POSITIVE
+    - TIME_TO_MFE
+    - DIRECTIONAL_PERSISTENCE
+    - PATH_EFFICIENCY
+    - TERMINAL_SIDE_RETURN
+    - NET_UTILITY
+
+economics:
+  base_round_trip_cost_bps: 14
+  stress_round_trip_cost_bps: [20, 30]
+  funding: INCLUDE_WHEN_HORIZON_CROSSES_FUNDING_TIMESTAMP
+  primary_objective: NET_EXPECTANCY_WITH_BOUNDED_MAE
+
+partitions:
+  train: ['2025-08-01T00:00:00Z', '2026-02-01T00:00:00Z']
+  validation: ['2026-02-01T00:00:00Z', '2026-05-01T00:00:00Z']
+  final_holdout: ['2026-05-01T00:00:00Z', '2026-08-01T00:00:00Z']
+  purge_5m_bars: 99
+  final_holdout_state: SEALED
+  repeated_holdout_testing: PROHIBITED
+
+walk_forward:
+  fit_months: 3
+  validation_months: 1
+  expanding: true
+  minimum_folds: 4
+  thresholds_reselected_each_fold_from_train: false
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_cluster: UTC_DAY
+  bayesian_prior: BETA_1_1
+  multiple_comparison_control: BENJAMINI_HOCHBERG_FDR_0_05
+  report_distributions_not_only_means: true
+
+contract_selection:
+  unit: REGISTERED_LADDER_SIDE_ENTRY_VARIANT
+  partition: TRAIN_ONLY
+  minimum_train_events: 500
+  objective: MAXIMUM_NET_EXPECTANCY_AT_BASE_COST
+  tie_break: LEXICOGRAPHIC_CONTRACT_ID
+  validation_reselection: PROHIBITED
+  final_holdout_reselection: PROHIBITED
+  validation_hypothesis_count_maximum: 56
+
+controls:
+  - NO_TRADE
+  - MATCHED_RANDOM_SYMBOL_SIDE_MONTH
+  - PRICE_ONLY_MOMENTUM
+  - VOLUME_ONLY
+  - C2A_FROZEN_FLOW_DETECTORS
+
+evidence_gate:
+  minimum_validation_events_per_side: 1000
+  minimum_events_per_symbol_side: 50
+  positive_net_expectancy: true
+  bootstrap_expectancy_lower_95_gt: 0.0
+  profit_factor_lower_95_gt: 1.0
+  survive_20bps_cost: true
+  positive_symbols: 7
+  positive_walk_forward_folds: 3
+  outperform_all_controls: true
+  maximum_symbol_share: 0.20
+  no_material_leakage: true
+  no_unregistered_threshold_search: true
+
+models:
+  permitted_only_after_registered_rule_evidence:
+    - REGULARIZED_LOGISTIC_REGRESSION
+    - HISTOGRAM_GRADIENT_BOOSTING_SHALLOW
+  first_pass: INTERPRETABLE_TABLES_AND_REGISTERED_RULES
+  deep_learning: PROHIBITED_IN_W1
+  probability_calibration: TRAIN_ONLY_THEN_VALIDATION
+
+gates:
+  W1_DATASET_READY: false
+  W1_RULE_EDGE_FOUND: false
+  W1_MODELING_JUSTIFIED: false
+  W1_READY_FOR_SHADOW: false
+  W1_READY_FOR_LIVE: false
+
+safety:
+  authenticated_requests: 0
+  exchange_mutations: 0
+  credentials_loaded: false
+  typescript_changes: NONE
+  pm2_changes: NONE
+  live_changes: NONE
+  shadow_changes: NONE

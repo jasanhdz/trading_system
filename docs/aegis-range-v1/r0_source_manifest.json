@@ -1,0 +1,105 @@
+{
+  "schema_version": "aegis-range-r0-source-manifest-v1",
+  "created_date": "2026-08-24",
+  "status": "R0_DOCUMENTARY_ONLY",
+  "repositories": {
+    "typescript": {
+      "path": "/home/jasan/Develop/trading_system/binance-futures-bot-ts",
+      "branch": "work/entry-quality-evidence-20260726",
+      "head": "bb034431e0ce05c8e0f978453c46dcff6efb981c"
+    },
+    "scientific_parent": {
+      "path": "/home/jasan/Develop/trading_system",
+      "branch": "work/entry-quality-evidence-20260726",
+      "head": "cfbde9bd47e9f29dfda35e9e9f05d57ca148f556",
+      "recorded_typescript_gitlink": "814a302885e1d07bfd27404ebb5e69a30acebcc5",
+      "gitlink_status": "MISMATCH_RECORDED_NOT_RESOLVED"
+    }
+  },
+  "universe": {
+    "path": "/home/jasan/Develop/trading_system/config/universe.yaml",
+    "sha256": "b7bb2e7dfe7f2de22e730e10f0688c0f01468a1d6d3f0f5a2c935476226f2991",
+    "declared_symbol_set_hash": "f6448e67daf1d017e16cc6b331f6494e97e178824474994fff08864303ccd348",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "BNBUSDT",
+      "XRPUSDT",
+      "DOGEUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "LINKUSDT",
+      "SUIUSDT",
+      "LTCUSDT"
+    ]
+  },
+  "datasets": {
+    "primary_ohlcv": {
+      "manifest_path": "/home/jasan/Develop/trading_system/data/market_event_fast_track_m1a/archive_manifest.jsonl",
+      "manifest_sha256": "ce638d06f20f298f5be74c6b1c7648ad3df5abb1006b3861088302bd5da9f095",
+      "filter": {
+        "market": "futures/um",
+        "data_type": "klines",
+        "interval": "1m",
+        "months": "2024-01..2026-07"
+      },
+      "records": 341,
+      "locally_materialized_records_at_r0": 341,
+      "manifest_actual_expected_field_matches_at_r0": 341,
+      "binding_integrity": "each filtered record expected_sha256"
+    },
+    "funding_and_mark_price": {
+      "manifest_path": "/home/jasan/Develop/trading_system/data/market_event_economic_path_m1b/archive_manifest.jsonl",
+      "manifest_sha256": "1cc559055937f3d2432f0559a6badda6865495fdfd26f52f3f02c0943836f92b",
+      "filter": {
+        "market": "futures/um",
+        "data_types": [
+          "fundingRate",
+          "markPriceKlines"
+        ],
+        "mark_price_interval": "1m",
+        "months": "2024-01..2026-07"
+      },
+      "records_per_data_type": 341,
+      "locally_materialized_records_per_data_type_at_r0": 237,
+      "manifest_actual_expected_field_matches_per_data_type_at_r0": 341,
+      "binding_integrity": "each filtered record expected_sha256",
+      "missing_local_materialization_policy": "BLOCK_R2_UNTIL_DOWNLOADED_AND_VERIFIED"
+    }
+  },
+  "excluded_sources": [
+    {
+      "path": "/home/jasan/Develop/trading_system/data/binance_candles.db",
+      "reason": "duplicate conflicts and insufficient partial-candle lineage"
+    },
+    {
+      "path": "/home/jasan/Develop/trading_system/data/e4_live_candle_cache",
+      "reason": "mutable live cache is not canonical for retrospective Range V1"
+    }
+  ],
+  "conceptual_code": {
+    "RegimeEngineV2.ts": "3726e28badfdba5acc81d87ccd3202fc43310a04d4b3cff2597f38acb2913134",
+    "RegimeEngineV2.types.ts": "3b3972153f7c977d50ec864a5d8a4c4b3d8d2e73822453eaed1a25391211d10c",
+    "RegimeEngineV2.test.ts": "80aa2619efdcb74fa8722f79ce62a01a4028bb213856f3a5b7fc0ea32e091cf1",
+    "package.json": "379d99536ae7cab2ca84a9e8b3639cef3f6aedffb7c76515af4148c487c8c9df",
+    "package-lock.json": "b8b6649b4e437ecaff4ed2b094e218f33b9025e3f7bcfe6a024e36d81343ab0a"
+  },
+  "authority_document": {
+    "path": "docs/AEGIS_RANGE_STRATEGY_V1_PLAN.md",
+    "sha256": "2b6976fa9a90949084640991b5643da407a55cf97f3a8d435de8ba1cf6fc7288"
+  },
+  "e4_lineage": {
+    "preregistration_v1.json": "786fc4987e1bc92712bc0ca407f018a97bf4c9a7d3c5a36d6fa6da4edafa244f",
+    "thresholds_frozen_v1.json": "b096229bd9435d8fff03c75909c1332f0b5ab5191377b4399c0cc964b71c2207",
+    "04_CONTAMINATION_AND_LEAKAGE_AUDIT.md": "dda6c9ed560da80c083e7b5a98ea793e54ffdb19ca89ab429c13961ae445f585",
+    "09_FINAL_VERDICT_AND_TRANSITION_RECOMMENDATION.md": "946a15555cebe0cf908bd0f28707e91282d2f51ce89995121b013d6172caf074",
+    "historical_end_to_end_oos": false,
+    "secondary_policy": "CONTAMINATED_COMPATIBILITY_DIAGNOSTIC_NO_PROMOTION_AUTHORITY"
+  },
+  "production_baseline_read_only": {
+    "regime_config.live.yaml": "7b841c07bc8488827201a443a8682f676e08fc7863df903baa2527d200360858",
+    "src/domain/services/AegisRegimeGuard.ts": "86211d956b290931bd92475886645ae9cd666ca7898b9147b56f3a3150efd755",
+    "src/app/services/TradingService.ts": "db63d7996c5fc36c206b75f462c2e875602ffc6f8fc74a09fb26e3c1a8af012c"
+  }
+}

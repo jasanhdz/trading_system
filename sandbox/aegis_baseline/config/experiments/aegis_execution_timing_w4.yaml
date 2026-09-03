@@ -1,0 +1,143 @@
+schema_version: aegis-execution-timing-w4-preregistration-v1
+experiment_id: aegis-execution-timing-adverse-selection-w4-01
+registered_at_utc: '2026-08-14T16:00:00Z'
+mode: RESEARCH_ONLY
+runtime_effect: NONE
+automatic_shadow_activation: false
+automatic_live_promotion: false
+
+scope:
+  directional_intent_source: EXTERNAL_FROZEN_AEGIS_DECISION
+  directional_prediction: PROHIBITED
+  objective: MINIMIZE_TOTAL_COST_PER_EXECUTION_INTENT
+  refutation_first: true
+
+current_execution:
+  policy: MARKET_NOW
+  implementation: binance-futures-bot-ts/src/infra/adapters/BinanceAdapter.ts#marketOpen
+  order_type: MARKET
+  response_type: RESULT
+  durable_identity_available: true
+  decision_event: ORDER_SUBMITTED
+  causal_primary_reference: SYNCHRONIZED_MIDPRICE_AT_INTENT_TIMESTAMP
+
+universe:
+  venue: BINANCE_USDM_PERPETUAL
+  symbols: [ADAUSDT, AVAXUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ETHUSDT, LINKUSDT, LTCUSDT, SOLUSDT, SUIUSDT, XRPUSDT]
+  sides: [LONG, SHORT]
+  unit: execution_intent_id
+
+data_contract:
+  required:
+    - frozen_aegis_intent_with_exchange_and_local_timestamp
+    - synchronized_best_bid_ask
+    - top_of_book_quantities
+    - aggregate_trades
+    - authoritative_fee_schedule
+  passive_limit_additional_required:
+    - sequenced_l2_depth
+    - queue_position_evidence
+    - traded_quantity_at_price
+  synthetic_bbo: PROHIBITED
+  candle_bbo_proxy: PROHIBITED
+  optimistic_limit_fill: PROHIBITED
+  future_directional_return_as_feature: PROHIBITED
+
+partitions:
+  train: FUTURE_UNTOUCHED_COLLECTION_FIRST_50_PERCENT
+  validation: FUTURE_UNTOUCHED_COLLECTION_NEXT_25_PERCENT
+  final_holdout: FUTURE_UNTOUCHED_COLLECTION_FINAL_25_PERCENT
+  minimum_calendar_days: 60
+  minimum_intents_train: 1000
+  minimum_intents_validation: 500
+  minimum_intents_holdout: 500
+  purge_seconds: 10
+  final_holdout_state: SEALED
+
+metrics:
+  primary: TOTAL_COST_PER_EXECUTION_INTENT_BPS
+  sign_convention: POSITIVE_IS_COST_NEGATIVE_IS_IMPROVEMENT
+  decision_reference: SYNCHRONIZED_MIDPRICE_AT_INTENT_TIMESTAMP
+  secondary:
+    - implementation_shortfall_bps
+    - spread_paid_bps
+    - slippage_bps
+    - fee_bps
+    - delay_cost_bps
+    - missed_opportunity_cost_bps
+    - adverse_selection_bps
+    - fill_probability
+    - partial_fill_probability
+    - fill_latency_ms
+    - p95_total_cost_bps
+    - p99_total_cost_bps
+    - expected_shortfall_total_cost_bps
+
+actions:
+  initial: [EXECUTE_NOW, WAIT_250MS, WAIT_500MS]
+  conditional_only_if_queue_data_passes: [AGGRESSIVE_LIMIT_AT_BBO, PASSIVE_LIMIT_AT_BBO]
+  abort_execution: OUT_OF_SCOPE_FIRST_PASS
+
+latency:
+  scenarios_ms: [100, 250, 500, 1000]
+  zero_latency: DIAGNOSTIC_ONLY
+  exchange_timestamp_ordering_required: true
+  local_receive_timestamp_required: true
+
+fees:
+  source: ACCOUNT_TIER_SNAPSHOT_FROZEN_BEFORE_FUTURE_COLLECTION
+  taker_bps: TO_BE_FROZEN_BEFORE_DATASET_OPEN
+  maker_bps: TO_BE_FROZEN_BEFORE_DATASET_OPEN
+  fee_guessing: PROHIBITED
+
+models:
+  w4a: [LINEAR_L2, LOGISTIC_L2, HIST_GRADIENT_BOOSTING, RANDOM_FOREST]
+  w4b_requires_w4a: true
+  deep_learning: PROHIBITED
+  calibration: TEMPORAL_TRAIN_ONLY
+  seed: 419001
+  seed_search: PROHIBITED
+
+statistics:
+  bootstrap_repetitions: 10000
+  bootstrap_unit: execution_intent_id
+  block_bootstrap: UTC_DAY
+  fdr_method: BENJAMINI_HOCHBERG
+  fdr_alpha: 0.05
+  minimum_positive_symbols: 7
+  minimum_positive_temporal_folds: 3
+
+gate:
+  minimum_execution_savings_bps: 2.0
+  median_improvement_gt_bps: 0.0
+  bootstrap_improvement_lower_95_gt_bps: 0.0
+  posterior_probability_improvement_gte: 0.95
+  posterior_probability_minimum_effect_gte: 0.80
+  no_p95_degradation: true
+  no_p99_degradation: true
+  missed_opportunities_included: true
+  partial_fills_included: true
+  survive_250ms_latency: true
+  survive_fees: true
+
+holdout_open_condition:
+  - DATA_QUALITY_PASS
+  - W4A_PREDICTABILITY_PASS
+  - W4B_TRAIN_VALIDATION_ALL_GATES_PASS
+  - FEATURES_MODELS_COSTS_FEES_LATENCIES_POLICY_FROZEN
+
+gates:
+  W4_DATA_QUALITY_SUFFICIENT: false
+  W4_EXECUTION_COST_PREDICTABLE: false
+  W4_EXECUTION_EDGE_FOUND: false
+  W4_MODELING_JUSTIFIED: false
+  W4_READY_FOR_SHADOW: false
+  W4_READY_FOR_LIVE: false
+
+safety:
+  authenticated_requests: 0
+  exchange_mutations: 0
+  production_changes: NONE
+  typescript_changes: NONE
+  websocket_changes: NONE
+  pm2_changes: NONE
