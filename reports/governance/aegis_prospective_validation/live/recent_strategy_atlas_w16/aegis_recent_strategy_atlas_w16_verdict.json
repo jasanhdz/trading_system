@@ -1,9 +1,0 @@
-{
-  "verdict": "AEGIS_W16_NO_RECENT_CLASSIC_STRATEGY_EDGE",
-  "W16_RECENT_STRATEGY_EDGE_FOUND": false,
-  "W16_MODELING_JUSTIFIED": false,
-  "W16_READY_FOR_PROSPECTIVE_OBSERVATION": false,
-  "W16_READY_FOR_SHADOW": false,
-  "W16_READY_FOR_LIVE": false,
-  "production_modified": false
-}

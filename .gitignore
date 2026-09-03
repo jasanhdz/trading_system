@@ -28,17 +28,11 @@ binance_futures_bot_py/state/*
 # Output Artifacts
 *.png
 *.csv
-scripts/grid_results/
-scripts/grid_search_results/
 # Generated Reports (local only)
 reports/
 *.txt
 backtest_*.png
 backtest_*.csv
-
-# Grid Search temp files
-*grid_temp*
-*_temp.*
 
 # Jupyter notebooks output
 *.ipynb_checkpoints/
@@ -65,9 +59,4 @@ archive/
 *.parquet
 
 # Experiment artifacts (results, scored data, models, audits)
-# Keep: src/, tools/, config/, tests/ (code)
-# Exclude: artifacts/ (generated outputs)
 sandbox/**/artifacts/
-
-# Experiment-generated docs (not source code)
-sandbox/aegis_strategy_router/experiments/*/docs/
