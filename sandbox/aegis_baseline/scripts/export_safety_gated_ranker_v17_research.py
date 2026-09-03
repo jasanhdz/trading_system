@@ -17,9 +17,9 @@ from aegis.utils import Sha256HashProvider, canonical_json, sha256_file
 from aegis.v17_feature_contract import contract_for_side
 from aegis.tree_models import TreeEnsemble
 from aegis.v17_research_artifact import FrozenLinearModel, V17ResearchArtifact
-from train_directional_contract_v15_research import _fit_bundle, _mapping, _partition, _predict
-from train_economic_ranker_v16_research import _fit_ranker, _load_v16, _ranked
-from train_safety_gated_ranker_v17_research import _candidate, _verify_authority
+from training.train_directional_contract_v15_research import _fit_bundle, _mapping, _partition, _predict
+from training.train_economic_ranker_v16_research import _fit_ranker, _load_v16, _ranked
+from training.train_safety_gated_ranker_v17_research import _candidate, _verify_authority
 
 
 def _linear_payload(model: Any, names: tuple[str, ...], *, output: str) -> Mapping[str, Any]:

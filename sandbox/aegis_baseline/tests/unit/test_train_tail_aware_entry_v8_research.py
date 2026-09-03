@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from train_tail_aware_entry_v8_research import _control_rows, _derive_policy
+from training.train_tail_aware_entry_v8_research import _control_rows, _derive_policy
 
 
 def row(index: int, score: float = 0.8) -> dict[str, object]:

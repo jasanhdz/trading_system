@@ -21,7 +21,7 @@ from aegis.research.competing_barrier_v10 import (
 )
 from aegis.utils import Sha256HashProvider, sha256_file
 from build_decomposed_entry_v9_dataset import _pairs
-from train_long_entry_v21_shadow import _mapping, _source_series
+from training.train_long_entry_v21_shadow import _mapping, _source_series
 
 
 def build_dataset(

@@ -17,7 +17,7 @@ productive threshold, or publish a real CANDIDATE.
 - `training/phase_e.py` owns preflight, orchestration contracts, artifact manifests,
   promotion checks, simulated mechanics, and the structurally complete candidate
   publication path.
-- `scripts/run_aegis_candidate_experiment.py` only parses CLI arguments, enforces the
+- `scripts/training/run_aegis_candidate_experiment.py` only parses CLI arguments, enforces the
   full-run authorization phrase, selects a backend, invokes the orchestrator, and returns
   a structured exit status.
 
@@ -80,7 +80,7 @@ run snapshot artifacts and does not call a scientific backend.
 
 ```bash
 PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
-  scripts/run_aegis_candidate_experiment.py --mode dry-run
+  scripts/training/run_aegis_candidate_experiment.py --mode dry-run
 ```
 
 ### Smoke-run
@@ -91,11 +91,11 @@ produce the same deterministic smoke `run_id`.
 
 ```bash
 PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
-  scripts/run_aegis_candidate_experiment.py --mode smoke-run \
+  scripts/training/run_aegis_candidate_experiment.py --mode smoke-run \
   --smoke-outcome candidate --reports-root reports/experiments-smoke-candidate
 
 PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
-  scripts/run_aegis_candidate_experiment.py --mode smoke-run \
+  scripts/training/run_aegis_candidate_experiment.py --mode smoke-run \
   --smoke-outcome rejected --reports-root reports/experiments-smoke-rejected
 ```
 

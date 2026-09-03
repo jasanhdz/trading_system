@@ -8,7 +8,7 @@ from aegis.research.directional_contract_v15 import (
     entry_quality_score,
     select_at_most_one_per_timestamp,
 )
-from train_directional_contract_v15_research import _partition
+from training.train_directional_contract_v15_research import _partition
 
 
 def _config():

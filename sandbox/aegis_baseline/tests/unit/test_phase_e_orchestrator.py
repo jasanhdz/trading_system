@@ -153,7 +153,7 @@ def test_full_run_without_exact_authorization_fails_before_preflight(tmp_path: P
 def test_cli_full_run_without_authorization_has_no_outputs(tmp_path: Path) -> None:
     completed = subprocess.run(
         [
-            sys.executable, str(ROOT / "scripts" / "run_aegis_candidate_experiment.py"),
+            sys.executable, str(ROOT / "scripts" / "training" / "run_aegis_candidate_experiment.py"),
             "--mode", "full-run", "--reports-root", str(tmp_path / "reports"),
         ],
         cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

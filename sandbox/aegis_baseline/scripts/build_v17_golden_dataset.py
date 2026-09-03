@@ -13,8 +13,8 @@ from aegis.config import CANONICAL_SYMBOLS
 from aegis.utils import Sha256HashProvider, sha256_file
 from aegis.v17_feature_contract import V17_DTYPE, V17_FEATURE_SCHEMA, select_v17_features
 from aegis.v17_research_artifact import V17ResearchArtifact
-from train_directional_contract_v15_research import _partition
-from train_economic_ranker_v16_research import _load_v16
+from training.train_directional_contract_v15_research import _partition
+from training.train_economic_ranker_v16_research import _load_v16
 
 
 def main() -> int:

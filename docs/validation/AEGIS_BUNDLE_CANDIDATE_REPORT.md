@@ -68,7 +68,7 @@ The classification is `REJECTED`, not `CANDIDATE` and not `APPROVED_FOR_SHADOW`.
 Reproduction command:
 
 ```bash
-PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python scripts/run_aegis_candidate_experiment.py
+PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python scripts/training/run_aegis_candidate_experiment.py
 ```
 
 Runtime JSON reports are ignored artifacts under `reports/aegis_phase2/`; they are not registry entries.

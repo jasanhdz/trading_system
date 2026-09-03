@@ -22,10 +22,10 @@ from aegis.research.long_entry_v51_ablation_shadow import (
 )
 from aegis.research.long_entry_v5_multiobjective_shadow import time_to_profit_fraction
 from aegis.utils import sha256_file
-from train_long_entry_v21_shadow import _fold_boundaries, _selection_metrics
-from train_long_entry_v31_shadow import _mapping, build_datasets
-from train_long_entry_v4_shadow import _augment_entry_records, _verify_protection_authority
-from train_long_entry_v5_shadow import _fit_bundle, _predict, _split
+from training.train_long_entry_v21_shadow import _fold_boundaries, _selection_metrics
+from training.train_long_entry_v31_shadow import _mapping, build_datasets
+from training.train_long_entry_v4_shadow import _augment_entry_records, _verify_protection_authority
+from training.train_long_entry_v5_shadow import _fit_bundle, _predict, _split
 
 
 def _with_combination(

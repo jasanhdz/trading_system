@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from train_feature_information_v14_research import _folds, _improvements, _split
+from training.train_feature_information_v14_research import _folds, _improvements, _split
 
 
 def test_v14_folds_are_expanding_and_temporally_ordered() -> None:

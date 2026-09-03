@@ -25,7 +25,7 @@ from aegis.research.tail_aware_entry_v8 import (
 )
 from aegis.training.hybrid_directional import DirectionalSide
 from aegis.utils import Sha256HashProvider, sha256_file
-from train_long_entry_v21_shadow import _mapping, _source_series
+from training.train_long_entry_v21_shadow import _mapping, _source_series
 
 
 def _canonical(values: list[Any]) -> tuple[CanonicalBar, ...]:

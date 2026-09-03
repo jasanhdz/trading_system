@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from train_long_entry_v32_shadow import FAMILY_FEATURE_NAMES, _augment
+from training.train_long_entry_v32_shadow import FAMILY_FEATURE_NAMES, _augment
 
 
 def test_v32_family_encoding_is_explicit_and_deterministic() -> None:

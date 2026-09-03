@@ -6,7 +6,7 @@ from aegis.research.economic_ranker_v16 import (
     preference_key,
     trajectory_tier,
 )
-from train_economic_ranker_v16_research import _rank_selected
+from training.train_economic_ranker_v16_research import _rank_selected
 
 
 def _row(

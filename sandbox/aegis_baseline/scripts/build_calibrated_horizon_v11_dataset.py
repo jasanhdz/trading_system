@@ -19,7 +19,7 @@ from aegis.research.calibrated_horizon_v11 import (
     clean_entry_diagnostics,
 )
 from aegis.utils import Sha256HashProvider, sha256_file
-from train_long_entry_v21_shadow import _mapping, _source_series
+from training.train_long_entry_v21_shadow import _mapping, _source_series
 
 
 def build_dataset(

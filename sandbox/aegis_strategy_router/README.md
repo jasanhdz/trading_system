@@ -35,21 +35,11 @@ permitted only after independently validated edge; see the scope amendment.
 - [Specialists and critics](docs/02_SPECIALISTS_AND_CRITICS.md)
 - [Router specification](docs/03_ROUTER_SPECIFICATION.md)
 - [Data, labels, and feature contracts](docs/04_DATA_AND_FEATURE_CONTRACTS.md)
-- [Experimental and implementation plan](docs/05_EXPERIMENT_AND_IMPLEMENTATION_PLAN.md)
-- [Risk register and failure analysis](docs/06_RISK_REGISTER.md)
 - [Visual system map](docs/07_VISUAL_SYSTEM_MAP.md)
 - [Isolation and deletion plan](docs/08_ISOLATION_AND_DELETION.md)
-- [Design review gate](docs/09_DESIGN_REVIEW_GATE.md)
-- [Phase 0 frozen decisions](docs/10_PHASE0_FROZEN_DECISIONS.md)
-- [Phase 1 implementation report](docs/11_PHASE1_IMPLEMENTATION_REPORT.md)
-- [Phase 2 governance amendment](docs/12_PHASE2_GOVERNANCE_AMENDMENT.md)
-- [Phase 2 implementation report](docs/13_PHASE2_IMPLEMENTATION_REPORT.md)
-- [Phase 2 pipeline and decision-gap review](docs/14_PHASE2_UNBLOCKING_REPORT.md)
-- [Phase 2 deterministic rule freeze](docs/15_PHASE2_RULE_FREEZE.md)
 - [Phase 2 rule execution report](docs/16_PHASE2_RULE_EXECUTION_REPORT.md)
-- [Independent discovery amendment](docs/17_INDEPENDENT_STRATEGY_DISCOVERY_AMENDMENT.md)
-- [Independent-mode transition report](docs/18_INDEPENDENT_MODE_TRANSITION_REPORT.md)
 - [Shared market-data audit and reuse report](docs/19_SHARED_MARKET_DATA_AUDIT.md)
+- [Retrospective falsification report](docs/21_RETROSPECTIVE_FALSIFICATION_REPORT.md)
 
 ## Implementation tree
 
@@ -92,6 +82,5 @@ Phase 0 remains frozen. Phase 1 technical infrastructure is accepted, including
 deterministic structural clustering. Phase 2 deterministic implementation is
 authorized separately from empirical validation. Fresh-data sufficiency,
 specialists, routing, Shadow, and Live remain blocked.
-The five candidate generators now execute the frozen definitions recorded in
-`docs/15_PHASE2_RULE_FREEZE.md`. The fresh snapshot pipeline is operational,
-but fresh population support remains insufficient and no edge was evaluated.
+The fresh snapshot pipeline is operational, but fresh population support remains
+insufficient and no edge was evaluated.

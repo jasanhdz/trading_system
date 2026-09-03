@@ -53,14 +53,14 @@ Dry-run command (executed after the orchestrator implementation):
 
 ```bash
 PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
-  scripts/run_aegis_candidate_experiment.py --mode dry-run
+  scripts/training/run_aegis_candidate_experiment.py --mode dry-run
 ```
 
 Owner-authorized full-run command (not executed in this phase):
 
 ```bash
 PYTHONPATH=src /home/jasan/.venv_rocm62/bin/python \
-  scripts/run_aegis_candidate_experiment.py \
+  scripts/training/run_aegis_candidate_experiment.py \
   --mode full-run --owner-authorization OWNER_AUTHORIZED_PHASE_E_FULL_RUN
 ```
 

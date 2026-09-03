@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from train_temporal_stability_v13_research import _recent_rows
+from training.train_temporal_stability_v13_research import _recent_rows
 
 
 def test_recent_window_prefers_time_bounded_rows() -> None:

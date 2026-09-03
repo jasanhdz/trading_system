@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from train_regime_aware_directional_v6_shadow import (
+from training.train_regime_aware_directional_v6_shadow import (
     _derive_policy,
     _fit_regime_router,
     _regime_probabilities,

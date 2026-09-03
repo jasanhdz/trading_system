@@ -24,7 +24,7 @@ from aegis.research.feature_information_v14 import (
     taker_imbalance,
 )
 from aegis.utils import Sha256HashProvider, sha256_file
-from train_long_entry_v21_shadow import _mapping
+from training.train_long_entry_v21_shadow import _mapping
 
 
 def _timestamp(value: str) -> datetime:
