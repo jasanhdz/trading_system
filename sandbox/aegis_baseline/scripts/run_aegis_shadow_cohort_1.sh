@@ -2,7 +2,7 @@
 set -euo pipefail
 
 WORKSPACE_ROOT=/home/jasan/Develop/trading_system
-ROOT="$WORKSPACE_ROOT/sandbox/aegis"
+ROOT="$WORKSPACE_ROOT/sandbox/aegis_baseline"
 TS_ROOT="$WORKSPACE_ROOT/binance-futures-bot-ts"
 
 exec env -i \

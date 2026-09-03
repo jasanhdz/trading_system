@@ -7,7 +7,7 @@ migration.
 Run the API through PM2 with:
 
 ```bash
-pm2 start sandbox/aegis/deploy/ecosystem.config.js
+pm2 start sandbox/aegis_baseline/deploy/ecosystem.config.js
 ```
 
 Run its tests from this directory so relative experiment paths resolve inside

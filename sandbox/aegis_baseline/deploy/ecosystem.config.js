@@ -5,7 +5,7 @@ module.exports = {
             script: "/home/jasan/.venv_rocm62/bin/python",
             args: "-m aegis.live_api --host 127.0.0.1 --port 8001",
             interpreter: "none",
-            cwd: "/home/jasan/Develop/trading_system/sandbox/aegis",
+            cwd: "/home/jasan/Develop/trading_system/sandbox/aegis_baseline",
             instances: 1,
             autorestart: true,
             // Current Brain plus full-history E4 peaks near 12.3 GiB at startup.
@@ -15,7 +15,7 @@ module.exports = {
             max_restarts: 10,
             watch: false,
             env: {
-                "PYTHONPATH": "/home/jasan/Develop/trading_system/sandbox/aegis/src",
+                "PYTHONPATH": "/home/jasan/Develop/trading_system/sandbox/aegis_baseline/src",
                 "E4_HISTORY_SEED_ROOT": "/home/jasan/Develop/trading_system/data/independent_entry_quality_discovery_v1/candles_1m",
                 "E4_DURABLE_CACHE_ROOT": "/home/jasan/Develop/trading_system/data/e4_live_candle_cache",
                 "HSA_OVERRIDE_GFX_VERSION": "10.3.0",

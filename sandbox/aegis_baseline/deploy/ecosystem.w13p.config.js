@@ -15,7 +15,7 @@ module.exports = {
       watch: false,
       kill_timeout: 15000,
       env: {
-        PYTHONPATH: '/home/jasan/Develop/trading_system/sandbox/aegis/src',
+        PYTHONPATH: '/home/jasan/Develop/trading_system/sandbox/aegis_baseline/src',
         PYTHONUNBUFFERED: '1',
       },
       out_file: '/home/jasan/Develop/trading_system/data/w13p_prospective_collection/runtime/stdout.log',

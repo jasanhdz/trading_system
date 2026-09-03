@@ -940,7 +940,7 @@ def test_pm2_definition_uses_local_module_and_no_credentials() -> None:
     assert "-m aegis.live_api --host 127.0.0.1 --port 8001" in text
     python_block = text.split('name: "02-Aegis-API"', 1)[1]
     assert "BINANCE_API" not in python_block
-    assert '"PYTHONPATH": "/home/jasan/Develop/trading_system/sandbox/aegis/src"' in python_block
+    assert '"PYTHONPATH": "/home/jasan/Develop/trading_system/sandbox/aegis_baseline/src"' in python_block
 
 
 def test_live_api_uses_single_lazy_application_factory() -> None:
